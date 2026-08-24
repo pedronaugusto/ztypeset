@@ -1,0 +1,142 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  ZIG_VERSION: 0.16.0
+
+jobs:
+  # The full suite, executed on every supported host. `ci/run.sh` mirrors these
+  # steps locally; they are spelled out here so each one reports its own status.
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # Only ztext's own sources: libs/ is vendored verbatim and reformatting
+      # it would make the next re-vendor an unreadable diff.
+      - name: Formatting
+        run: zig fmt --check src tests/fonts.zig build.zig
+
+      # The sanitizer is opt-in, because a library must not force its runtime
+      # into a consumer's link. ztext's own Debug run asks for it, and this is
+      # what would catch UB in ztext's own C.
+      - name: Test — Debug, sanitizer on
+        run: zig build test -Doptimize=Debug -Dsanitize_c=true
+
+      - name: Test — ReleaseSafe
+        run: zig build test -Doptimize=ReleaseSafe
+
+      - name: Test — ReleaseFast
+        run: zig build test -Doptimize=ReleaseFast
+
+      - name: Test — ReleaseSmall
+        run: zig build test -Doptimize=ReleaseSmall
+
+      # The C boundary on its own, with no Zig in the picture — the header is a
+      # real C contract, not a private detail of the wrapper, and this is what
+      # proves the allocator seam balances.
+      - name: Test — C ABI standalone
+        run: zig build test-c
+
+      # Consuming ztext as a dependency exercises a different code path from
+      # building it -- artifact registration and installed-header spelling are
+      # invisible to the in-repo suite. See tests/consumer/build.zig.
+      - name: Test — as a downstream dependency
+        working-directory: tests/consumer
+        run: zig build run
+
+      # Zig's default ABI for Windows is gnu, so every step above exercises
+      # that one and the MSVC branches in build.zig would never be built at
+      # all. On a Windows runner the MSVC ABI is native, so the suite can run
+      # there rather than merely compile.
+      - name: Test — Windows MSVC ABI
+        if: runner.os == 'Windows'
+        run: zig build test -Dtarget=x86_64-windows-msvc
+
+  # Compile-only coverage of the targets the suite cannot execute on. These
+  # prove the sources and build graph are portable; the `test` job above is
+  # what proves behaviour.
+  cross-compile:
+    name: cross (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-gnu
+          - aarch64-linux-gnu
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+          - x86_64-windows-gnu
+          - aarch64-windows-gnu
+          - x86_64-macos
+          - aarch64-macos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: zig build -Dtarget=${{ matrix.target }}
+
+  # Build options that change what the C compiles to, so a regression in one
+  # configuration cannot hide behind the defaults.
+  configurations:
+    name: build configurations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - name: Shared library
+        run: zig build -Dshared=true
+      - name: Sanitizer forced on in ReleaseSafe
+        run: zig build -Doptimize=ReleaseSafe -Dsanitize_c=true
+
+  # Proves libs/ is still a pristine copy of the three pinned upstream commits,
+  # and that the committed test fonts are the exact bytes the golden results
+  # were measured against — rather than all of that being a claim in a markdown
+  # file. Needs network, so it is its own job and not part of the local inner
+  # A passing test says nothing about whether it CAN fail. This applies one
+  # deliberate bug at a time -- a renumbered enumerator, a swapped struct
+  # field, a line reordered over the paragraph instead of over itself -- and
+  # asserts a NAMED test catches each. Its own job because every case is a
+  # rebuild, and single-host because what it checks is logic, not portability.
+  guards:
+    name: guards fail when they should
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - run: ci/check-guards.sh
+
+  # loop.
+  vendor-integrity:
+    name: vendor integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ci/verify-vendor.sh
