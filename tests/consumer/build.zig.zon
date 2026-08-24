@@ -1,0 +1,10 @@
+.{
+    .name = .ztext_consumer,
+    .version = "0.0.0",
+    .fingerprint = 0x208eedae24babbf0,
+    .minimum_zig_version = "0.16.0",
+    .dependencies = .{
+        .ztext = .{ .path = "../.." },
+    },
+    .paths = .{""},
+}
