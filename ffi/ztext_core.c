@@ -562,6 +562,11 @@ size_t ztextDecodeUtf8(const char* text, size_t length, uint32_t* out) {
   return extra + 1u;
 }
 
+bool ztextSplitsUtf8Character(const char* text, size_t length, size_t index) {
+  if (index >= length) return false;
+  return ((unsigned char)text[index] & 0xC0u) == 0x80u;
+}
+
 //===----------------------------------------------------------------------===//
 // Growable array
 //===----------------------------------------------------------------------===//

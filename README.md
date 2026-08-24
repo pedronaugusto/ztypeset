@@ -270,7 +270,7 @@ Measured, on Noto Sans, with the committed `zig build bench`:
 | | Per additional size | Four sizes |
 |---|---|---|
 | One handle carrying its own size | 47 354 B | 189 419 B |
-| Font shared, faces per size | **26 893 B** | **128 650 B** |
+| Font shared, faces per size | **26 901 B** | **128 714 B** |
 
 That is 43% off a size — worth having, but not "most of it", and the honest
 breakdown matters: HarfBuzz's per-size cost is **296 bytes** against ~14 KB for the
@@ -404,7 +404,7 @@ those macros into the `@cImport`; ztext's does not.
   fail at link; `FT_Stroker_New` was the one that made the point.
 - A shared build compiles with `-fvisibility=hidden`, so the ~10 000 upstream
   symbols statically inside it stay internal — exported symbols drop from
-  10 218 to 214. The 150 that remain are FreeType's public API, which upstream
+  10 218 to 215. The 150 that remain are FreeType's public API, which upstream
   marks `visibility("default")` itself; if you load a shared ztext beside a
   system FreeType, link statically or add a version script.
 - Build options are declared once and mirrored into a Zig `options` module, so
@@ -533,7 +533,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 64 entry points with
+And `tests/null_sweep.c` calls **every one of the 65 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the

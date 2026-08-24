@@ -454,14 +454,6 @@ const ZtextShapingRun* ztextParagraphShapingRuns(
 // Lines
 //===----------------------------------------------------------------------===//
 
-/// True if `index` is inside the paragraph and lands on a UTF-8 continuation
-/// byte, which is the one way a caller can hand over a byte range that would
-/// slice a character in half.
-static bool splitsCharacter(const ZtextParagraph* paragraph, size_t index) {
-  if (paragraph->text == NULL || index >= paragraph->length) return false;
-  return ((unsigned char)paragraph->text[index] & 0xC0u) == 0x80u;
-}
-
 ZtextResult ztextLineCreate(const ZtextParagraph* paragraph, size_t offset,
                             size_t length, ZtextLine** out) {
   if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
@@ -475,8 +467,9 @@ ZtextResult ztextLineCreate(const ZtextParagraph* paragraph, size_t offset,
   // A range that splits a character would produce runs slicing one glyph's
   // bytes across two lines. Refused rather than reordered: it is always a
   // caller bug, and the paragraph holds the bytes needed to see it.
-  if (splitsCharacter(paragraph, offset) ||
-      splitsCharacter(paragraph, offset + length)) {
+  if (ztextSplitsUtf8Character(paragraph->text, paragraph->length, offset) ||
+      ztextSplitsUtf8Character(paragraph->text, paragraph->length,
+                               offset + length)) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
 
