@@ -245,9 +245,12 @@ case_ "a rejected shape leaves the previous run queryable" \
 
 printf '\n%sAllocator%s %s(ffi/ztext_core.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 
+# Named, like every other case here. It asserted the substring "error" once,
+# which any build failure satisfies — including one caused by a typo in the
+# mutation itself, which would have been counted as the guard working.
 case_ "a declined reallocate reported as out of memory" \
   ffi/ztext_core.c \
-  "error" \
+  "a rendered bitmap survives anything but the next render on its own face" \
   "  void* fresh = ztextAllocWith(allocator, new_size, backing);" \
   "  if (allocator->reallocate != NULL) return NULL;
   void* fresh = ztextAllocWith(allocator, new_size, backing);"
