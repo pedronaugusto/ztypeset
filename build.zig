@@ -1,0 +1,690 @@
+const std = @import("std");
+
+//=============================================================================
+// Vendored upstream sources.
+//
+// Every list below is explicit. A directory glob would silently start
+// compiling whatever the next re-vendor drops in, and would just as silently
+// stop compiling a file upstream renamed; both are the kind of change that
+// should be a decision, not a side effect. The cost is that adding a file is a
+// deliberate edit here, which is the point.
+//=============================================================================
+
+/// FreeType, reduced to the modules ztext registers.
+///
+/// Kept in step with `ffi/ztext_ftmodules.h` by the linker: a module named
+/// there whose sources are missing here is an undefined symbol. The `.c` files
+/// named here are FreeType's own aggregate translation units -- `ftbase.c`
+/// includes eighteen further sources, `smooth.c` two, `sdf.c` four -- which is
+/// how upstream intends the library to be compiled outside its own makefiles.
+const freetype_sources = [_][]const u8{
+    // base -- objects, streams, outlines, the module registry
+    "libs/freetype/src/base/ftbase.c",
+    "libs/freetype/src/base/ftbbox.c",
+    "libs/freetype/src/base/ftbitmap.c",
+    "libs/freetype/src/base/ftdebug.c",
+    "libs/freetype/src/base/ftinit.c",
+    "libs/freetype/src/base/ftmm.c",
+    "libs/freetype/src/base/ftsystem.c",
+    // hinting
+    "libs/freetype/src/autofit/autofit.c",
+    "libs/freetype/src/pshinter/pshinter.c",
+    // font formats: OpenType's two outline flavours and their shared container
+    "libs/freetype/src/truetype/truetype.c",
+    "libs/freetype/src/cff/cff.c",
+    "libs/freetype/src/sfnt/sfnt.c",
+    "libs/freetype/src/psaux/psaux.c",
+    "libs/freetype/src/psnames/psnames.c",
+    // rasterisers: A8 coverage, and FreeType's native SDF renderers
+    "libs/freetype/src/smooth/smooth.c",
+    "libs/freetype/src/sdf/sdf.c",
+};
+
+/// FreeType's public headers, for consumers that link the artifact directly.
+///
+/// Explicit for the same reason the source lists are: `installHeadersDirectory`
+/// is recursive, and pointing it at `include/freetype` would also publish
+/// `internal/`, which upstream does not install. A header upstream adds is not
+/// published until it is added here, which is a visible omission rather than a
+/// silent one.
+/// Only headers whose implementation is in `freetype_sources`. A header for a
+/// module ztext does not compile would compile fine for a consumer and then
+/// fail at link with an undefined symbol -- `FT_Stroker_New` was the one that
+/// made the point.
+const freetype_public_headers = [_][]const u8{
+    "freetype.h",
+    "ftadvanc.h",
+    "ftbbox.h",
+    "ftbitmap.h",
+    "ftchapters.h",
+    "ftcolor.h",
+    "ftdriver.h",
+    "fterrdef.h",
+    "fterrors.h",
+    "ftfntfmt.h",
+    "ftimage.h",
+    "ftincrem.h",
+    "ftlcdfil.h",
+    "ftlist.h",
+    "ftlogging.h",
+    "ftmm.h",
+    "ftmodapi.h",
+    "ftmoderr.h",
+    "ftoutln.h",
+    "ftparams.h",
+    "ftrender.h",
+    "ftsizes.h",
+    "ftsnames.h",
+    "ftsystem.h",
+    "fttrigon.h",
+    "fttypes.h",
+    "ttnameid.h",
+    "tttables.h",
+    "tttags.h",
+};
+
+/// HarfBuzz.
+///
+/// This is upstream's own `src/harfbuzz.cc` manifest minus the platform shaper
+/// integrations (CoreText, DirectWrite, GDI, Uniscribe, GLib, Graphite2,
+/// WASM). Those compile to nothing without their `HAVE_*` macros, so excluding
+/// them changes no behaviour -- it just means this list describes what is
+/// actually built.
+///
+/// Deliberately NOT compiled as `harfbuzz.cc` itself. That amalgam is a single
+/// translation unit whose contents upstream can change, which would let a
+/// re-vendor silently alter what compiles. Listed individually, a translation
+/// unit that appears or disappears is a link error.
+const harfbuzz_sources = [_][]const u8{
+    "libs/harfbuzz/src/OT/Var/VARC/VARC.cc",
+    "libs/harfbuzz/src/hb-aat-layout.cc",
+    "libs/harfbuzz/src/hb-aat-map.cc",
+    "libs/harfbuzz/src/hb-blob.cc",
+    "libs/harfbuzz/src/hb-buffer-serialize.cc",
+    "libs/harfbuzz/src/hb-buffer-verify.cc",
+    "libs/harfbuzz/src/hb-buffer.cc",
+    "libs/harfbuzz/src/hb-common.cc",
+    "libs/harfbuzz/src/hb-draw.cc",
+    "libs/harfbuzz/src/hb-face-builder.cc",
+    "libs/harfbuzz/src/hb-face.cc",
+    "libs/harfbuzz/src/hb-fallback-shape.cc",
+    "libs/harfbuzz/src/hb-font.cc",
+    "libs/harfbuzz/src/hb-ft.cc",
+    "libs/harfbuzz/src/hb-map.cc",
+    "libs/harfbuzz/src/hb-number.cc",
+    "libs/harfbuzz/src/hb-ot-cff1-table.cc",
+    "libs/harfbuzz/src/hb-ot-cff2-table.cc",
+    "libs/harfbuzz/src/hb-ot-color.cc",
+    "libs/harfbuzz/src/hb-ot-face.cc",
+    "libs/harfbuzz/src/hb-ot-fetch.cc",
+    "libs/harfbuzz/src/hb-ot-font.cc",
+    "libs/harfbuzz/src/hb-ot-layout.cc",
+    "libs/harfbuzz/src/hb-ot-map.cc",
+    "libs/harfbuzz/src/hb-ot-math.cc",
+    "libs/harfbuzz/src/hb-ot-meta.cc",
+    "libs/harfbuzz/src/hb-ot-metrics.cc",
+    "libs/harfbuzz/src/hb-ot-name.cc",
+    "libs/harfbuzz/src/hb-ot-shape-fallback.cc",
+    "libs/harfbuzz/src/hb-ot-shape-normalize.cc",
+    "libs/harfbuzz/src/hb-ot-shape.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-arabic.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-default.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-hangul.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-hebrew.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-indic-table.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-indic.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-khmer.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-myanmar.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-syllabic.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-thai.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-use.cc",
+    "libs/harfbuzz/src/hb-ot-shaper-vowel-constraints.cc",
+    "libs/harfbuzz/src/hb-ot-tag.cc",
+    "libs/harfbuzz/src/hb-ot-var.cc",
+    "libs/harfbuzz/src/hb-outline.cc",
+    "libs/harfbuzz/src/hb-paint-bounded.cc",
+    "libs/harfbuzz/src/hb-paint-extents.cc",
+    "libs/harfbuzz/src/hb-paint.cc",
+    "libs/harfbuzz/src/hb-set.cc",
+    "libs/harfbuzz/src/hb-shape-plan.cc",
+    "libs/harfbuzz/src/hb-shape.cc",
+    "libs/harfbuzz/src/hb-shaper.cc",
+    "libs/harfbuzz/src/hb-static.cc",
+    "libs/harfbuzz/src/hb-style.cc",
+    "libs/harfbuzz/src/hb-ucd.cc",
+    "libs/harfbuzz/src/hb-unicode.cc",
+};
+
+/// HarfBuzz's public headers, restricted to those whose translation units are
+/// in `harfbuzz_sources`. Upstream ships headers for every integration it can
+/// be configured with -- subsetting, Cairo, CoreText, DirectWrite, ICU,
+/// Graphite2, WASM -- and installing them advertises an API that compiles and
+/// then fails at link.
+const harfbuzz_public_headers = [_][]const u8{
+    "hb-aat-layout.h",
+    "hb-aat.h",
+    "hb-blob.h",
+    "hb-buffer.h",
+    "hb-common.h",
+    "hb-deprecated.h",
+    "hb-draw.h",
+    "hb-face.h",
+    "hb-font.h",
+    "hb-ft.h",
+    "hb-gpu.h",
+    "hb-map.h",
+    "hb-ot-color.h",
+    "hb-ot-deprecated.h",
+    "hb-ot-fetch.h",
+    "hb-ot-font.h",
+    "hb-ot-layout.h",
+    "hb-ot-math.h",
+    "hb-ot-meta.h",
+    "hb-ot-metrics.h",
+    "hb-ot-name.h",
+    "hb-ot-shape.h",
+    "hb-ot-var.h",
+    "hb-ot.h",
+    "hb-paint.h",
+    "hb-raster.h",
+    "hb-script-list.h",
+    "hb-set.h",
+    "hb-shape-plan.h",
+    "hb-shape.h",
+    "hb-style.h",
+    "hb-subset-depend.h",
+    "hb-unicode.h",
+    "hb-vector.h",
+    "hb-version.h",
+    "hb.h",
+};
+
+/// SheenBidi. Plain C99, no configuration, no generated sources.
+///
+/// `Source/SheenBidi.c` is upstream's unity wrapper and is skipped: it compiles
+/// to nothing unless `SB_CONFIG_UNITY` is defined, and the files it would
+/// include are all listed here individually.
+/// libunibreak: UAX #14 line breaking and UAX #29 grapheme and word
+/// segmentation. Explicit, like every other list here -- upstream's `src/`
+/// also holds table generators and its own test driver, and a glob would
+/// compile both.
+///
+/// Note what is NOT here: an allocator seam. libunibreak allocates nothing at
+/// all -- its tables are static and its results go into a buffer the caller
+/// provides -- so unlike the other three there is nothing to route.
+const libunibreak_sources = [_][]const u8{
+    "libs/libunibreak/src/eastasianwidthdata.c",
+    "libs/libunibreak/src/eastasianwidthdef.c",
+    "libs/libunibreak/src/emojidata.c",
+    "libs/libunibreak/src/emojidef.c",
+    "libs/libunibreak/src/graphemebreak.c",
+    "libs/libunibreak/src/graphemebreakdata.c",
+    "libs/libunibreak/src/indicconjunctbreakdata.c",
+    "libs/libunibreak/src/linebreak.c",
+    "libs/libunibreak/src/linebreakdata.c",
+    "libs/libunibreak/src/linebreakdef.c",
+    "libs/libunibreak/src/unibreakbase.c",
+    "libs/libunibreak/src/unibreakdef.c",
+    "libs/libunibreak/src/wordbreak.c",
+    "libs/libunibreak/src/wordbreakdata.c",
+};
+
+const sheenbidi_sources = [_][]const u8{
+    "libs/sheenbidi/Source/API/SBAlgorithm.c",
+    "libs/sheenbidi/Source/API/SBAllocator.c",
+    "libs/sheenbidi/Source/API/SBAttributeList.c",
+    "libs/sheenbidi/Source/API/SBAttributeRegistry.c",
+    "libs/sheenbidi/Source/API/SBBase.c",
+    "libs/sheenbidi/Source/API/SBCodepoint.c",
+    "libs/sheenbidi/Source/API/SBCodepointSequence.c",
+    "libs/sheenbidi/Source/API/SBLine.c",
+    "libs/sheenbidi/Source/API/SBLog.c",
+    "libs/sheenbidi/Source/API/SBMirrorLocator.c",
+    "libs/sheenbidi/Source/API/SBParagraph.c",
+    "libs/sheenbidi/Source/API/SBScriptLocator.c",
+    "libs/sheenbidi/Source/API/SBText.c",
+    "libs/sheenbidi/Source/API/SBTextConfig.c",
+    "libs/sheenbidi/Source/API/SBTextIterators.c",
+    "libs/sheenbidi/Source/Core/List.c",
+    "libs/sheenbidi/Source/Core/Memory.c",
+    "libs/sheenbidi/Source/Core/Object.c",
+    "libs/sheenbidi/Source/Core/Once.c",
+    "libs/sheenbidi/Source/Data/BidiTypeLookup.c",
+    "libs/sheenbidi/Source/Data/GeneralCategoryLookup.c",
+    "libs/sheenbidi/Source/Data/PairingLookup.c",
+    "libs/sheenbidi/Source/Data/ScriptLookup.c",
+    "libs/sheenbidi/Source/Script/ScriptStack.c",
+    "libs/sheenbidi/Source/Text/AttributeDictionary.c",
+    "libs/sheenbidi/Source/Text/AttributeManager.c",
+    "libs/sheenbidi/Source/UBA/BidiChain.c",
+    "libs/sheenbidi/Source/UBA/BracketQueue.c",
+    "libs/sheenbidi/Source/UBA/IsolatingRun.c",
+    "libs/sheenbidi/Source/UBA/LevelRun.c",
+    "libs/sheenbidi/Source/UBA/RunQueue.c",
+    "libs/sheenbidi/Source/UBA/StatusStack.c",
+};
+
+/// The ztext boundary. One translation unit per concern.
+///
+/// C, not C++: every upstream exposes a C API, so there is nothing here for
+/// C++ to do. See README -- this layer exists to stop FreeType's large,
+/// config-conditional structs at the C boundary, not to re-present HarfBuzz to
+/// the world under a different name.
+const ztext_sources = [_][]const u8{
+    "ffi/ztext_core.c",
+    "ffi/ztext_face.c",
+    "ffi/ztext_shape.c",
+    "ffi/ztext_bidi.c",
+    "ffi/ztext_raster.c",
+    "ffi/ztext_abi.c",
+};
+
+//=============================================================================
+// Compiler flags, as comptime fragments.
+//
+// Split this way because the C++ base differs by ABI and Zig needs the whole
+// concatenation to be comptime-known.
+//=============================================================================
+
+/// Tells FreeType it is being compiled (rather than consumed), and points it at
+/// ztext's configuration instead of the vendored defaults. Every translation
+/// unit that includes a FreeType header while ztext's build is in effect needs
+/// these, or it sees a different FreeType than the one that was compiled.
+const freetype_defines = [_][]const u8{
+    "-DFT2_BUILD_LIBRARY",
+    "-DFT_CONFIG_OPTIONS_H=<ztext_ftoption.h>",
+    "-DFT_CONFIG_MODULES_H=<ztext_ftmodules.h>",
+};
+
+/// Switches HarfBuzz onto ztext's allocator. Defining all four macros is what
+/// makes HarfBuzz define HB_CUSTOM_MALLOC for itself; it then declares these
+/// names `extern "C"` and ztext_core.c implements them. Naming them ztext_hb_*
+/// rather than accepting HarfBuzz's default hb_*_impl keeps the symbols out of
+/// a namespace a host might also be using.
+const harfbuzz_defines = [_][]const u8{
+    "-DHAVE_FREETYPE=1",
+    "-Dhb_malloc_impl=ztext_hb_malloc",
+    "-Dhb_calloc_impl=ztext_hb_calloc",
+    "-Dhb_realloc_impl=ztext_hb_realloc",
+    "-Dhb_free_impl=ztext_hb_free",
+};
+
+/// Zig defaults the Windows ABI to gnu, so an `abi == .msvc` branch is dead in
+/// every configuration nobody explicitly asked for -- it compiles for the
+/// first time on whoever's machine finally targets MSVC. CI runs both.
+///
+/// Under the MSVC ABI the Microsoft standard library headers assume exceptions
+/// are available, and switching them off through Clang flags is a well-known
+/// way to produce header errors. The saving is a little code size; the cost
+/// would be a toolchain-specific build failure, so the MSVC ABI keeps the
+/// defaults.
+const cxx_base_msvc = [_][]const u8{"-std=c++17"};
+const cxx_base_other = [_][]const u8{ "-std=c++17", "-fno-exceptions", "-fno-rtti" };
+
+const c_base = [_][]const u8{"-std=c11"};
+
+/// Applied only to a shared build; see the comment at its use site.
+const visibility_flags = [_][]const u8{ "-fvisibility=hidden", "-DZTEXT_SHARED", "-DZTEXT_BUILD" };
+
+pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
+    const options = .{
+        .shared = b.option(
+            bool,
+            "shared",
+            "Build the C library as a shared object",
+        ) orelse false,
+        // Off by default, and deliberately NOT tied to `optimize`.
+        //
+        // Zig's full C sanitizer emits calls into a runtime that is linked
+        // only into a compilation that is itself sanitized. Defaulting this on
+        // in Debug means a consumer who writes `b.dependency("ztext", .{})` --
+        // forgetting to forward `optimize`, the most common Zig packaging
+        // mistake -- gets a Debug ztext inside a release executable and a link
+        // failure reading `undefined symbol: __ubsan_handle_shift_out_of_bounds`,
+        // which names nothing they can act on.
+        //
+        // ztext's own suite turns it on explicitly instead: ci/run.sh and CI
+        // both pass -Dsanitize_c=true for the Debug runs. A library should not
+        // decide that its consumers are running a sanitizer.
+        .sanitize_c = b.option(
+            bool,
+            "sanitize_c",
+            "Compile the C with Zig's undefined-behaviour sanitizer",
+        ) orelse false,
+    };
+
+    // Every option that changes what the C compiles to is mirrored into a Zig
+    // module, so the wrapper can never disagree with the library it links.
+    const options_step = b.addOptions();
+    inline for (std.meta.fields(@TypeOf(options))) |field| {
+        options_step.addOption(field.type, field.name, @field(options, field.name));
+    }
+    const options_module = options_step.createModule();
+
+    const sanitize: std.zig.SanitizeC = if (options.sanitize_c) .full else .off;
+    const msvc = target.result.abi == .msvc;
+
+    // A shared ztext must not re-export the upstreams it statically contains.
+    // Hidden visibility costs nothing in a static build -- the static linker
+    // ignores it -- but it is only needed for the shared one, so it is only
+    // applied there and the default build's flags stay minimal.
+    const shared_elf = options.shared and !msvc;
+
+    const harfbuzz_flags: []const []const u8 = if (msvc)
+        &(cxx_base_msvc ++ freetype_defines ++ harfbuzz_defines)
+    else if (shared_elf)
+        &(cxx_base_other ++ freetype_defines ++ harfbuzz_defines ++ visibility_flags)
+    else
+        &(cxx_base_other ++ freetype_defines ++ harfbuzz_defines);
+
+    const c_flags: []const []const u8 = if (shared_elf)
+        &(c_base ++ freetype_defines ++ visibility_flags)
+    else
+        &(c_base ++ freetype_defines);
+
+    // SheenBidi wants no FreeType defines, but does want the visibility flag:
+    // its SB_PUBLIC is empty outside Windows, so hiding actually takes effect
+    // there. FreeType's does not -- it marks its public API
+    // `visibility("default")` itself (config/public-macros.h:76), which
+    // overrides -fvisibility=hidden, so a shared ztext still re-exports
+    // FreeType's API. That is upstream's decision and not overridable without
+    // editing the vendored tree; the README says so.
+    const sheenbidi_flags: []const []const u8 = if (shared_elf)
+        &([_][]const u8{"-std=c99"} ++ visibility_flags)
+    else
+        &[_][]const u8{"-std=c99"};
+
+    //=====================================================================
+    // FreeType
+    //=====================================================================
+
+    const freetype = b.addLibrary(.{
+        .name = "freetype",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    freetype.root_module.link_libc = true;
+    freetype.root_module.addIncludePath(b.path("libs/freetype/include"));
+    // ztext_ftoption.h and ztext_ftmodules.h live here, not in libs/.
+    freetype.root_module.addIncludePath(b.path("ffi"));
+    freetype.root_module.addCSourceFiles(.{
+        .files = &freetype_sources,
+        .flags = c_flags,
+    });
+    freetype.root_module.sanitize_c = sanitize;
+    // Public headers only. `installHeadersDirectory` is recursive and would
+    // otherwise also install `freetype/internal/`, which upstream deliberately
+    // does not install -- those headers are implementation-private and require
+    // FT2_BUILD_LIBRARY to even compile.
+    freetype.installHeader(b.path("libs/freetype/include/ft2build.h"), "ft2build.h");
+    freetype.installHeadersDirectory(
+        b.path("libs/freetype/include/freetype/config"),
+        "freetype/config",
+        .{ .include_extensions = &.{".h"} },
+    );
+    for (freetype_public_headers) |header| {
+        freetype.installHeader(
+            b.path(b.fmt("libs/freetype/include/freetype/{s}", .{header})),
+            b.fmt("freetype/{s}", .{header}),
+        );
+    }
+
+    //=====================================================================
+    // SheenBidi
+    //=====================================================================
+
+    const sheenbidi = b.addLibrary(.{
+        .name = "sheenbidi",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    sheenbidi.root_module.link_libc = true;
+    sheenbidi.root_module.addIncludePath(b.path("libs/sheenbidi/Headers"));
+    // Its own translation units include each other as <API/...>, <UBA/...>.
+    sheenbidi.root_module.addIncludePath(b.path("libs/sheenbidi/Source"));
+    sheenbidi.root_module.addCSourceFiles(.{
+        .files = &sheenbidi_sources,
+        .flags = sheenbidi_flags,
+    });
+    sheenbidi.root_module.sanitize_c = sanitize;
+    sheenbidi.installHeadersDirectory(
+        b.path("libs/sheenbidi/Headers"),
+        "",
+        .{ .include_extensions = &.{".h"} },
+    );
+
+    //=====================================================================
+    // libunibreak
+    //=====================================================================
+
+    const libunibreak = b.addLibrary(.{
+        .name = "unibreak",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    libunibreak.root_module.link_libc = true;
+    libunibreak.root_module.addIncludePath(b.path("libs/libunibreak/src"));
+    libunibreak.root_module.addCSourceFiles(.{
+        .files = &libunibreak_sources,
+        .flags = sheenbidi_flags,
+    });
+    libunibreak.root_module.sanitize_c = sanitize;
+    // Only the three headers whose implementation is compiled, plus the base
+    // types they need. The *def.h headers are upstream's internals.
+    libunibreak.installHeadersDirectory(
+        b.path("libs/libunibreak/src"),
+        "",
+        .{ .include_extensions = &.{
+            "linebreak.h",
+            "graphemebreak.h",
+            "wordbreak.h",
+            "unibreakbase.h",
+        } },
+    );
+
+    //=====================================================================
+    // HarfBuzz
+    //=====================================================================
+
+    const harfbuzz = b.addLibrary(.{
+        .name = "harfbuzz",
+        .linkage = .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    harfbuzz.root_module.link_libc = true;
+    if (!msvc) harfbuzz.root_module.link_libcpp = true;
+    harfbuzz.root_module.addIncludePath(b.path("libs/harfbuzz/src"));
+    harfbuzz.root_module.addIncludePath(b.path("libs/freetype/include"));
+    harfbuzz.root_module.addIncludePath(b.path("ffi"));
+    harfbuzz.root_module.addCSourceFiles(.{
+        .files = &harfbuzz_sources,
+        .flags = harfbuzz_flags,
+    });
+    harfbuzz.root_module.sanitize_c = sanitize;
+    harfbuzz.root_module.linkLibrary(freetype);
+    // At the include ROOT, not under a `harfbuzz/` subdirectory. Upstream
+    // installs to `<prefix>/include/harfbuzz/` and has pkg-config put that
+    // directory on the include path, so the spelling HarfBuzz documents and
+    // every consumer writes is `#include <hb.h>`. There is no pkg-config here
+    // to add the -I, so the headers go where that spelling resolves.
+    for (harfbuzz_public_headers) |header| {
+        harfbuzz.installHeader(
+            b.path(b.fmt("libs/harfbuzz/src/{s}", .{header})),
+            header,
+        );
+    }
+
+    //=====================================================================
+    // ztext
+    //=====================================================================
+
+    const lib = b.addLibrary(.{
+        .name = "ztext",
+        .linkage = if (options.shared) .dynamic else .static,
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    lib.root_module.link_libc = true;
+    if (!msvc) lib.root_module.link_libcpp = true;
+    lib.root_module.addIncludePath(b.path("ffi"));
+    lib.root_module.addIncludePath(b.path("libs/freetype/include"));
+    lib.root_module.addIncludePath(b.path("libs/harfbuzz/src"));
+    lib.root_module.addIncludePath(b.path("libs/sheenbidi/Headers"));
+    lib.root_module.addIncludePath(b.path("libs/libunibreak/src"));
+    if (options.shared and msvc) {
+        lib.root_module.addCMacro("ZTEXT_SHARED", "");
+        lib.root_module.addCMacro("ZTEXT_BUILD", "");
+    }
+    // Non-MSVC shared builds get the same two macros through visibility_flags,
+    // where they turn ZTEXT_API into an explicit default-visibility marker.
+    lib.root_module.addCSourceFiles(.{
+        .files = &ztext_sources,
+        .flags = c_flags,
+    });
+    lib.root_module.sanitize_c = sanitize;
+    lib.root_module.linkLibrary(freetype);
+    lib.root_module.linkLibrary(harfbuzz);
+    lib.root_module.linkLibrary(sheenbidi);
+    lib.root_module.linkLibrary(libunibreak);
+    lib.installHeader(b.path("ffi/ztext.h"), "ztext.h");
+
+    //=====================================================================
+    // The Zig module.
+    //=====================================================================
+
+    const module = b.addModule("ztext", .{
+        .root_source_file = b.path("src/ztext.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "ztext_options", .module = options_module },
+        },
+    });
+    // No include path: the wrapper hand-writes its externs against ztext.h
+    // rather than @cImport-ing it, so nothing Zig-side compiles C.
+    module.linkLibrary(lib);
+
+    //=====================================================================
+    // Tests
+    //=====================================================================
+
+    // The committed OFL fonts, embedded through a module rooted at tests/ so
+    // @embedFile stays inside its own module directory.
+    const fonts_module = b.createModule(.{
+        .root_source_file = b.path("tests/fonts.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const tests = b.addTest(.{
+        .name = "ztext-tests",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/ztext.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ztext_options", .module = options_module },
+                .{ .name = "fonts", .module = fonts_module },
+            },
+        }),
+    });
+    tests.root_module.linkLibrary(lib);
+
+    // The ABI cross-check @cImport-s ffi/ztext.h. It is wired here, on the test
+    // module, and deliberately NOT on the module above: the shipped module has
+    // no include path and never runs translate-c.
+    //
+    // No macro wiring accompanies it, and that is a measured claim rather than
+    // an omission. ffi/ztext.h includes only <stddef.h> and <stdint.h> and is
+    // sensitive to exactly one macro -- ZTEXT_SHARED, which changes the
+    // ZTEXT_API attribute and no type. Every FreeType and HarfBuzz
+    // configuration macro reaches the implementation, never the installed
+    // header, so a header preprocessed without them still describes what the
+    // library ships. A package whose public header changed type widths with its
+    // build options would have to forward those macros here; ztext's does not.
+    tests.root_module.link_libc = true;
+    tests.root_module.addIncludePath(b.path("ffi"));
+
+    const test_step = b.step("test", "Run the ztext test suite");
+    test_step.dependOn(&b.addRunArtifact(tests).step);
+
+    // The C boundary on its own, with no Zig in the picture: the header is a
+    // real C contract and the allocator seam is genuinely in use. It asserts
+    // allocations balance, which no Zig-side test can prove about the C side.
+    const c_smoke = b.addExecutable(.{
+        .name = "ztext-c-smoke",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    c_smoke.root_module.link_libc = true;
+    c_smoke.root_module.addIncludePath(b.path("ffi"));
+    c_smoke.root_module.addCSourceFile(.{
+        .file = b.path("tests/c_smoke.c"),
+        .flags = &.{"-std=c11"},
+    });
+    c_smoke.root_module.linkLibrary(lib);
+
+    const run_c_smoke = b.addRunArtifact(c_smoke);
+    // Passed as a path argument rather than embedded, so the C test stays
+    // plain C with no generated array to regenerate.
+    run_c_smoke.addFileArg(b.path("tests/fonts/NotoSansHebrew-Regular.ttf"));
+
+    // The harness behind README's measurements, so those numbers can be
+    // reproduced rather than taken on trust. Not part of `test`: timings are
+    // not assertions, and a loaded machine would fail them.
+    const bench = b.addExecutable(.{
+        .name = "ztext-bench",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    bench.root_module.link_libc = true;
+    bench.root_module.addIncludePath(b.path("ffi"));
+    bench.root_module.addCSourceFile(.{
+        .file = b.path("tests/bench.c"),
+        .flags = &.{"-std=c11"},
+    });
+    bench.root_module.linkLibrary(lib);
+
+    const run_bench = b.addRunArtifact(bench);
+    run_bench.addFileArg(b.path("tests/fonts/NotoSans-Regular.ttf"));
+    b.step("bench", "Measure shaping, rasterisation and per-size cost")
+        .dependOn(&run_bench.step);
+
+    // Every entry point, called with nothing. A sweep rather than a scenario:
+    // c_smoke drives the library the way a consumer would, this drives it the
+    // way nobody should. Its own translation unit so the two do not blur.
+    const null_sweep = b.addExecutable(.{
+        .name = "ztext-null-sweep",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    null_sweep.root_module.link_libc = true;
+    null_sweep.root_module.addIncludePath(b.path("ffi"));
+    null_sweep.root_module.addCSourceFile(.{
+        .file = b.path("tests/null_sweep.c"),
+        .flags = &.{"-std=c11"},
+    });
+    null_sweep.root_module.linkLibrary(lib);
+
+    const run_null_sweep = b.addRunArtifact(null_sweep);
+    run_null_sweep.addFileArg(b.path("tests/fonts/NotoSansHebrew-Regular.ttf"));
+
+    const c_test_step = b.step("test-c", "Run the C-level smoke test");
+    c_test_step.dependOn(&run_c_smoke.step);
+    c_test_step.dependOn(&run_null_sweep.step);
+    test_step.dependOn(c_test_step);
+
+    // Registered unconditionally, including when ztext is consumed as a
+    // dependency. `std.Build.Dependency.artifact` finds an artifact by
+    // scanning the dependency's install step, so anything NOT installed here
+    // is invisible to a consumer -- `dep.artifact("harfbuzz")` panics rather
+    // than failing gracefully.
+    //
+    // This does not put ztext's libraries in a consumer's prefix: a
+    // dependency's install step only runs when something the consumer builds
+    // actually depends on it.
+    b.installArtifact(lib);
+    b.installArtifact(freetype);
+    b.installArtifact(harfbuzz);
+    b.installArtifact(sheenbidi);
+    b.installArtifact(libunibreak);
+}
