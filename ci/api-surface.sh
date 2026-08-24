@@ -69,9 +69,11 @@ printf '%s%-34s %-4s %-4s %-4s %-4s %-4s%s\n' \
   "$BOLD" "entry point" "hdr" "impl" "c.zig" "wrap" "test" "$OFF"
 
 gaps=0
+total=0
 for name in $names; do
   hdr=$(grep -c "ZTEXT_API[^;]*\b$name\b" ffi/ztext.h)
   [ "$hdr" -eq 0 ] && continue          # a macro or a type, not an entry point
+  total=$((total + 1))
 
   impl=$(grep -rl "^[A-Za-z].*\b$name\b(" ffi/*.c 2>/dev/null | wc -l | tr -d ' ')
   ext=$(grep -c "^pub extern fn $name\b" src/c.zig)
@@ -93,7 +95,7 @@ for name in $names; do
 done
 
 printf '\n%s%d entry points, %d with an unfilled column%s\n' \
-  "$DIM" "$(printf '%s\n' "$names" | wc -l | tr -d ' ')" "$gaps" "$OFF"
+  "$DIM" "$total" "$gaps" "$OFF"
 printf '%sA "--" is not always wrong -- an abi/debug entry point has no wrapper%s\n' \
   "$DIM" "$OFF"
 printf '%sby design -- but it should be a decision, not a surprise.%s\n' "$DIM" "$OFF"

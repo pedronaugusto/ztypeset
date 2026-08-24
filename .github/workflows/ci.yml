@@ -114,10 +114,6 @@ jobs:
       - name: Sanitizer forced on in ReleaseSafe
         run: zig build -Doptimize=ReleaseSafe -Dsanitize_c=true
 
-  # Proves libs/ is still a pristine copy of the three pinned upstream commits,
-  # and that the committed test fonts are the exact bytes the golden results
-  # were measured against — rather than all of that being a claim in a markdown
-  # file. Needs network, so it is its own job and not part of the local inner
   # A passing test says nothing about whether it CAN fail. This applies one
   # deliberate bug at a time -- a renumbered enumerator, a swapped struct
   # field, a line reordered over the paragraph instead of over itself -- and
@@ -133,6 +129,10 @@ jobs:
           version: ${{ env.ZIG_VERSION }}
       - run: ci/check-guards.sh
 
+  # Proves libs/ is still a pristine copy of the three pinned upstream commits,
+  # and that the committed test fonts are the exact bytes the golden results
+  # were measured against — rather than all of that being a claim in a markdown
+  # file. Needs network, so it is its own job and not part of the local inner
   # loop.
   vendor-integrity:
     name: vendor integrity

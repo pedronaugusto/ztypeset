@@ -135,6 +135,16 @@ bool ztextIsValidUtf8(const char* text, size_t length);
 /// terminates.
 size_t ztextDecodeUtf8(const char* text, size_t length, uint32_t* out);
 
+/// True if `index` is inside `text[0..length]` and lands on a UTF-8
+/// continuation byte -- the one way a caller-given byte range can slice a
+/// character in half. False for `index >= length`, which is what lets a
+/// caller check both ends of a half-open range with the same call.
+///
+/// Shared by ztext_shape.c (a shaped run) and ztext_bidi.c (a line), which
+/// both refuse a range that would split a character rather than shape or
+/// reorder half of one.
+bool ztextSplitsUtf8Character(const char* text, size_t length, size_t index);
+
 //===----------------------------------------------------------------------===//
 // Growable array
 //

@@ -142,12 +142,6 @@ static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
   return true;
 }
 
-/// True if `index` is inside the text and lands on a UTF-8 continuation byte.
-static bool splitsCharacter(const char* text, size_t length, size_t index) {
-  if (index >= length) return false;
-  return ((unsigned char)text[index] & 0xC0u) == 0x80u;
-}
-
 ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
                                  const char* text, size_t length,
                                  size_t run_offset, size_t run_length,
@@ -178,8 +172,8 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
   if (!ztextIsValidUtf8(text, length)) return ZTEXT_RESULT_INVALID_UTF8;
   // A run that starts or ends inside a character would hand HarfBuzz half of
   // one. Refused rather than shaped, as everywhere else that takes a range.
-  if (splitsCharacter(text, length, run_offset) ||
-      splitsCharacter(text, length, run_offset + run_length)) {
+  if (ztextSplitsUtf8Character(text, length, run_offset) ||
+      ztextSplitsUtf8Character(text, length, run_offset + run_length)) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
 
