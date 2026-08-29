@@ -139,6 +139,11 @@ pub const FaceMetrics = extern struct {
     units_per_em: u32,
     num_glyphs: u32,
     pixel_size: f32,
+    vert_ascender: f32,
+    vert_descender: f32,
+    vert_line_height: f32,
+    vert_max_advance: f32,
+    has_vertical_metrics: u32,
 };
 
 pub const Extents = extern struct {
@@ -189,6 +194,32 @@ pub const GlyphBitmap = extern struct {
     left: i32,
     top: i32,
     x_advance: f32,
+};
+
+/// Mirrors `ZtextOutlineFuncs`: one callback per outline command, called
+/// synchronously from `ztextFaceDecomposeOutline`, plus an opaque `user`
+/// pointer passed back unmodified -- the same shape as `Allocator`.
+pub const OutlineFuncs = extern struct {
+    move_to: ?*const fn (user: ?*anyopaque, x: i32, y: i32) callconv(.c) Result,
+    line_to: ?*const fn (user: ?*anyopaque, x: i32, y: i32) callconv(.c) Result,
+    conic_to: ?*const fn (
+        user: ?*anyopaque,
+        control_x: i32,
+        control_y: i32,
+        x: i32,
+        y: i32,
+    ) callconv(.c) Result,
+    cubic_to: ?*const fn (
+        user: ?*anyopaque,
+        control1_x: i32,
+        control1_y: i32,
+        control2_x: i32,
+        control2_y: i32,
+        x: i32,
+        y: i32,
+    ) callconv(.c) Result,
+    close: ?*const fn (user: ?*anyopaque) callconv(.c) Result,
+    user: ?*anyopaque,
 };
 
 pub const AbiLayout = extern struct {
@@ -333,11 +364,15 @@ pub extern fn ztextFaceDestroy(face: ?*Face) void;
 pub extern fn ztextFaceFont(face: *const Face) ?*Font;
 pub extern fn ztextFaceSetPixelSize(face: *Face, width: f32, height: f32) Result;
 pub extern fn ztextFaceMetrics(face: *const Face, out: *FaceMetrics) Result;
+pub extern fn ztextFaceSetSyntheticBold(face: *Face, enabled: c_int) Result;
+pub extern fn ztextFaceSetSyntheticOblique(face: *Face, enabled: c_int) Result;
 pub extern fn ztextFaceRenderGlyph(
     face: *Face,
     glyph_id: u32,
     mode: RenderMode,
     hinting: Hinting,
+    offset_x: i32,
+    offset_y: i32,
     out: *GlyphBitmap,
 ) Result;
 pub extern fn ztextFaceGlyphExtents(
@@ -345,6 +380,12 @@ pub extern fn ztextFaceGlyphExtents(
     glyph_id: u32,
     hinting: Hinting,
     out: *Extents,
+) Result;
+pub extern fn ztextFaceDecomposeOutline(
+    face: *Face,
+    glyph_id: u32,
+    hinting: Hinting,
+    funcs: *const OutlineFuncs,
 ) Result;
 
 pub extern fn ztextShaperCreate(out: **Shaper) Result;

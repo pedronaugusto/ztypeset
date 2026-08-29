@@ -33,6 +33,10 @@ pub const FaceMetrics = c.FaceMetrics;
 /// only until the next render or shape on that face.
 pub const GlyphBitmap = c.GlyphBitmap;
 
+/// Callbacks for `Face.decomposeOutline`: one per outline command, points in
+/// 26.6 fixed point, plus a `user` pointer passed back unmodified.
+pub const OutlineFuncs = c.OutlineFuncs;
+
 /// A maximal span of one embedding level, in visual order.
 /// Where a boundary is permitted, required, or absent.
 ///

@@ -40,7 +40,7 @@
 //!         .script = run.script,
 //!     });
 //!     for (glyphs) |glyph| {
-//!         const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light);
+//!         const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
 //!         _ = bitmap; // ... into your atlas, before this face's next render.
 //!     }
 //! }
@@ -83,6 +83,7 @@ pub const feature_global = types_mod.feature_global;
 pub const Extents = types_mod.Extents;
 pub const FaceMetrics = types_mod.FaceMetrics;
 pub const GlyphBitmap = types_mod.GlyphBitmap;
+pub const OutlineFuncs = types_mod.OutlineFuncs;
 pub const VariationAxis = types_mod.VariationAxis;
 pub const Variation = types_mod.Variation;
 pub const VisualRun = types_mod.VisualRun;

@@ -155,15 +155,23 @@ int main(int argc, char** argv) {
   ZtextGlyphBitmap bitmap;
   memset(&bitmap, 0, sizeof(bitmap));
   REFUSES(ztextFaceRenderGlyph(NULL, 1, ZTEXT_RENDER_MODE_A8,
-                               ZTEXT_HINTING_NORMAL, &bitmap));
+                               ZTEXT_HINTING_NORMAL, 0, 0, &bitmap));
   CHECK(bitmap.pixels == NULL, "a refused render wrote pixels");
   REFUSES_OUT(ztextFaceRenderGlyph(NULL, 1, ZTEXT_RENDER_MODE_A8,
-                                   ZTEXT_HINTING_NORMAL, NULL));
+                                   ZTEXT_HINTING_NORMAL, 0, 0, NULL));
+  REFUSES(ztextFaceSetSyntheticBold(NULL, 1));
+  REFUSES(ztextFaceSetSyntheticOblique(NULL, 1));
 
   ZtextExtents extents;
   memset(&extents, 0, sizeof(extents));
   REFUSES(ztextFaceGlyphExtents(NULL, 1, ZTEXT_HINTING_NORMAL, &extents));
   REFUSES_OUT(ztextFaceGlyphExtents(NULL, 1, ZTEXT_HINTING_NORMAL, NULL));
+
+  ZtextOutlineFuncs outline_funcs;
+  memset(&outline_funcs, 0, sizeof(outline_funcs));
+  REFUSES(ztextFaceDecomposeOutline(NULL, 1, ZTEXT_HINTING_NORMAL,
+                                    &outline_funcs));
+  REFUSES(ztextFaceDecomposeOutline(NULL, 1, ZTEXT_HINTING_NORMAL, NULL));
 
   //--------------------------------------------------------------------------
   // Shaper.
@@ -261,8 +269,9 @@ int main(int argc, char** argv) {
   }
   REFUSES_OUT(ztextFaceMetrics(face, NULL));
   REFUSES_OUT(ztextFaceRenderGlyph(face, 1, ZTEXT_RENDER_MODE_A8,
-                                   ZTEXT_HINTING_NORMAL, NULL));
+                                   ZTEXT_HINTING_NORMAL, 0, 0, NULL));
   REFUSES_OUT(ztextFaceGlyphExtents(face, 1, ZTEXT_HINTING_NORMAL, NULL));
+  REFUSES(ztextFaceDecomposeOutline(face, 1, ZTEXT_HINTING_NORMAL, NULL));
 
   if (ztextShaperCreate(&shaper) != ZTEXT_RESULT_OK) {
     printf("  FAIL could not create a shaper\n");
