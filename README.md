@@ -70,7 +70,7 @@ for (paragraph.shapingRuns()) |run| {
     // come from the run, because that is what a run is for.
     const glyphs = try shaper.shapeRun(face, text, run, .{});
     for (glyphs) |glyph| {
-        const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light);
+        const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
         // ... into your atlas, before the next call on this face.
         _ = bitmap;
     }
@@ -461,7 +461,7 @@ ci/check-guards.sh    # and prove the guards can fail -- see below
 ci/measurements.sh    # every number this file claims, recomputed
 ```
 
-85 tests. The ones that touch a face, a shaper or a paragraph install
+95 tests. The ones that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
 fails the test; the rest check tags, versions and the ABI and allocate nothing.
 
@@ -521,6 +521,21 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
 - **A bitmap survives everything but its own face's next render** — a sibling
   face's render, a measure, a shape with FreeType metrics — and two faces hold
   two independent, byte-identical bitmaps of the same glyph.
+- **Subpixel offsets are real, not decoration**: a whole-pixel offset moves
+  the bitmap by exactly one pixel with byte-identical coverage, a fractional
+  one changes the antialiasing without moving the pixel grid, and SDF mode
+  ignores the offset entirely.
+- **Outline decomposition closes every contour it opens**, visits at least
+  one curve on a round letter, lands in the same coordinate space
+  `glyphExtents` reports, and propagates a callback's own failure rather than
+  reporting success or a different error.
+- **Synthetic bold widens the advance and the ink together**, and rasterisation
+  agrees with `glyphExtents` because both load through the same path.
+  **Synthetic oblique** moves the ink without moving the advance, and reaches
+  outline decomposition too, not just render and extents.
+- **Vertical face metrics report which they are**: synthesised from ascender
+  and descender for every committed font, with the flag saying so rather than
+  a caller having to guess.
 
 `zig build test-c` adds four things no Zig test can reach, because they need
 failure injected *below* the C boundary:
@@ -533,7 +548,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 65 entry points with
+And `tests/null_sweep.c` calls **every one of the 68 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -705,17 +720,30 @@ Exposed today:
 - **Run context**: shaping a range of a longer text, so joining stays correct
   where a host split a word between fonts
 - Rasterisation: A8 coverage and SDF, three hinting modes, configurable spread
+- **Subpixel positioning**: `renderGlyph` takes a fractional offset in 26.6,
+  so text laid out at a fractional x is not forced onto the pixel grid.
+  Ignored in SDF mode: a distance field is baked once and sampled at any
+  position later, so baking a sub-pixel shift in would be wasted, unrecoverable
+  work.
+- **Glyph outlines as paths**: `decomposeOutline` walks `FT_Outline_Decompose`
+  through move-to/line-to/conic-to/cubic-to/close callbacks, points in 26.6,
+  for a host that fills its own shapes rather than sampling a bitmap.
+- **Synthetic bold and oblique**, for a family with no bold or italic face of
+  its own. Both apply at glyph loading, so `glyphExtents` and `renderGlyph`
+  always agree on the same widened, sheared glyph.
+- **Vertical face metrics**: column-direction analogues of `ascender`,
+  `descender`, `line_height` and `max_advance`, plus a flag saying whether
+  they are real (from a `vhea`/`vmtx`) or synthesised — see below.
 
 **Vertical direction, exactly as far as it goes.** `ttb` and `btt` reach
 HarfBuzz and come back with vertical advances instead of horizontal ones —
 tested, including that the shaper reports back the direction it was given
-rather than a normalisation of it. What is *not* there, and is pinned by its
-own test so it cannot be assumed away: `FaceMetrics` is horizontal throughout,
-so a host laying out a vertical column has per-glyph advances but no line
-spacing to place columns at. And none of the committed fonts has a `vmtx`, so
-what the tests exercise are the advances HarfBuzz *synthesises* from the
-ascender and descender, not real vertical metrics from a CJK face. Enough to
-say the plumbing works; not enough to call vertical text supported.
+rather than a normalisation of it. `FaceMetrics` now carries column spacing
+too, but none of the committed fonts has a `vmtx`, so what the tests exercise
+is the synthesised path — `has_vertical_metrics` reporting false, and a span
+derived from `ascender` and `descender` — not real vertical metrics read from
+a CJK face's own tables. Enough to say the plumbing works; not enough to call
+vertical text supported.
 
 Not exposed:
 
@@ -739,7 +767,6 @@ Not exposed:
 - Reusable `Paragraph` scratch. Less valuable than it looks: SheenBidi
   allocates per paragraph internally regardless, so a reusable handle would
   save ztext's copy and nothing else.
-- Glyph outlines as paths, for a host that wants to fill them itself
 
 Deliberately out of scope: an atlas, a layout engine, justification, a caret
 *model*, rich text. Those are a host's job, and keeping them out is what makes

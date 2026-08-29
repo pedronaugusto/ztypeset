@@ -41,7 +41,7 @@ pub fn main() !void {
             .script = run.script,
         });
         for (glyphs) |glyph| {
-            const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light);
+            const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
             if (ztext.bitmapRows(bitmap)) |rows| glyph_total += rows.len;
         }
     }

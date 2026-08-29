@@ -528,6 +528,22 @@ typedef struct ZtextFaceMetrics {
   /// The vertical pixel size currently set. Quantised to 1/64 px, so it may
   /// differ from what was asked for in the last bit.
   float pixel_size;
+
+  /// Column-direction analogues of the four fields above, for a host laying
+  /// out vertical text: how far a column extends either side of its
+  /// baseline, the recommended column-to-column distance, and the widest
+  /// per-glyph vertical advance. Real when the font has a `vhea`/`vmtx`
+  /// (`has_vertical_metrics` is nonzero); otherwise synthesised from
+  /// `ascender` and `descender` -- the same span HarfBuzz's own vertical
+  /// advance fallback uses, so a shaped run's advances land in the same
+  /// range as these.
+  float vert_ascender;
+  float vert_descender;
+  float vert_line_height;
+  float vert_max_advance;
+  /// Nonzero when the four fields above are read from the font's own
+  /// vhea/vmtx tables rather than synthesised.
+  uint32_t has_vertical_metrics;
 } ZtextFaceMetrics;
 
 ZTEXT_API ZtextResult ztextFaceMetrics(const ZtextFace* face,
@@ -983,6 +999,43 @@ typedef enum ZtextHinting {
   ZTEXT_HINTING_NONE = 2,
 } ZtextHinting;
 
+/// Fakes a bold or an italic on a face that has neither of its own, the way a
+/// production stack does. Both apply at glyph LOADING, so
+/// ztextFaceGlyphExtents and ztextFaceRenderGlyph always agree on the same
+/// widened, sheared glyph -- but not shaping: HarfBuzz's own advance queries
+/// bypass this face's glyph loading, so a shaped run's advances do not widen.
+///
+/// Emboldening widens the glyph, and its advance is widened by the same
+/// amount so bold text does not overlap; a shear leaves the advance alone,
+/// because slanting does not change how far the pen moves.
+///
+/// `enabled` is 0 or 1. Applies to every glyph loaded through this face from
+/// the next call on; already-rendered bitmaps and already-taken extents are
+/// unaffected.
+ZTEXT_API ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face, int enabled);
+ZTEXT_API ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face,
+                                                   int enabled);
+
+/// Callbacks for ztextFaceDecomposeOutline, one per outline command. Points
+/// are in 26.6 fixed point, at this face's current size. Modelled on
+/// ZtextAllocator: `user` is passed back unmodified, and a callback other
+/// than ZTEXT_RESULT_OK aborts decomposition and becomes the result
+/// ztextFaceDecomposeOutline returns.
+typedef struct ZtextOutlineFuncs {
+  ZtextResult (*move_to)(void* user, int32_t x, int32_t y);
+  ZtextResult (*line_to)(void* user, int32_t x, int32_t y);
+  ZtextResult (*conic_to)(void* user, int32_t control_x, int32_t control_y,
+                          int32_t x, int32_t y);
+  ZtextResult (*cubic_to)(void* user, int32_t control1_x, int32_t control1_y,
+                          int32_t control2_x, int32_t control2_y, int32_t x,
+                          int32_t y);
+  /// Emitted once a contour is complete, before the next move_to and after
+  /// the last -- FT_Outline_Decompose itself has no such event, only an
+  /// implicit line/conic/cubic back to the contour's start.
+  ZtextResult (*close)(void* user);
+  void* user;
+} ZtextOutlineFuncs;
+
 typedef struct ZtextGlyphBitmap {
   /// Owned by the FACE, and valid until the next ztextFaceRenderGlyph on it.
   ///
@@ -1018,9 +1071,19 @@ typedef struct ZtextGlyphBitmap {
 /// SDF mode forces unhinted loading regardless of `hinting`, because a hinted
 /// outline produces a distance field that does not match the shape at other
 /// sizes -- which is the only reason to want one.
+///
+/// `offset_x`/`offset_y` place the glyph at a fractional pixel offset, in
+/// 26.6 fixed point -- the unit FreeType uses and shaping advances already
+/// come back in -- so a host laying out text at fractional x is not forced to
+/// snap every glyph to the pixel grid. 0, 0 renders identically to a build
+/// without this parameter. Ignored in SDF mode: the field is meant to be
+/// sampled at any sub-pixel position later, so baking one in here would be
+/// wasted, unrecoverable work -- apply the offset where the field is sampled
+/// instead, the same way scale and rotation already are.
 ZTEXT_API ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
                                            ZtextRenderMode mode,
                                            ZtextHinting hinting,
+                                           int32_t offset_x, int32_t offset_y,
                                            ZtextGlyphBitmap* out);
 
 /// Metrics for one glyph without rasterising it.
@@ -1031,6 +1094,18 @@ ZTEXT_API ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
 ZTEXT_API ZtextResult ztextFaceGlyphExtents(ZtextFace* face, uint32_t glyph_id,
                                             ZtextHinting hinting,
                                             ZtextExtents* out);
+
+/// Walks one glyph's outline through `funcs`, for a host that fills its own
+/// shapes -- an offline SDF baker, a path-effect renderer -- rather than
+/// sampling a bitmap. A wrapper over FT_Outline_Decompose; see
+/// ZtextOutlineFuncs for the callback shape.
+///
+/// Subject to this face's synthetic bold and oblique settings, the same as
+/// ztextFaceRenderGlyph and ztextFaceGlyphExtents.
+ZTEXT_API ZtextResult ztextFaceDecomposeOutline(ZtextFace* face,
+                                                uint32_t glyph_id,
+                                                ZtextHinting hinting,
+                                                const ZtextOutlineFuncs* funcs);
 
 /// Half-width of the distance field ramp, in pixels, for ZTEXT_RENDER_MODE_SDF.
 ///

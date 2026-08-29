@@ -18,6 +18,8 @@
 #include FT_MODULE_H
 #include FT_MULTIPLE_MASTERS_H
 #include FT_SIZES_H
+#include FT_OUTLINE_H
+#include FT_TRUETYPE_TABLES_H
 
 #include <hb.h>
 #include <hb-ot.h>
@@ -286,6 +288,11 @@ struct ZtextFace {
   /// size.
   int32_t pixel_width;
   int32_t pixel_height;
+
+  /// Applied to every glyph this face loads; see ztextFaceSetSyntheticBold
+  /// and ztextFaceSetSyntheticOblique.
+  bool synthetic_bold;
+  bool synthetic_oblique;
 
   /// The last rasterised glyph, COPIED out of the font's shared glyph slot.
   ///

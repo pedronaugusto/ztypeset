@@ -127,12 +127,13 @@ int main(int argc, char** argv) {
     ZtextGlyphBitmap bitmap;
 
     for (size_t i = 0; i < glyph_count; i++) {
-      ztextFaceRenderGlyph(face, glyphs[i], render, ZTEXT_HINTING_NONE, &bitmap);
+      ztextFaceRenderGlyph(face, glyphs[i], render, ZTEXT_HINTING_NONE, 0, 0,
+                           &bitmap);
     }
     start = clock();
     for (long round = 0; round < rounds; round++) {
       for (size_t i = 0; i < glyph_count; i++) {
-        ztextFaceRenderGlyph(face, glyphs[i], render, ZTEXT_HINTING_NONE,
+        ztextFaceRenderGlyph(face, glyphs[i], render, ZTEXT_HINTING_NONE, 0, 0,
                              &bitmap);
       }
     }
@@ -176,7 +177,7 @@ int main(int argc, char** argv) {
   ztextShaperShapeUtf8(shaper, faces[0], sentence, sentence_length, 0,
                        sentence_length, &params);
   ztextFaceRenderGlyph(faces[0], glyphs[0], ZTEXT_RENDER_MODE_A8,
-                       ZTEXT_HINTING_NORMAL, &bitmap);
+                       ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
   const size_t font_and_one_face = live_bytes - before_font;
 
   // Three more sizes over the same font.
@@ -185,7 +186,7 @@ int main(int argc, char** argv) {
     ztextShaperShapeUtf8(shaper, faces[i], sentence, sentence_length, 0,
                          sentence_length, &params);
     ztextFaceRenderGlyph(faces[i], glyphs[0], ZTEXT_RENDER_MODE_A8,
-                         ZTEXT_HINTING_NORMAL, &bitmap);
+                         ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
   }
   const size_t four_sizes = live_bytes - before_font;
   printf("%-28s %9zu B   one font plus its first size\n", "font + one face",

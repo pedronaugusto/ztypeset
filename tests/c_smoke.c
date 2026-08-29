@@ -400,6 +400,57 @@ static unsigned char* readFile(const char* path, size_t* size_out) {
   return buffer;
 }
 
+//===----------------------------------------------------------------------===//
+// Outline decomposition: a callback context that just counts events, so the
+// smoke test proves the C callback shape works without a real path renderer.
+//===----------------------------------------------------------------------===//
+
+typedef struct OutlineCounts {
+  int move_to;
+  int line_to;
+  int conic_to;
+  int cubic_to;
+  int close;
+} OutlineCounts;
+
+static ZtextResult countMoveTo(void* user, int32_t x, int32_t y) {
+  (void)x;
+  (void)y;
+  ((OutlineCounts*)user)->move_to++;
+  return ZTEXT_RESULT_OK;
+}
+static ZtextResult countLineTo(void* user, int32_t x, int32_t y) {
+  (void)x;
+  (void)y;
+  ((OutlineCounts*)user)->line_to++;
+  return ZTEXT_RESULT_OK;
+}
+static ZtextResult countConicTo(void* user, int32_t control_x, int32_t control_y,
+                                int32_t x, int32_t y) {
+  (void)control_x;
+  (void)control_y;
+  (void)x;
+  (void)y;
+  ((OutlineCounts*)user)->conic_to++;
+  return ZTEXT_RESULT_OK;
+}
+static ZtextResult countCubicTo(void* user, int32_t control1_x, int32_t control1_y,
+                                int32_t control2_x, int32_t control2_y, int32_t x,
+                                int32_t y) {
+  (void)control1_x;
+  (void)control1_y;
+  (void)control2_x;
+  (void)control2_y;
+  (void)x;
+  (void)y;
+  ((OutlineCounts*)user)->cubic_to++;
+  return ZTEXT_RESULT_OK;
+}
+static ZtextResult countClose(void* user) {
+  ((OutlineCounts*)user)->close++;
+  return ZTEXT_RESULT_OK;
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
     printf("usage: %s <font.ttf>\n", argv[0]);
@@ -515,6 +566,12 @@ int main(int argc, char** argv) {
   CHECK(metrics.num_glyphs > 0, "the face should have glyphs");
   CHECK(metrics.ascender > 0.0f, "ascender should be above the baseline");
   CHECK(metrics.descender < 0.0f, "descender should be below the baseline");
+  // None of the committed fonts has a vmtx, so this is the synthesised path,
+  // not the real one -- the flag has to say so rather than claim otherwise.
+  CHECK(!metrics.has_vertical_metrics,
+        "this font has no vhea/vmtx; vertical metrics should be synthesised");
+  CHECK(metrics.vert_line_height > 0.0f,
+        "even synthesised column spacing should be positive");
   printf("  face: %s %s, %u glyphs, %u upem\n", ztextFontFamilyName(the_font),
          ztextFontStyleName(the_font), metrics.num_glyphs,
          metrics.units_per_em);
@@ -559,10 +616,60 @@ int main(int argc, char** argv) {
     ZtextGlyphBitmap bitmap;
     CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
                                   ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_NORMAL,
-                                  &bitmap));
+                                  0, 0, &bitmap));
     CHECK(bitmap.width > 0 && bitmap.height > 0,
           "a letter should rasterise to a non-empty bitmap");
     CHECK(bitmap.pixels != NULL, "a non-empty bitmap needs pixels");
+
+    // Subpixel offset: a half-pixel shift must not crash and must still
+    // rasterise to ink, exercising ztextFaceRenderGlyph's new parameters from
+    // C directly rather than only through the Zig wrapper.
+    ZtextGlyphBitmap shifted;
+    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_NORMAL,
+                                  32, 0, &shifted));
+    CHECK(shifted.width > 0 && shifted.height > 0,
+          "an offset render should still produce a non-empty bitmap");
+  }
+
+  // Outline decomposition: a letter's outline has at least one contour, and
+  // every contour opened by move_to is closed exactly once.
+  if (glyphs != NULL && glyph_count > 0) {
+    OutlineCounts counts;
+    memset(&counts, 0, sizeof(counts));
+    ZtextOutlineFuncs outline_funcs = {countMoveTo,  countLineTo, countConicTo,
+                                       countCubicTo, countClose,  &counts};
+    CHECK_OK(ztextFaceDecomposeOutline(face, glyphs[0].glyph_id,
+                                       ZTEXT_HINTING_NONE, &outline_funcs));
+    CHECK(counts.move_to > 0, "a letter's outline should have a contour");
+    CHECK(counts.move_to == counts.close,
+          "every contour opened should be closed exactly once");
+  }
+
+  // Synthetic bold widens the advance; synthetic oblique moves the ink
+  // without touching it. Reset each afterwards so nothing below inherits it.
+  if (glyphs != NULL && glyph_count > 0) {
+    ZtextExtents plain;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id,
+                                   ZTEXT_HINTING_NONE, &plain));
+
+    CHECK_OK(ztextFaceSetSyntheticBold(face, 1));
+    ZtextExtents bold;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id,
+                                   ZTEXT_HINTING_NONE, &bold));
+    CHECK(bold.x_advance > plain.x_advance,
+          "synthetic bold should widen the advance");
+    CHECK_OK(ztextFaceSetSyntheticBold(face, 0));
+
+    CHECK_OK(ztextFaceSetSyntheticOblique(face, 1));
+    ZtextExtents sheared;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id,
+                                   ZTEXT_HINTING_NONE, &sheared));
+    CHECK(sheared.x_advance == plain.x_advance,
+          "a shear should not change the advance");
+    CHECK(sheared.x_max != plain.x_max || sheared.x_min != plain.x_min,
+          "a shear should move the ink");
+    CHECK_OK(ztextFaceSetSyntheticOblique(face, 0));
   }
 
   // Bidi, with no face involved at all.

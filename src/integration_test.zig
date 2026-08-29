@@ -167,10 +167,10 @@ test "a fractional pixel size is honoured rather than rounded" {
     // through values that are not whole pixels.
     const glyph = face.font.glyphIndex('H');
     try face.setPixelSize(0, 18.0);
-    const small = try face.renderGlyph(glyph, .a8, .none);
+    const small = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     const small_height = small.height;
     try face.setPixelSize(0, 18.5);
-    const larger = try face.renderGlyph(glyph, .a8, .none);
+    const larger = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     try std.testing.expect(larger.height > small_height);
 }
 
@@ -275,7 +275,7 @@ test "a face always has a size, so there is no unsized state to refuse" {
     defer face.deinit();
     _ = try face.metrics();
     _ = try fixture.shaper.shape(face, "x", .{});
-    _ = try face.renderGlyph(face.font.glyphIndex('x'), .a8, .normal);
+    _ = try face.renderGlyph(face.font.glyphIndex('x'), .a8, .normal, 0, 0);
 }
 
 test "a font and its faces may be destroyed in either order" {
@@ -330,13 +330,13 @@ test "faces of one font share the parse but not the size" {
 
     // And the same for rendering, which goes through the shared glyph slot.
     const glyph = font.glyphIndex('H');
-    const big = try large.renderGlyph(glyph, .a8, .none);
+    const big = try large.renderGlyph(glyph, .a8, .none, 0, 0);
     const big_height = big.height;
-    const wee = try small.renderGlyph(glyph, .a8, .none);
+    const wee = try small.renderGlyph(glyph, .a8, .none, 0, 0);
     try std.testing.expect(big_height > wee.height);
 
     // Interleaving must not let one face's size leak into the other's.
-    try std.testing.expectEqual(big_height, (try large.renderGlyph(glyph, .a8, .none)).height);
+    try std.testing.expectEqual(big_height, (try large.renderGlyph(glyph, .a8, .none, 0, 0)).height);
 
     // Shaping too: advances come from each face's own HarfBuzz font.
     _ = try fixture.shaper.shape(small, "Hamburgefonstiv", .{ .direction = .ltr });
@@ -376,14 +376,14 @@ test "a rendered bitmap survives anything but the next render on its own face" {
     // regression shows up as a wrong answer even where it would not show up as
     // a crash.
     const h = font.glyphIndex('H');
-    const big = try face.renderGlyph(h, .a8, .normal);
+    const big = try face.renderGlyph(h, .a8, .normal, 0, 0);
     const big_rows = ztext.bitmapRows(big).?;
-    const twin_bitmap = try twin.renderGlyph(h, .a8, .normal);
+    const twin_bitmap = try twin.renderGlyph(h, .a8, .normal, 0, 0);
     const twin_rows = ztext.bitmapRows(twin_bitmap).?;
     try std.testing.expect(big_rows.ptr != twin_rows.ptr);
     try std.testing.expectEqualSlices(u8, big_rows, twin_rows);
 
-    const wee = try sibling.renderGlyph(h, .a8, .normal);
+    const wee = try sibling.renderGlyph(h, .a8, .normal, 0, 0);
     const wee_rows = ztext.bitmapRows(wee).?;
     try std.testing.expect(big_rows.ptr != wee_rows.ptr);
     try std.testing.expect(big.height > wee.height);
@@ -395,7 +395,7 @@ test "a rendered bitmap survives anything but the next render on its own face" {
 
     // Everything that touches the shared slot, and none of it may disturb the
     // pixels either face is holding.
-    _ = try sibling.renderGlyph(font.glyphIndex('W'), .a8, .normal);
+    _ = try sibling.renderGlyph(font.glyphIndex('W'), .a8, .normal, 0, 0);
     _ = try face.glyphExtents(font.glyphIndex('W'), .normal);
     _ = try fixture.shaper.shape(face, "unrelated", .{ .use_freetype_metrics = true });
     _ = try fixture.shaper.extents(face);
@@ -406,7 +406,7 @@ test "a rendered bitmap survives anything but the next render on its own face" {
 
     // The face's own next render is the one thing that does replace it, and
     // the same glyph must come back the same way.
-    const again = try face.renderGlyph(h, .a8, .normal);
+    const again = try face.renderGlyph(h, .a8, .normal, 0, 0);
     try std.testing.expectEqualSlices(u8, big_rows, ztext.bitmapRows(again).?);
 }
 
@@ -421,7 +421,7 @@ test "a rasterised bitmap is tightly packed and top-down" {
     // ignores the sign cannot render upside down. Asserted rather than
     // assumed, because the guarantee is now ztext's rather than FreeType's.
     for ("HWjgq") |ch| {
-        const bitmap = try face.renderGlyph(face.font.glyphIndex(ch), .a8, .normal);
+        const bitmap = try face.renderGlyph(face.font.glyphIndex(ch), .a8, .normal, 0, 0);
         try std.testing.expectEqual(@as(i32, @intCast(bitmap.width)), bitmap.pitch);
         try std.testing.expect(ztext.bitmapRows(bitmap) != null);
     }
@@ -646,27 +646,40 @@ test "vertical direction produces vertical advances" {
     }
 }
 
-test "vertical face metrics are absent, and that is the documented state" {
+test "vertical face metrics are synthesised for a font with no vmtx" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    // ZtextFaceMetrics is horizontal throughout: ascender, descender,
-    // line_height and max_advance all describe a horizontal line. There is no
-    // vertical equivalent, so a host laying out a vertical column has advances
-    // but no line spacing to put columns at.
+    // ZtextFaceMetrics now carries column-direction analogues of ascender,
+    // descender, line_height and max_advance, plus has_vertical_metrics
+    // saying whether they came from a real vhea/vmtx or were synthesised.
     //
-    // Pinned as a test rather than left as prose because it is the kind of
-    // absence a reader assumes away -- and because the day a vertical metric
-    // IS added, this test is what says the documentation has to change too.
+    // None of the committed fonts has a vmtx, so this test can only exercise
+    // the synthesised path -- it asserts the flag says so rather than
+    // pretending the real path (a genuine CJK vertical font) is covered here.
     const metrics = try face.metrics();
     try std.testing.expect(metrics.ascender > 0);
     try std.testing.expect(metrics.line_height > 0);
     try std.testing.expectEqual(
-        @as(usize, 9),
+        @as(usize, 14),
         @typeInfo(ztext.FaceMetrics).@"struct".fields.len,
+    );
+
+    try std.testing.expectEqual(@as(u32, 0), metrics.has_vertical_metrics);
+    // Synthesised from ascender and descender, so the column-direction span
+    // stays in the same ballpark as the horizontal one -- not identical, but
+    // neither zero nor wildly different.
+    try std.testing.expect(metrics.vert_ascender > 0);
+    try std.testing.expect(metrics.vert_descender < 0);
+    try std.testing.expect(metrics.vert_line_height > 0);
+    try std.testing.expect(metrics.vert_max_advance > 0);
+    try std.testing.expectApproxEqAbs(
+        metrics.vert_ascender - metrics.vert_descender,
+        metrics.vert_line_height,
+        0.01,
     );
 }
 
@@ -1045,7 +1058,7 @@ test "moving an axis moves shaping and rasterisation together" {
     var light_freetype: f32 = 0;
     for (fixture.shaper.glyphs()) |glyph| light_freetype += glyph.x_advance;
 
-    const light_bitmap = try face.renderGlyph(shin, .a8, .none);
+    const light_bitmap = try face.renderGlyph(shin, .a8, .none, 0, 0);
     const light_rows = ztext.bitmapRows(light_bitmap) orelse return error.TestUnexpectedResult;
     var light_ink: u64 = 0;
     for (light_rows) |value| light_ink += value;
@@ -1062,7 +1075,7 @@ test "moving an axis moves shaping and rasterisation together" {
     var black_freetype: f32 = 0;
     for (fixture.shaper.glyphs()) |glyph| black_freetype += glyph.x_advance;
 
-    const black_bitmap = try face.renderGlyph(shin, .a8, .none);
+    const black_bitmap = try face.renderGlyph(shin, .a8, .none, 0, 0);
     const black_rows = ztext.bitmapRows(black_bitmap) orelse return error.TestUnexpectedResult;
     var black_ink: u64 = 0;
     for (black_rows) |value| black_ink += value;
@@ -1901,7 +1914,7 @@ test "A8 rasterisation produces coverage with ink in it" {
     const glyph = face.font.glyphIndex('o');
     try std.testing.expect(glyph != 0);
 
-    const bitmap = try face.renderGlyph(glyph, .a8, .none);
+    const bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
     try std.testing.expect(bitmap.pitch > 0);
 
@@ -1917,7 +1930,7 @@ test "A8 rasterisation produces coverage with ink in it" {
 
     // A blank glyph has no ink and says so rather than inventing a bitmap.
     const space = face.font.glyphIndex(' ');
-    const blank = try face.renderGlyph(space, .a8, .none);
+    const blank = try face.renderGlyph(space, .a8, .none, 0, 0);
     try std.testing.expect(blank.pixels == null);
     try std.testing.expect(blank.x_advance > 0);
 }
@@ -1929,13 +1942,13 @@ test "SDF is a real distance field, not a coverage bitmap in disguise" {
     defer face.deinit();
 
     const glyph = face.font.glyphIndex('o');
-    const coverage = try face.renderGlyph(glyph, .a8, .none);
+    const coverage = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     const coverage_width = coverage.width;
     const coverage_height = coverage.height;
     const coverage_left = coverage.left;
 
     const spread: u32 = 8; // FreeType's default.
-    const sdf = try face.renderGlyph(glyph, .sdf, .none);
+    const sdf = try face.renderGlyph(glyph, .sdf, .none, 0, 0);
 
     // The field extends by the spread on every side, and the bearing moves
     // with it. Getting this wrong puts every glyph in an atlas off by 8px.
@@ -1979,7 +1992,7 @@ test "SDF is a real distance field, not a coverage bitmap in disguise" {
 
     // The spread is a library-wide property and changing it changes the field.
     try fixture.library.setSdfSpread(16);
-    const wider = try face.renderGlyph(glyph, .sdf, .none);
+    const wider = try face.renderGlyph(glyph, .sdf, .none, 0, 0);
     try std.testing.expectEqual(coverage_width + 32, wider.width);
     try fixture.library.setSdfSpread(spread);
 
@@ -1995,7 +2008,7 @@ test "glyph extents match the rasterised bitmap" {
 
     const glyph = face.font.glyphIndex('H');
     const extents = try face.glyphExtents(glyph, .none);
-    const bitmap = try face.renderGlyph(glyph, .a8, .none);
+    const bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
 
     // The bitmap is the extents rounded outwards to whole pixels, so it can be
     // larger by at most a pixel on each axis but never smaller.
@@ -2004,6 +2017,331 @@ test "glyph extents match the rasterised bitmap" {
     try std.testing.expect(@as(f32, @floatFromInt(bitmap.width)) >= ink_width - 1.0);
     try std.testing.expect(@as(f32, @floatFromInt(bitmap.height)) >= ink_height - 1.0);
     try std.testing.expect(extents.x_advance > 0);
+}
+
+//=============================================================================
+// Subpixel positioning
+//
+// offset_x/offset_y are in 26.6, same as everywhere else FreeType's fixed
+// point crosses this boundary. `0, 0` is the pin: every other rasterisation
+// test in this file calls renderGlyph with a zero offset and none of them
+// moved when the parameter was added, which is what "unchanged for an
+// existing caller" means in practice.
+//=============================================================================
+
+test "a whole-pixel offset shifts the bitmap by exactly one pixel" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('o');
+    const plain = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    // Copied out: the face's bitmap buffer is reused and overwritten by the
+    // very next renderGlyph on this face, so `plain`'s pixels do not survive
+    // the second call below.
+    const plain_rows = try std.testing.allocator.dupe(
+        u8,
+        ztext.bitmapRows(plain) orelse return error.TestUnexpectedResult,
+    );
+    defer std.testing.allocator.free(plain_rows);
+
+    // 64 in 26.6 is exactly one pixel, so this is a pure repositioning: same
+    // shape, same coverage, moved by one pixel on each axis.
+    const shifted = try face.renderGlyph(glyph, .a8, .none, 64, 64);
+    const shifted_rows = ztext.bitmapRows(shifted) orelse return error.TestUnexpectedResult;
+
+    try std.testing.expectEqual(plain.width, shifted.width);
+    try std.testing.expectEqual(plain.height, shifted.height);
+    try std.testing.expectEqual(plain.left + 1, shifted.left);
+    try std.testing.expectEqual(plain.top + 1, shifted.top);
+    try std.testing.expectEqualSlices(u8, plain_rows, shifted_rows);
+}
+
+test "a fractional offset changes the antialiasing rather than the pixel grid" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('o');
+    const plain = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    const plain_rows = try std.testing.allocator.dupe(
+        u8,
+        ztext.bitmapRows(plain) orelse return error.TestUnexpectedResult,
+    );
+    defer std.testing.allocator.free(plain_rows);
+
+    // Half a pixel: too small to move the glyph a whole cell, but the coverage
+    // at every partially-covered edge pixel has to change -- that is the
+    // entire point of subpixel positioning.
+    const half = try face.renderGlyph(glyph, .a8, .none, 32, 0);
+    const half_rows = ztext.bitmapRows(half) orelse return error.TestUnexpectedResult;
+
+    var identical = plain.width == half.width and plain.height == half.height;
+    if (identical) identical = std.mem.eql(u8, plain_rows, half_rows);
+    try std.testing.expect(!identical);
+}
+
+test "SDF ignores the subpixel offset" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('o');
+    const plain = try face.renderGlyph(glyph, .sdf, .none, 0, 0);
+    const plain_rows = try std.testing.allocator.dupe(
+        u8,
+        ztext.bitmapRows(plain) orelse return error.TestUnexpectedResult,
+    );
+    defer std.testing.allocator.free(plain_rows);
+
+    // The same fractional offset that changed the A8 bitmap above must do
+    // nothing here: SDF is baked once and sampled at any position later, so
+    // baking a sub-pixel shift in would be work with no way to undo it.
+    const offset = try face.renderGlyph(glyph, .sdf, .none, 32, 32);
+    const offset_rows = ztext.bitmapRows(offset) orelse return error.TestUnexpectedResult;
+
+    try std.testing.expectEqual(plain.width, offset.width);
+    try std.testing.expectEqual(plain.height, offset.height);
+    try std.testing.expectEqual(plain.left, offset.left);
+    try std.testing.expectEqual(plain.top, offset.top);
+    try std.testing.expectEqualSlices(u8, plain_rows, offset_rows);
+}
+
+//=============================================================================
+// Glyph outlines as paths
+//=============================================================================
+
+const OutlineCollector = struct {
+    move_to_count: u32 = 0,
+    line_to_count: u32 = 0,
+    conic_to_count: u32 = 0,
+    cubic_to_count: u32 = 0,
+    close_count: u32 = 0,
+    min_x: i32 = std.math.maxInt(i32),
+    max_x: i32 = std.math.minInt(i32),
+
+    fn track(self: *OutlineCollector, x: i32) void {
+        self.min_x = @min(self.min_x, x);
+        self.max_x = @max(self.max_x, x);
+    }
+};
+
+fn outlineMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result {
+    _ = y;
+    const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
+    self.move_to_count += 1;
+    self.track(x);
+    return .ok;
+}
+
+fn outlineLineTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result {
+    _ = y;
+    const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
+    self.line_to_count += 1;
+    self.track(x);
+    return .ok;
+}
+
+fn outlineConicTo(user: ?*anyopaque, control_x: i32, control_y: i32, x: i32, y: i32) callconv(.c) ztext.c.Result {
+    _ = control_x;
+    _ = control_y;
+    _ = y;
+    const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
+    self.conic_to_count += 1;
+    self.track(x);
+    return .ok;
+}
+
+fn outlineCubicTo(
+    user: ?*anyopaque,
+    control1_x: i32,
+    control1_y: i32,
+    control2_x: i32,
+    control2_y: i32,
+    x: i32,
+    y: i32,
+) callconv(.c) ztext.c.Result {
+    _ = control1_x;
+    _ = control1_y;
+    _ = control2_x;
+    _ = control2_y;
+    _ = y;
+    const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
+    self.cubic_to_count += 1;
+    self.track(x);
+    return .ok;
+}
+
+fn outlineClose(user: ?*anyopaque) callconv(.c) ztext.c.Result {
+    const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
+    self.close_count += 1;
+    return .ok;
+}
+
+fn outlineFuncsInto(collector: *OutlineCollector) ztext.OutlineFuncs {
+    return .{
+        .move_to = outlineMoveTo,
+        .line_to = outlineLineTo,
+        .conic_to = outlineConicTo,
+        .cubic_to = outlineCubicTo,
+        .close = outlineClose,
+        .user = @ptrCast(collector),
+    };
+}
+
+test "decomposing a round letter visits curves and closes every contour" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('o');
+    var collector = OutlineCollector{};
+    const funcs = outlineFuncsInto(&collector);
+    try face.decomposeOutline(glyph, .none, &funcs);
+
+    // An 'o' is two contours -- the outer ring and the counter -- each opened
+    // by move_to and closed exactly once.
+    try std.testing.expect(collector.move_to_count >= 2);
+    try std.testing.expectEqual(collector.move_to_count, collector.close_count);
+    // It is round, so FT_Outline_Decompose must emit at least one curve.
+    try std.testing.expect(collector.conic_to_count > 0 or collector.cubic_to_count > 0);
+
+    // Points are 26.6 in the same space glyphExtents reports.
+    const extents = try face.glyphExtents(glyph, .none);
+    const min_x_px = @as(f32, @floatFromInt(collector.min_x)) / 64.0;
+    const max_x_px = @as(f32, @floatFromInt(collector.max_x)) / 64.0;
+    try std.testing.expectApproxEqAbs(extents.x_min, min_x_px, 1.0);
+    try std.testing.expectApproxEqAbs(extents.x_max, max_x_px, 1.0);
+}
+
+test "an inkless glyph decomposes to nothing" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const space = face.font.glyphIndex(' ');
+    var collector = OutlineCollector{};
+    const funcs = outlineFuncsInto(&collector);
+    try face.decomposeOutline(space, .none, &funcs);
+
+    try std.testing.expectEqual(@as(u32, 0), collector.move_to_count);
+    try std.testing.expectEqual(@as(u32, 0), collector.close_count);
+}
+
+fn abortingMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result {
+    _ = user;
+    _ = x;
+    _ = y;
+    return .out_of_memory;
+}
+
+test "a callback's own failure aborts decomposition and propagates" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('o');
+    var collector = OutlineCollector{};
+    var funcs = outlineFuncsInto(&collector);
+    funcs.move_to = abortingMoveTo;
+
+    try std.testing.expectError(ztext.Error.OutOfMemory, face.decomposeOutline(glyph, .none, &funcs));
+    // Aborted before the first line/curve of the contour it never opened.
+    try std.testing.expectEqual(@as(u32, 0), collector.line_to_count);
+}
+
+test "decomposeOutline refuses an incomplete callback set" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('o');
+    var collector = OutlineCollector{};
+    var funcs = outlineFuncsInto(&collector);
+    funcs.close = null;
+
+    try std.testing.expectError(ztext.Error.InvalidArgument, face.decomposeOutline(glyph, .none, &funcs));
+}
+
+//=============================================================================
+// Synthetic bold and oblique
+//=============================================================================
+
+test "synthetic bold widens the ink and the advance, and rasterisation agrees" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+    const plain_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+
+    try face.setSyntheticBold(true);
+    const bold = try face.glyphExtents(glyph, .none);
+    const bold_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    try face.setSyntheticBold(false);
+
+    // The advance has to widen or bold text overlaps the next glyph.
+    try std.testing.expect(bold.x_advance > plain.x_advance);
+    // The ink widens too, and ztextFaceGlyphExtents and renderGlyph agree on
+    // it -- both flow through the same glyph-loading path.
+    try std.testing.expect(bold.x_max - bold.x_min > plain.x_max - plain.x_min);
+    try std.testing.expect(bold_bitmap.width >= plain_bitmap.width);
+
+    // Disabling it again is not a one-way trip.
+    const restored = try face.glyphExtents(glyph, .none);
+    try std.testing.expectEqual(plain.x_advance, restored.x_advance);
+}
+
+test "synthetic oblique shears the ink but leaves the advance alone" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const upright = try face.glyphExtents(glyph, .none);
+
+    try face.setSyntheticOblique(true);
+    const sheared = try face.glyphExtents(glyph, .none);
+    try face.setSyntheticOblique(false);
+
+    // A shear does not change how far the pen moves.
+    try std.testing.expectEqual(upright.x_advance, sheared.x_advance);
+    // But it does move the ink -- ztextFaceGlyphExtents has to recompute the
+    // bounds from the sheared outline rather than report the upright ones.
+    try std.testing.expect(sheared.x_min != upright.x_min or sheared.x_max != upright.x_max);
+}
+
+test "synthetic style reaches outline decomposition, not just render and extents" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+
+    var plain_collector = OutlineCollector{};
+    const plain_funcs = outlineFuncsInto(&plain_collector);
+    try face.decomposeOutline(glyph, .none, &plain_funcs);
+
+    try face.setSyntheticBold(true);
+    var bold_collector = OutlineCollector{};
+    const bold_funcs = outlineFuncsInto(&bold_collector);
+    try face.decomposeOutline(glyph, .none, &bold_funcs);
+    try face.setSyntheticBold(false);
+
+    const plain_width = plain_collector.max_x - plain_collector.min_x;
+    const bold_width = bold_collector.max_x - bold_collector.min_x;
+    try std.testing.expect(bold_width > plain_width);
 }
 
 //=============================================================================
@@ -2120,7 +2458,7 @@ test "every truncated prefix of a font fails cleanly or behaves" {
         _ = face.font.glyphIndex('a');
         _ = fixture.shaper.shape(face, "abc שלום", .{}) catch continue;
         for (fixture.shaper.glyphs()) |glyph| {
-            _ = face.renderGlyph(glyph.glyph_id, .a8, .normal) catch {};
+            _ = face.renderGlyph(glyph.glyph_id, .a8, .normal, 0, 0) catch {};
             _ = face.glyphExtents(glyph.glyph_id, .none) catch {};
         }
         _ = fixture.shaper.extents(face) catch {};
@@ -2157,7 +2495,7 @@ test "flipping bytes inside a real font never gets past the boundary" {
             _ = face.metrics() catch {};
             _ = fixture.shaper.shape(face, "שלום abc", .{}) catch continue;
             for (fixture.shaper.glyphs()) |glyph| {
-                if (face.renderGlyph(glyph.glyph_id, .a8, .normal)) |bitmap| {
+                if (face.renderGlyph(glyph.glyph_id, .a8, .normal, 0, 0)) |bitmap| {
                     // Whatever comes back must describe itself consistently:
                     // a bitmap claiming pixels must have them, and its rows
                     // must fit the buffer it points at.

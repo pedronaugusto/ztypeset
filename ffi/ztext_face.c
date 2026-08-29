@@ -589,6 +589,41 @@ ZtextResult ztextFaceMetrics(const ZtextFace* face, ZtextFaceMetrics* out) {
     out->underline_thickness = (float)ft->underline_thickness * scale;
   }
 
+  // FT_Size_Metrics has no vertical counterpart -- FreeType computes only the
+  // four horizontal fields above from `hhea`. `vhea`'s Ascender/Descender/
+  // Line_Gap extend along the SAME axis hhea's max_advance does (how far a
+  // column sits from its baseline), so they scale with x_scale; its
+  // advance_Height_Max extends along the axis hhea's ascender/descender do
+  // (how far one glyph's vertical advance can be), so it scales with y_scale
+  // -- the mirror image of how ft_recompute_scaled_metrics scales hhea.
+  const TT_VertHeader* vert = NULL;
+  if (FT_HAS_VERTICAL(ft)) {
+    vert = (const TT_VertHeader*)FT_Get_Sfnt_Table(ft, FT_SFNT_VHEA);
+  }
+  if (vert != NULL) {
+    out->vert_ascender =
+        (float)FT_MulFix(vert->Ascender, metrics->x_scale) / 64.0f;
+    out->vert_descender =
+        (float)FT_MulFix(vert->Descender, metrics->x_scale) / 64.0f;
+    const float line_gap =
+        (float)FT_MulFix(vert->Line_Gap, metrics->x_scale) / 64.0f;
+    out->vert_line_height = out->vert_ascender - out->vert_descender + line_gap;
+    out->vert_max_advance =
+        (float)FT_MulFix(vert->advance_Height_Max, metrics->y_scale) / 64.0f;
+    out->has_vertical_metrics = 1u;
+  } else {
+    // Synthesised from ascender and descender: the same span HarfBuzz's own
+    // vertical-advance fallback uses when a font has no vmtx
+    // (hb_ot_get_glyph_v_advances), so a shaped run's synthesised advances
+    // land in this range too.
+    const float span = out->ascender - out->descender;
+    out->vert_ascender = span / 2.0f;
+    out->vert_descender = -span / 2.0f;
+    out->vert_line_height = span;
+    out->vert_max_advance = span;
+    out->has_vertical_metrics = 0u;
+  }
+
   return ZTEXT_RESULT_OK;
 }
 

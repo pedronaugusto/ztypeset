@@ -229,19 +229,55 @@ pub const Face = struct {
         return out;
     }
 
+    /// Fakes a bold weight for a face with no bold of its own, at FreeType's
+    /// own reference strength. Applies to every glyph loaded through this
+    /// face from the next call on -- `glyphExtents` and `renderGlyph` always
+    /// agree on the same widened glyph, advance included, so bold text does
+    /// not overlap.
+    ///
+    /// Not reflected in shaping: HarfBuzz's own advance queries bypass this
+    /// face's glyph loading, so a shaped run's advances do not widen.
+    pub fn setSyntheticBold(self: Face, enabled: bool) err.Error!void {
+        try err.check(c.ztextFaceSetSyntheticBold(self.handle, @intFromBool(enabled)));
+    }
+
+    /// Fakes an italic by shearing the outline about 12 degrees, FreeType's
+    /// own reference slant. The advance is untouched, because a shear does
+    /// not change how far the pen moves. Same loading-time scope and the same
+    /// shaping caveat as `setSyntheticBold`.
+    pub fn setSyntheticOblique(self: Face, enabled: bool) err.Error!void {
+        try err.check(c.ztextFaceSetSyntheticOblique(self.handle, @intFromBool(enabled)));
+    }
+
     /// Rasterises one glyph.
     ///
     /// The pixels belong to this face and live until its next `renderGlyph`.
     /// Nothing else disturbs them -- not shaping, not measuring, not a call on
     /// a sibling face.
+    ///
+    /// `offset_x`/`offset_y` place the glyph at a fractional pixel offset, in
+    /// 26.6 fixed point -- the unit shaping advances already come back in --
+    /// so text laid out at a fractional x is not forced onto the pixel grid.
+    /// `0, 0` renders identically to a caller with no notion of subpixel
+    /// placement. Ignored in `.sdf` mode: see `ffi/ztext.h`.
     pub fn renderGlyph(
         self: Face,
         glyph_id: u32,
         mode: types.RenderMode,
         hinting: types.Hinting,
+        offset_x: i32,
+        offset_y: i32,
     ) err.Error!types.GlyphBitmap {
         var out: types.GlyphBitmap = undefined;
-        try err.check(c.ztextFaceRenderGlyph(self.handle, glyph_id, mode, hinting, &out));
+        try err.check(c.ztextFaceRenderGlyph(
+            self.handle,
+            glyph_id,
+            mode,
+            hinting,
+            offset_x,
+            offset_y,
+            &out,
+        ));
         return out;
     }
 
@@ -254,6 +290,22 @@ pub const Face = struct {
         var out: types.Extents = undefined;
         try err.check(c.ztextFaceGlyphExtents(self.handle, glyph_id, hinting, &out));
         return out;
+    }
+
+    /// Walks one glyph's outline through `funcs`, for a host that fills its
+    /// own shapes -- an offline SDF baker, a path-effect renderer -- rather
+    /// than sampling a bitmap. Points arrive in 26.6 fixed point.
+    ///
+    /// `funcs` is called synchronously and does not need to outlive the call.
+    /// A callback returning anything but `.ok` stops decomposition and that
+    /// result is what this returns.
+    pub fn decomposeOutline(
+        self: Face,
+        glyph_id: u32,
+        hinting: types.Hinting,
+        funcs: *const types.OutlineFuncs,
+    ) err.Error!void {
+        try err.check(c.ztextFaceDecomposeOutline(self.handle, glyph_id, hinting, funcs));
     }
 };
 
