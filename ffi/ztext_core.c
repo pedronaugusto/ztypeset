@@ -15,7 +15,7 @@
 static void* defaultAllocate(void* user, size_t size, size_t alignment) {
   (void)user;
   (void)alignment;
-  // malloc guarantees ZTEXT_DEFAULT_ALIGN and no more, which is why
+  // malloc guarantees ZTEXT_DEFAULT_ALIGN and no more, so
   // ztextAllocWith refuses anything stricter before reaching any allocator.
   return malloc(size);
 }
@@ -87,7 +87,7 @@ static size_t backingAlignment(size_t alignment) {
 /// Computed identically at allocate and free time. That works out because the
 /// rounded-up minimum is already a multiple of every alignment at or below it,
 /// so rounding to max(requested, alignof(header)) lands on the same value as
-/// rounding to `requested` -- which is why only the backing alignment needs
+/// rounding to `requested` -- so only the backing alignment needs
 /// storing.
 static size_t prefixSize(size_t alignment) {
   size_t minimum = sizeof(ZtextBlockHeader);

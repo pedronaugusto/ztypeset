@@ -487,7 +487,7 @@ ZtextFont* ztextFaceFont(const ZtextFace* face) {
 }
 
 /// Pixels to FreeType's 26.6, rounded to nearest. Returns 0 for anything
-/// out of range, including NaN -- which is why the comparisons are written
+/// out of range, including NaN -- so the comparisons are written
 /// positively rather than as negated bounds.
 static int32_t toFixed266(float pixels) {
   if (!(pixels > 0.0f) || !(pixels <= 16384.0f)) return 0;

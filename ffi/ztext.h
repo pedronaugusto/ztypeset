@@ -337,8 +337,8 @@ ZTEXT_API const char* ztextFontFamilyName(const ZtextFont* font);
 ZTEXT_API const char* ztextFontStyleName(const ZtextFont* font);
 
 /// Glyph index for a Unicode scalar in the font's character map, or 0
-/// (.notdef) if it has none. Note that shaping does its own mapping -- this is
-/// for callers checking coverage before choosing a fallback font.
+/// (.notdef) if it has none. Shaping does its own mapping; this is for callers
+/// checking coverage before choosing a fallback font.
 ZTEXT_API uint32_t ztextFontGlyphIndex(const ZtextFont* font,
                                        uint32_t codepoint);
 
@@ -1139,10 +1139,10 @@ ZTEXT_API ZtextResult ztextLibraryCountFaces(ZtextLibrary* library,
 // function arity and per-parameter sizes, and every enumerator by name rather
 // than only the last. What it cannot see is a header preprocessed differently
 // from the library it is linked against -- and that is exactly what
-// ztextAbiProbe covers, which is why both exist.
+// ztextAbiProbe covers, so both exist.
 //
 // A consumer without a comptime view of this header has only what is below,
-// which is the reason it is a public API rather than a test fixture. It is not
+// so it is a public API rather than a test fixture. It is not
 // grown field-by-field as the API grows; treat it as a self-check on the types
 // most likely to be mirrored, not as an exhaustive manifest.
 //

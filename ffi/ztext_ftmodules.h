@@ -10,7 +10,7 @@
  * checked against each other by the linker: a module named here whose sources
  * are not compiled is an undefined symbol, and a module compiled but not named
  * here is dead weight that FT_Add_Default_Modules never registers. Loud either
- * way, which is why the list is here and nowhere else.
+ * way, so the list is here and nowhere else.
  *
  * Dropped relative to upstream's default list, with reasons:
  *

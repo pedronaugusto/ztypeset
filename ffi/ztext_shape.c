@@ -132,7 +132,7 @@ static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
   hb_feature_t* out = (hb_feature_t*)shaper->features.data;
   for (size_t i = 0u; i < count; i++) {
     // Converted field by field rather than cast: the two structs happen to
-    // agree today, and nothing would tell us if that stopped being true.
+    // agree today, and nothing would report it if that stopped being true.
     out[i].tag = (hb_tag_t)features[i].tag;
     out[i].value = features[i].value;
     out[i].start = features[i].start;

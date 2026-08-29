@@ -72,7 +72,7 @@ void* ztextCalloc(size_t count, size_t size);
 /// Wires `library`'s FreeType memory record to ztext, capturing the allocator
 /// installed right now into `library->allocator`.
 ///
-/// The record must outlive the FT_Library built from it, which is why it lives
+/// The record must outlive the FT_Library built from it, so it lives
 /// inside the library rather than on a caller's stack.
 void ztextInitFtMemory(ZtextLibrary* library);
 
@@ -104,7 +104,7 @@ void ztextFaceActivate(const ZtextFace* face);
 /// fonts, both the OpenType one and the FreeType-backed one if it has been
 /// built. A no-op for a font with no axes.
 ///
-/// Called from three places, which is why it is shared rather than inlined:
+/// Called from three places, so it is shared rather than inlined:
 /// when the axes move, when a face is created after they moved, and when the
 /// FreeType-backed font is built lazily on the first shape that asks for it.
 /// Miss any one of them and that face shapes the default instance while

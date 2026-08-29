@@ -960,7 +960,7 @@ test "format characters never break a run" {
 //
 // The goldens below were measured against `fonts.variable` at `ppem`, not
 // predicted. Both of its axes default to an END of their range rather than to
-// the middle, which is why its style name is "Light".
+// the middle, so its style name is "Light".
 //=============================================================================
 
 /// The Hebrew word the variable-font tests shape, and the letter they
