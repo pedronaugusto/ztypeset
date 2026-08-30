@@ -131,6 +131,14 @@ void ztextFaceActivate(const ZtextFace* face);
 /// FreeType rasterises the chosen one.
 void ztextFaceApplyVariations(ZtextFace* face);
 
+/// Tells both of this face's HarfBuzz fonts what its synthetic bold and
+/// oblique are, so a shaped run's advances widen with the ink instead of
+/// staying at the unstyled font's widths.
+///
+/// Called by the setters and by whatever builds the FreeType-backed font,
+/// which comes into existence long after a style may have been set.
+void ztextFaceApplySynthetic(ZtextFace* face);
+
 /// Records an upstream's own description of a failure, for
 /// ztextLastErrorDetail. Never affects control flow.
 void ztextSetErrorDetail(const char* detail);
@@ -359,8 +367,13 @@ struct ZtextFace {
 
   /// Applied to every glyph this face loads; see ztextFaceSetSyntheticBold
   /// and ztextFaceSetSyntheticOblique.
-  bool synthetic_bold;
-  bool synthetic_oblique;
+  /// Synthetic bold as a fraction of the em, and synthetic oblique as a
+  /// shear factor; zero for off. Floats rather than flags because neither
+  /// upstream has one strength -- FreeType's ftsynth.c and HarfBuzz's
+  /// hb_font_set_synthetic_bold both take an amount, and the reference
+  /// amounts are only ZTEXT_SYNTHETIC_*_DEFAULT.
+  float synthetic_bold;
+  float synthetic_oblique;
 
   /// The last rasterised glyph, COPIED out of the font's shared glyph slot.
   ///

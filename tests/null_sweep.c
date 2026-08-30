@@ -190,8 +190,8 @@ int main(int argc, char** argv) {
   CHECK(bitmap.pixels == NULL, "a refused render wrote pixels");
   REFUSES_OUT(ztextFaceRenderGlyph(NULL, 1, ZTEXT_RENDER_MODE_A8,
                                    ZTEXT_HINTING_NORMAL, 0, 0, NULL));
-  REFUSES(ztextFaceSetSyntheticBold(NULL, 1));
-  REFUSES(ztextFaceSetSyntheticOblique(NULL, 1));
+  REFUSES(ztextFaceSetSyntheticBold(NULL, ZTEXT_SYNTHETIC_BOLD_DEFAULT));
+  REFUSES(ztextFaceSetSyntheticOblique(NULL, ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT));
 
   ZtextExtents extents;
   memset(&extents, 0, sizeof(extents));

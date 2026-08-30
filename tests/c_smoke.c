@@ -9,6 +9,7 @@
 // Usage: ztext-c-smoke <path-to-font.ttf>
 //===----------------------------------------------------------------------===//
 
+#include <math.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -993,27 +994,64 @@ int main(int argc, char** argv) {
   // Synthetic bold widens the advance; synthetic oblique moves the ink
   // without touching it. Reset each afterwards so nothing below inherits it.
   if (glyphs != NULL && glyph_count > 0) {
+    // Taken by value: the re-shape below replaces the shaper's glyph array,
+    // and this phase has to keep asking about the same glyph.
+    const uint32_t styled = glyphs[0].glyph_id;
     ZtextExtents plain;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id,
-                                   ZTEXT_HINTING_NONE, &plain));
+    CHECK_OK(ztextFaceGlyphExtents(face, styled, ZTEXT_HINTING_NONE, &plain));
 
-    CHECK_OK(ztextFaceSetSyntheticBold(face, 1));
+    CHECK_OK(ztextFaceSetSyntheticBold(face, ZTEXT_SYNTHETIC_BOLD_DEFAULT));
     ZtextExtents bold;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id,
-                                   ZTEXT_HINTING_NONE, &bold));
+    CHECK_OK(ztextFaceGlyphExtents(face, styled, ZTEXT_HINTING_NONE, &bold));
     CHECK(bold.x_advance > plain.x_advance,
           "synthetic bold should widen the advance");
-    CHECK_OK(ztextFaceSetSyntheticBold(face, 0));
+    CHECK_OK(ztextFaceSetSyntheticBold(face, 0.0f));
 
-    CHECK_OK(ztextFaceSetSyntheticOblique(face, 1));
+    // The half FreeType cannot reach: a shaped advance comes from HarfBuzz
+    // and never passes through this face's glyph loading.
+    ZtextShapeParams bold_params;
+    memset(&bold_params, 0, sizeof(bold_params));
+    bold_params.direction = ZTEXT_DIRECTION_LTR;
+    const char* bold_word = "HH";
+    CHECK_OK(ztextShaperShape(shaper, face, bold_word, strlen(bold_word),
+                              ZTEXT_ENCODING_UTF8, 0, strlen(bold_word),
+                              &bold_params));
+    float plain_run = 0.0f;
+    const ZtextGlyph* run_glyphs = ztextShaperGlyphs(shaper);
+    for (size_t i = 0; i < ztextShaperGlyphCount(shaper); i++) {
+      plain_run += run_glyphs[i].x_advance;
+    }
+    CHECK_OK(ztextFaceSetSyntheticBold(face, ZTEXT_SYNTHETIC_BOLD_DEFAULT));
+    CHECK_OK(ztextShaperShape(shaper, face, bold_word, strlen(bold_word),
+                              ZTEXT_ENCODING_UTF8, 0, strlen(bold_word),
+                              &bold_params));
+    float bold_run = 0.0f;
+    run_glyphs = ztextShaperGlyphs(shaper);
+    for (size_t i = 0; i < ztextShaperGlyphCount(shaper); i++) {
+      bold_run += run_glyphs[i].x_advance;
+    }
+    CHECK_OK(ztextFaceSetSyntheticBold(face, 0.0f));
+    CHECK(bold_run > plain_run,
+          "synthetic bold should widen a SHAPED run's advances too");
+
+    // A strength that is not a number is refused rather than cast.
+    CHECK(ztextFaceSetSyntheticBold(face, (float)INFINITY) ==
+              ZTEXT_RESULT_INVALID_ARGUMENT,
+          "an infinite strength should be refused");
+    CHECK(ztextFaceSetSyntheticOblique(face, (float)NAN) ==
+              ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a slant that is not a number should be refused");
+
+    CHECK_OK(
+        ztextFaceSetSyntheticOblique(face, ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT));
     ZtextExtents sheared;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id,
-                                   ZTEXT_HINTING_NONE, &sheared));
+    CHECK_OK(ztextFaceGlyphExtents(face, styled, ZTEXT_HINTING_NONE,
+                                   &sheared));
     CHECK(sheared.x_advance == plain.x_advance,
           "a shear should not change the advance");
     CHECK(sheared.x_max != plain.x_max || sheared.x_min != plain.x_min,
           "a shear should move the ink");
-    CHECK_OK(ztextFaceSetSyntheticOblique(face, 0));
+    CHECK_OK(ztextFaceSetSyntheticOblique(face, 0.0f));
   }
 
   phase("bidi");

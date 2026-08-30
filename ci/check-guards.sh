@@ -372,6 +372,84 @@ case_ "the language the autohinter interns, left cold" \
   "  (void)hb_language_get_default();" \
   ""
 
+printf '\n%sSynthetic styles%s %s(two upstreams, one weight)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# A synthetic style has to reach BOTH upstreams or the picture disagrees with
+# itself: FreeType widens the ink, HarfBuzz widens the advance, and a run laid
+# out with one and not the other overlaps its own glyphs. Every case here is a
+# way for exactly half of that to happen -- no crash, no error, just text that
+# is a little too tight.
+
+# The setter widens the ink and forgets to tell HarfBuzz. This is the defect
+# the API used to document as a limitation.
+case_ "a style applied to the ink and not to the shaping" \
+  ffi/ztext_raster.c \
+  "widens a shaped run's advances" \
+  "  face->generation = ztextNextGeneration();
+  ztextFaceApplySynthetic(face);
+  return ZTEXT_RESULT_OK;
+}
+
+ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {" \
+  "  face->generation = ztextNextGeneration();
+  return ZTEXT_RESULT_OK;
+}
+
+ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {"
+
+# HarfBuzz's in-place mode is font GRADING: the ink thickens and the advance
+# does not move. It is a real effect with a real name, and it is not this one.
+case_ "emboldening asked for in place, so the advance never moves" \
+  ffi/ztext_face.c \
+  "widens a shaped run's advances" \
+  "  hb_font_set_synthetic_bold(face->hb_font, face->synthetic_bold,
+                             face->synthetic_bold, false);" \
+  "  hb_font_set_synthetic_bold(face->hb_font, face->synthetic_bold,
+                             face->synthetic_bold, true);"
+
+# The FreeType-backed HarfBuzz font is built lazily, on the first shape that
+# asks for FreeType metrics -- which can be long after the style was set. Drop
+# the hand-over and one of the two metric sources silently keeps the unstyled
+# widths while the other does not.
+case_ "the lazily built font never told what style it was born into" \
+  ffi/ztext_shape.c \
+  "before the FreeType metrics font exists" \
+  "  face->hb_ft_font = font;
+  // The style may have been set long before this font existed.
+  ztextFaceApplySynthetic(face);" \
+  "  face->hb_ft_font = font;"
+
+# Shaped advances move with the strength now, so a run shaped before the
+# change is as stale as one shaped before a resize. Without the bump,
+# ztextShaperExtents mixes ink from one weight with advances from another.
+case_ "a restyled face that still passes for the one a run was shaped against" \
+  ffi/ztext_raster.c \
+  "ages a run shaped before it" \
+  "  face->synthetic_bold = strength;
+  // Shaped advances move with this now, so a run measured against this face
+  // before the change is as stale as one measured before a resize.
+  face->generation = ztextNextGeneration();" \
+  "  face->synthetic_bold = strength;"
+
+# The strength is a number the caller chooses, not a flag with one value.
+# Quantise it back to the reference weight and every call still succeeds --
+# a display face asked for three times the weight simply does not get it.
+case_ "a strength quantised back to the one weight upstream ships" \
+  ffi/ztext_raster.c \
+  "is a strength the caller chooses" \
+  "  const double scaled = (double)ppem * 64.0 * (double)strength;" \
+  "  const double reference = strength == 0.0f ? 0.0 : (strength > 0.0f ? 0.041656494 : -0.041656494);
+  const double scaled = (double)ppem * 64.0 * reference;"
+
+# A NaN reaches FreeType's fixed-point conversion as an undefined cast and
+# HarfBuzz's roundf as a NaN advance; neither reports anything.
+case_ "a strength that is not a number, taken at face value" \
+  ffi/ztext_raster.c \
+  "is not a number is refused" \
+  "  if (face == NULL || !isFiniteStrength(strength)) {" \
+  "  if (face == NULL) {"
+
 printf '\n%sEncodings%s %s(three upstreams, three seams)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

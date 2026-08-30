@@ -31,26 +31,35 @@ static FT_Int32 loadFlags(ZtextHinting hinting, ZtextRenderMode mode) {
   }
 }
 
-// FT_GlyphSlot_Embolden's and FT_GlyphSlot_Oblique's own reference strengths
-// (ftsynth.c). That module is documented by FreeType itself as "a code
-// resource... copied into the application", not a stable API, so ztext keeps
-// only the outline-format arithmetic it actually reaches -- every glyph here
-// loads with FT_LOAD_NO_BITMAP, so the bitmap-format branch ftsynth.c also
-// carries never applies.
-#define ZTEXT_EMBOLDEN_DELTA 0x0AAA
-#define ZTEXT_OBLIQUE_SLANT 0x0366A
+/// A strength that is a fraction of the em, in 26.6 pixels at `ppem`.
+///
+/// This is FreeType's own arithmetic with the constant taken out: ftsynth.c
+/// computes `ppem * 0x0AAA / 1024`, and 0x0AAA / 65536 is exactly
+/// ZTEXT_SYNTHETIC_BOLD_DEFAULT, so the default strength reproduces it to the
+/// unit. It is also HarfBuzz's, which rounds `|scale| * embolden` with scale
+/// already 26.6 -- one number, three places that need it.
+static FT_Pos scaledStrength(uint32_t ppem, float strength) {
+  const double scaled = (double)ppem * 64.0 * (double)strength;
+  return (FT_Pos)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
+}
 
 /// Widens and/or shears the just-loaded glyph in place, so every caller that
 /// loads through this face -- render, extents, outline decomposition -- sees
 /// the same synthesised shape.
+///
+/// The advances a SHAPED run reports do not come through here at all; they
+/// come from HarfBuzz, which is told the same two numbers by
+/// ztextFaceApplySynthetic and applies them with the same arithmetic.
 static void applySyntheticStyle(const ZtextFace* face, FT_GlyphSlot slot) {
   if (slot->format != FT_GLYPH_FORMAT_OUTLINE) return;
-  if (!face->synthetic_bold && !face->synthetic_oblique) return;
+  if (face->synthetic_bold == 0.0f && face->synthetic_oblique == 0.0f) return;
 
-  if (face->synthetic_bold) {
+  if (face->synthetic_bold != 0.0f) {
     const FT_Size_Metrics* metrics = &face->font->ft->size->metrics;
-    const FT_Pos xstr = (FT_Pos)metrics->x_ppem * ZTEXT_EMBOLDEN_DELTA / 1024;
-    const FT_Pos ystr = (FT_Pos)metrics->y_ppem * ZTEXT_EMBOLDEN_DELTA / 1024;
+    const FT_Pos xstr =
+        scaledStrength((uint32_t)metrics->x_ppem, face->synthetic_bold);
+    const FT_Pos ystr =
+        scaledStrength((uint32_t)metrics->y_ppem, face->synthetic_bold);
     FT_Outline_EmboldenXY(&slot->outline, xstr, ystr);
 
     // FT_Outline_EmboldenXY moves the outline only; the advance has to widen
@@ -61,13 +70,14 @@ static void applySyntheticStyle(const ZtextFace* face, FT_GlyphSlot slot) {
     slot->metrics.vertAdvance += ystr;
   }
 
-  if (face->synthetic_oblique) {
+  if (face->synthetic_oblique != 0.0f) {
     // A shear, not a rotation: the advance is untouched, because slanting
     // does not change how far the pen moves.
     FT_Matrix transform;
     transform.xx = 0x10000L;
     transform.yx = 0;
-    transform.xy = ZTEXT_OBLIQUE_SLANT;
+    transform.xy = (FT_Fixed)((double)face->synthetic_oblique * 65536.0 +
+                              (face->synthetic_oblique >= 0.0f ? 0.5 : -0.5));
     transform.yy = 0x10000L;
     FT_Outline_Transform(&slot->outline, &transform);
   }
@@ -104,15 +114,36 @@ static ZtextResult loadGlyph(ZtextFace* face, uint32_t glyph_id,
   return ZTEXT_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face, int enabled) {
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  face->synthetic_bold = enabled != 0;
+/// A strength has to be a number. NaN compares false with itself, which is
+/// how it is caught without <math.h>, and an infinity would reach FreeType's
+/// fixed-point conversion as an undefined cast.
+static bool isFiniteStrength(float value) {
+  return value == value && value > -1.0e30f && value < 1.0e30f;
+}
+
+ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face, float strength) {
+  if (face == NULL || !isFiniteStrength(strength)) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  if (face->synthetic_bold == strength) return ZTEXT_RESULT_OK;
+  face->synthetic_bold = strength;
+  // Shaped advances move with this now, so a run measured against this face
+  // before the change is as stale as one measured before a resize.
+  face->generation = ztextNextGeneration();
+  ztextFaceApplySynthetic(face);
   return ZTEXT_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, int enabled) {
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  face->synthetic_oblique = enabled != 0;
+ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {
+  if (face == NULL || !isFiniteStrength(slant)) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  if (face->synthetic_oblique == slant) return ZTEXT_RESULT_OK;
+  face->synthetic_oblique = slant;
+  // A shear moves the ink and not the advance, but ztextShaperExtents reads
+  // ink, so the same staleness applies.
+  face->generation = ztextNextGeneration();
+  ztextFaceApplySynthetic(face);
   return ZTEXT_RESULT_OK;
 }
 

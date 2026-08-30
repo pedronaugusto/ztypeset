@@ -95,6 +95,11 @@ pub const Direction = enum(c_int) {
 /// The values a break entry holds. Byte-sized, because they live in an array
 /// of one byte per text byte; `types.Break` is the enum a caller reads them
 /// through. Declared here so the ABI cross-check pairs each with its macro.
+/// FreeType's and HarfBuzz's own reference synthetic styles; see
+/// `ffi/ztext.h`. Fractions of the em, not pixels.
+pub const synthetic_bold_default: f32 = 0.041656494;
+pub const synthetic_oblique_default: f32 = 0.212554932;
+
 pub const break_none: u8 = 0;
 pub const break_allowed: u8 = 1;
 pub const break_mandatory: u8 = 2;
@@ -483,8 +488,8 @@ pub extern fn ztextFaceMetricWithFallback(
     metric: Metric,
     out: *f32,
 ) Result;
-pub extern fn ztextFaceSetSyntheticBold(face: *Face, enabled: c_int) Result;
-pub extern fn ztextFaceSetSyntheticOblique(face: *Face, enabled: c_int) Result;
+pub extern fn ztextFaceSetSyntheticBold(face: *Face, strength: f32) Result;
+pub extern fn ztextFaceSetSyntheticOblique(face: *Face, slant: f32) Result;
 pub extern fn ztextFaceRenderGlyph(
     face: *Face,
     glyph_id: u32,

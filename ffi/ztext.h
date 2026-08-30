@@ -1447,22 +1447,45 @@ typedef enum ZtextHinting {
   ZTEXT_HINTING_NONE = 2,
 } ZtextHinting;
 
+/// FreeType's own reference emboldening: 0x0AAA/65536 of the em, which is
+/// what FT_GlyphSlot_Embolden applies. HarfBuzz documents 0.01 to 0.05 as the
+/// useful range for the same quantity, and this sits inside it.
+#define ZTEXT_SYNTHETIC_BOLD_DEFAULT 0.041656494f
+/// FreeType's own reference slant: 0x0366A/65536, a shear of about 12
+/// degrees, which is what FT_GlyphSlot_Oblique applies.
+#define ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT 0.212554932f
+
 /// Fakes a bold or an italic on a face that has neither of its own, the way a
-/// production stack does. Both apply at glyph LOADING, so
-/// ztextFaceGlyphExtents and ztextFaceRenderGlyph always agree on the same
-/// widened, sheared glyph -- but not shaping: HarfBuzz's own advance queries
-/// bypass this face's glyph loading, so a shaped run's advances do not widen.
+/// production stack does.
 ///
-/// Emboldening widens the glyph, and its advance is widened by the same
-/// amount so bold text does not overlap; a shear leaves the advance alone,
-/// because slanting does not change how far the pen moves.
+/// `strength` is a fraction of the EM, not a pixel count, so it holds across
+/// sizes: 0 is off, ZTEXT_SYNTHETIC_BOLD_DEFAULT is what FreeType and
+/// HarfBuzz both use, and a negative value thins instead of thickens. `slant`
+/// is a shear factor -- the tangent of the angle -- with
+/// ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT the reference italic. Neither is clamped:
+/// a display face at twice the reference weight is a legitimate thing to ask
+/// for, and only the caller knows what its text is for.
 ///
-/// `enabled` is 0 or 1. Applies to every glyph loaded through this face from
-/// the next call on; already-rendered bitmaps and already-taken extents are
-/// unaffected.
-ZTEXT_API ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face, int enabled);
+/// Both reach every reader of this face. FreeType applies them at glyph
+/// LOADING, so ztextFaceGlyphExtents, ztextFaceRenderGlyph and
+/// ztextFaceDecomposeOutline agree on one widened, sheared glyph; and
+/// HarfBuzz is told the same two numbers, so a SHAPED run's advances widen
+/// by the same fraction of the em rather than staying at the unstyled font's
+/// widths. A shaped run laid out with unwidened advances overlaps its own
+/// ink, one glyph at a time, and gets worse the bolder it is.
+///
+/// Emboldening widens the glyph and its advance together; a shear leaves the
+/// advance alone, because slanting does not change how far the pen moves.
+///
+/// Applies from the next call on: already-rendered bitmaps and already-taken
+/// extents are unaffected, and the face's generation moves, so extents taken
+/// for a run shaped before the change are refused rather than mixed.
+///
+/// A strength that is not a finite number is ZTEXT_RESULT_INVALID_ARGUMENT.
+ZTEXT_API ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face,
+                                                float strength);
 ZTEXT_API ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face,
-                                                   int enabled);
+                                                   float slant);
 
 /// Callbacks for ztextFaceDecomposeOutline, one per outline command. Points
 /// are in 26.6 fixed point, at this face's current size. Modelled on

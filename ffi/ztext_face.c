@@ -845,6 +845,26 @@ void ztextFaceApplyVariations(ZtextFace* face) {
   }
 }
 
+void ztextFaceApplySynthetic(ZtextFace* face) {
+  // in_place = false is what makes the advance widen with the outline, which
+  // is the whole point: HarfBuzz's own comment calls the in-place mode font
+  // GRADING -- ink without width -- and that is a different effect.
+  //
+  // ztext does not draw glyphs through HarfBuzz, so the outline half of this
+  // never runs; FreeType's FT_Outline_EmboldenXY does that, with the same
+  // fraction of the em. What HarfBuzz is needed for is the half FreeType
+  // cannot reach, because a shaped advance never passes through ztext's glyph
+  // loading at all.
+  hb_font_set_synthetic_bold(face->hb_font, face->synthetic_bold,
+                             face->synthetic_bold, false);
+  hb_font_set_synthetic_slant(face->hb_font, face->synthetic_oblique);
+  if (face->hb_ft_font != NULL) {
+    hb_font_set_synthetic_bold(face->hb_ft_font, face->synthetic_bold,
+                               face->synthetic_bold, false);
+    hb_font_set_synthetic_slant(face->hb_ft_font, face->synthetic_oblique);
+  }
+}
+
 uint32_t ztextFontAxisCount(const ZtextFont* font) {
   if (font == NULL || font->mm == NULL) return 0u;
   return (uint32_t)font->mm->num_axis;

@@ -147,6 +147,29 @@ says.
 
 ### Changed
 
+- **Synthetic bold and oblique are amounts, not switches, and they reach
+  shaping.** `ztextFaceSetSyntheticBold(face, float strength)` and
+  `ztextFaceSetSyntheticOblique(face, float slant)` replace the `int enabled`
+  pair; `ZTEXT_SYNTHETIC_BOLD_DEFAULT` (0.041656494, FreeType's own
+  `0x0AAA/65536`) and `ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT` (0.212554932, its
+  `0x0366A/65536`) are the reference weights, exported to Zig as
+  `ztext.synthetic_bold_default` and `ztext.synthetic_oblique_default`.
+  Nothing is clamped, and a strength that is not finite is
+  `ZTEXT_RESULT_INVALID_ARGUMENT`.
+
+  The strength used to be two `#define`s no caller could reach, and it used to
+  apply at FreeType's glyph loading only — the header said so, which made a
+  documented limitation of the defect: a SHAPED run's advances come from
+  HarfBuzz and never pass through glyph loading, so bold text was laid out at
+  the unstyled font's widths and overlapped its own ink, one glyph at a time.
+  Both HarfBuzz fonts a face owns are now told the same two numbers
+  (`hb_font_set_synthetic_bold` with `in_place = false`, and
+  `hb_font_set_synthetic_slant`), including the FreeType-backed one, which is
+  built lazily and can come into existence long after a style was set.
+  HarfBuzz's advance arithmetic is FreeType's — `round(|scale| * embolden)`
+  against `ppem * 0x0AAA / 1024` — so one fraction of the em drives both.
+  Setting either style moves the face's generation, so extents for a run
+  shaped before the change are refused rather than mixed.
 - **`Paragraph.init` takes an options struct**: `init(text, .{})` where it
   used to be `init(text, .auto)`, with `.base` and `.segmentation` in it.
 - **`ztextParagraphNextGrapheme` and `ztextParagraphPreviousGrapheme` return

@@ -333,6 +333,24 @@ fn sweepOurs() Counts {
                 continue;
             }
 
+            // ---- float constants -------------------------------------------
+            if (@typeInfo(Decl) == .float or @typeInfo(Decl) == .comptime_float) {
+                const cname = constCName(d.name);
+                const what = "constant " ++ d.name;
+                _ = theirDecl(cname, what);
+                const ours_val: f64 = @field(c, d.name);
+                const theirs_val: f64 = @field(h, cname);
+                // Exact, not approximate: both sides are the same decimal
+                // literal, so anything else is a typo in one of them.
+                if (ours_val != theirs_val) {
+                    fail(what ++ " is " ++ std.fmt.comptimePrint("{d}", .{ours_val}) ++
+                        " in src/c.zig but " ++ cname ++ " is " ++
+                        std.fmt.comptimePrint("{d}", .{theirs_val}) ++ " in ffi/ztext.h");
+                }
+                n.constants += 1;
+                continue;
+            }
+
             // ---- constants -------------------------------------------------
             if (@typeInfo(Decl) == .int or @typeInfo(Decl) == .comptime_int or
                 @typeInfo(Decl) == .@"enum")

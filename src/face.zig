@@ -355,24 +355,31 @@ pub const Face = struct {
         return out;
     }
 
-    /// Fakes a bold weight for a face with no bold of its own, at FreeType's
-    /// own reference strength. Applies to every glyph loaded through this
-    /// face from the next call on -- `glyphExtents` and `renderGlyph` always
-    /// agree on the same widened glyph, advance included, so bold text does
-    /// not overlap.
+    /// Fakes a bold weight for a face with no bold of its own.
     ///
-    /// Not reflected in shaping: HarfBuzz's own advance queries bypass this
-    /// face's glyph loading, so a shaped run's advances do not widen.
-    pub fn setSyntheticBold(self: Face, enabled: bool) err.Error!void {
-        try err.check(c.ztextFaceSetSyntheticBold(self.handle, @intFromBool(enabled)));
+    /// `strength` is a fraction of the EM rather than a pixel count, so it
+    /// holds across sizes: 0 is off, `synthetic_bold_default` is what
+    /// FreeType and HarfBuzz both use, and a negative value thins. Nothing is
+    /// clamped -- a display face at twice the reference weight is a
+    /// legitimate thing to ask for.
+    ///
+    /// Reaches every reader of this face, shaping included: `glyphExtents`,
+    /// `renderGlyph` and `decomposeOutline` see one widened glyph, and a
+    /// shaped run's advances widen by the same fraction, so bold text does
+    /// not overlap its own ink. Applies from the next call on, and moves the
+    /// face's generation, so extents for a run shaped before the change are
+    /// refused rather than mixed.
+    pub fn setSyntheticBold(self: Face, strength: f32) err.Error!void {
+        try err.check(c.ztextFaceSetSyntheticBold(self.handle, strength));
     }
 
-    /// Fakes an italic by shearing the outline about 12 degrees, FreeType's
-    /// own reference slant. The advance is untouched, because a shear does
-    /// not change how far the pen moves. Same loading-time scope and the same
-    /// shaping caveat as `setSyntheticBold`.
-    pub fn setSyntheticOblique(self: Face, enabled: bool) err.Error!void {
-        try err.check(c.ztextFaceSetSyntheticOblique(self.handle, @intFromBool(enabled)));
+    /// Fakes an italic by shearing the outline. `slant` is the tangent of the
+    /// angle -- `synthetic_oblique_default` is FreeType's own reference, about
+    /// 12 degrees -- and 0 is off. The advance is untouched, because a shear
+    /// does not change how far the pen moves; the ink is not, so this moves
+    /// the face's generation too. Same scope as `setSyntheticBold`.
+    pub fn setSyntheticOblique(self: Face, slant: f32) err.Error!void {
+        try err.check(c.ztextFaceSetSyntheticOblique(self.handle, slant));
     }
 
     /// Rasterises one glyph.
