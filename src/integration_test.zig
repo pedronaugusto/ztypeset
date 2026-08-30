@@ -3375,3 +3375,124 @@ test "a variation sequence names its own glyph, the base glyph, or none" {
     // The base character on its own is unaffected by any of it.
     try std.testing.expectEqual(plain.glyphIndex(alef), font.glyphIndex(alef));
 }
+
+test "golden: the autohinter's coverage comes from GSUB, not the cmap alone" {
+    // FreeType gives every glyph a STYLE -- a script, a width, a hinting mode
+    // -- and the style is what picks the blue zones the autohinter snaps
+    // outlines to. There are two ways to decide which glyph belongs to which
+    // script, and they do not cover the same glyphs:
+    //
+    //   * the character map, which reaches only the glyphs some character
+    //     names;
+    //   * GSUB, which also reaches the glyphs those characters SUBSTITUTE to.
+    //
+    // The second set is what shaping produces and the first does not contain:
+    // an Arabic medial form, a ligature, an Indic conjunct. Through the
+    // character map alone each of those falls into a styleless default with no
+    // blue zones, so the glyphs a text renderer actually draws are the ones
+    // hinted worst. ffi/ztext_ftoption.h defines FT_CONFIG_OPTION_USE_HARFBUZZ
+    // so that it is the second, and this test is what holds that macro down.
+    //
+    // It matters at `light` in particular, which is the autohinter and nothing
+    // else for a TrueType face: FT_LOAD_TARGET_LIGHT falls through to the
+    // autohinter unless the driver hints lightly itself, and FreeType's CFF
+    // driver is the only one that says it does.
+    //
+    // WHY A WHOLE-FONT SWEEP AND NOT A GLYPH. The first version of this test
+    // pinned two rasters: a glyph only shaping can reach, and the isolated
+    // form of U+0628. Both are byte-identical with the macro on and off, and
+    // the mutation harness duly reported the guard as a hole. What the macro
+    // moves is a scattered minority of each font -- so the golden has to be
+    // the sweep the differential was measured in. Every one of the three
+    // digests below, and every ink total, differs between the two arms.
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const expected = .{
+        .{ "arabic", fonts.arabic, LightSweep{
+            .glyphs = 1415,
+            .refused = 2,
+            .first_refused = 262,
+            .digest = 0x164ded98f21af7e1,
+            .ink = 5415653,
+        } },
+        .{ "hebrew", fonts.hebrew, LightSweep{
+            .glyphs = 151,
+            .refused = 0,
+            .first_refused = 0,
+            .digest = 0x9bdaf335a5a9b362,
+            .ink = 342784,
+        } },
+        .{ "latin", fonts.latin, LightSweep{
+            .glyphs = 3884,
+            .refused = 0,
+            .first_refused = 0,
+            .digest = 0xda4e410f0897e11a,
+            .ink = 17511770,
+        } },
+    };
+
+    inline for (expected) |entry| {
+        const face = try fixture.faceAt(entry[1], 12.0);
+        defer face.deinit();
+        try std.testing.expectEqual(entry[2], try lightSweep(face));
+    }
+}
+
+/// Every glyph of a face rendered with `light` hinting, reduced to numbers a
+/// golden can hold.
+///
+/// `ink` is carried beside `digest` because a digest can only ever say that
+/// something moved. Two ink totals are a direction and a magnitude, which is
+/// most of what a reader of a failing golden wants.
+const LightSweep = struct {
+    glyphs: u32,
+    /// Glyphs FreeType's rasteriser declines outright. Pinned rather than
+    /// tolerated: a refusal appearing or disappearing is a change in what this
+    /// package can draw, and it should not be able to hide inside a digest.
+    refused: u32,
+    /// The lowest id of them, for a reader; the rest are held by `digest`,
+    /// which every glyph contributes to in id order -- a refusal included.
+    first_refused: u32,
+    digest: u64,
+    ink: u64,
+};
+
+fn lightSweep(face: ztext.Face) !LightSweep {
+    const metrics = try face.metrics();
+    var sweep = LightSweep{
+        .glyphs = metrics.num_glyphs,
+        .refused = 0,
+        .first_refused = 0,
+        .digest = 0,
+        .ink = 0,
+    };
+    var hasher = std.hash.Wyhash.init(0);
+    var glyph: u32 = 1;
+    while (glyph < metrics.num_glyphs) : (glyph += 1) {
+        const bitmap = face.renderGlyph(glyph, .a8, .light, 0, 0) catch |failure| {
+            // One kind of refusal, and it comes from FreeType's rasteriser
+            // rather than from ztext. Asserted so that a NEW failure mode
+            // cannot be absorbed by the count.
+            try std.testing.expectEqual(ztext.Error.RenderFailed, failure);
+            if (sweep.refused == 0) sweep.first_refused = glyph;
+            sweep.refused += 1;
+            hasher.update("refused");
+            continue;
+        };
+        hasher.update(std.mem.asBytes(&bitmap.width));
+        hasher.update(std.mem.asBytes(&bitmap.height));
+        hasher.update(std.mem.asBytes(&bitmap.left));
+        hasher.update(std.mem.asBytes(&bitmap.top));
+        const rows = ztext.bitmapRows(bitmap) orelse continue;
+        const pitch: usize = @intCast(bitmap.pitch);
+        var row: usize = 0;
+        while (row < bitmap.height) : (row += 1) {
+            const line = rows[row * pitch ..][0..bitmap.width];
+            hasher.update(line);
+            for (line) |byte| sweep.ink += byte;
+        }
+    }
+    sweep.digest = hasher.final();
+    return sweep;
+}

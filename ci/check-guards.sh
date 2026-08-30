@@ -295,6 +295,34 @@ case_ "a pixel size rounded to whole pixels" \
   "  return (int32_t)(pixels * 64.0f + 0.5f);" \
   "  return (int32_t)(pixels + 0.5f) * 64;"
 
+printf '\n%sHinting%s %s(ffi/ztext_ftoption.h, and the warm-up it needs)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# The autohinter's coverage comes from GSUB only because ztext_ftoption.h says
+# so. Take the macro away and FreeType falls back to
+# af_shaper_get_coverage_nohb, which can only walk the character map: every
+# glyph shaping produces loses its script and is hinted against no blue zones
+# at all. Nothing fails to compile, nothing errors, and the picture changes --
+# which is why a golden is the only thing that can hold it.
+case_ "the autohinter's coverage taken from the cmap alone" \
+  ffi/ztext_ftoption.h \
+  "the autohinter's coverage comes from GSUB" \
+  "#ifndef FT_CONFIG_OPTION_USE_HARFBUZZ
+#define FT_CONFIG_OPTION_USE_HARFBUZZ
+#endif
+" \
+  ""
+
+# And the allocation that coverage pass makes. hb_language_get_default is
+# reached by hinting and by nothing else here, so warm-up is the only thing
+# that keeps it off a host's tracking allocator. The C smoke test hints with
+# the autohinter for exactly this reason, and then counts.
+case_ "the language the autohinter interns, left cold" \
+  ffi/ztext_shape.c \
+  "blocks leaked" \
+  "  (void)hb_language_get_default();" \
+  ""
+
 printf '\n%sShaping%s %s(ffi/ztext_shape.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 
 case_ "a run shaped without the text around it" \
@@ -530,6 +558,16 @@ case_ "a licence row deleted rather than rechecked" \
   '| `libs/harfbuzz/src/ms-use/COPYING` | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
 ' \
   ''
+
+# LICENSES.md's "Reaches your binary?" answer for FreeType's autofit-HarfBuzz
+# files is decided by one macro in ffi/ztext_ftoption.h. Flip the cell and the
+# page tells a consumer they ship one licence fewer than they do; nothing in
+# the suite, and nothing in the digest check above, can see it.
+case_ "a licence row that no longer matches the build" \
+  LICENSES.md \
+  "LICENSES.md ft-hb row" \
+  '| "Old MIT", taken from HarfBuzz | **Yes.**' \
+  '| "Old MIT", taken from HarfBuzz | No.'
 
 printf '\n%sInstalled headers%s %s(ci/header-link.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"

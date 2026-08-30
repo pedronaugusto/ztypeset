@@ -82,6 +82,21 @@ move independently of this number.
   caller never meets UTF-16BE.
 - `ztextFontVariantGlyphIndex`: a base character plus a variation selector,
   through cmap format 14. Nonzero exactly when the font draws that exact pair.
+- The autohinter takes its glyph coverage from **GSUB**, not from the
+  character map alone (`FT_CONFIG_OPTION_USE_HARFBUZZ`). A glyph that only
+  shaping produces — an Arabic contextual form, a ligature, an Indic conjunct
+  — is reachable from no character, so without this it was hinted against no
+  script's blue zones; `light` hinting is the autohinter and nothing else for
+  a TrueType face. This changes the pixels of every light-hinted glyph. No new
+  dependency: HarfBuzz was already linked, and FreeType declares what it needs
+  itself rather than including a HarfBuzz header. Held by a whole-font golden
+  — every glyph of three fixtures at `light`, as a digest, an ink total and a
+  refusal count — because single-glyph rasters were measured not to move.
+- `ztextWarmup` touches a fifth process-lifetime HarfBuzz singleton: the
+  default language, interned by the buffer the autohinter's coverage pass
+  guesses the properties of. It is reached by hinting, not by shaping, so a
+  host that audits its heap and never called it would have seen two permanent
+  allocations appear at the first hinted glyph.
 - Zig: `ztext.Metric`, `Face.metric`, `Face.metricWithFallback`,
   `Font.variantGlyphIndex`, `Font.namedInstanceCount`,
   `Font.namedInstanceCoords`, `Font.namedInstanceName`,

@@ -893,6 +893,22 @@ int main(int argc, char** argv) {
     CHECK(field.format == ZTEXT_BITMAP_FORMAT_SDF,
           "an SDF render should report SDF, got %d", (int)field.format);
 
+    // Light hinting, which is the AUTOHINTER and nothing else for a
+    // TrueType face: FT_LOAD_TARGET_LIGHT falls through to it unless the
+    // driver hints lightly itself, and only FreeType's CFF driver does. It
+    // belongs in this function specifically because this function is the one
+    // that counts every byte in and out: the autohinter's coverage pass builds
+    // a HarfBuzz buffer and interns the host locale's language tag, which is a
+    // process-lifetime allocation like the other four ztextWarmup touches.
+    // Without a light render here, that byte count never met the path that
+    // makes it.
+    ZtextGlyphBitmap hinted;
+    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_LIGHT, 0,
+                                  0, &hinted));
+    CHECK(hinted.width > 0 && hinted.height > 0,
+          "a light-hinted letter should rasterise to a non-empty bitmap");
+
     // Subpixel offset: a half-pixel shift must not crash and must still
     // rasterise to ink, exercising ztextFaceRenderGlyph's new parameters from
     // C directly rather than only through the Zig wrapper.
