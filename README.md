@@ -305,19 +305,34 @@ upstreams split the same way (`hb_face_t`/`hb_font_t`, `FT_Face`/`FT_Size`).
 Collapsing them into one handle is tempting and costs more than it looks: four
 sizes would mean four full parses.
 
-Measured, on Noto Sans, with the committed `zig build bench`:
+Both rows below come from `zig build bench -Doptimize=ReleaseFast
+-Dsanitize_c=false`, which builds four sizes over one shared `Font` and then
+four independent `Font`s at the same four sizes — the second being exactly the
+handle a collapsed design gives you. Everything is shaped and rasterised with
+before it is measured, on the same schedule in both arms, because a handle that
+has never been used has not built its table accelerators, scaled state or glyph
+buffers yet and measuring it would flatter the design.
+
+Noto Sans, x86_64-windows-gnu:
 
 | | Per additional size | Four sizes |
 |---|---|---|
-| One handle carrying its own size | 47 354 B | 189 419 B |
-| Font shared, faces per size | **26 901 B** | **128 714 B** |
+| One handle carrying its own size | 34 703 B | 138 459 B |
+| Font shared, faces per size | **15 333 B** | **80 350 B** |
 
-That is 43% off a size — worth having, but not "most of it", and the honest
-breakdown matters: HarfBuzz's per-size cost is **296 bytes** against ~14 KB for the
-`hb_face_t` and the OpenType tables it loads lazily, so sharing the face is
-nearly all of the HarfBuzz saving; FreeType's `FT_Size` still costs ~26 KB of
-the ~31 KB an `FT_Face` does, because the interpreter state and scaled tables
-are per size whatever you do.
+That is 56% off a size. The absolute bytes move with the platform, the
+allocator and the build options; the ratio is the claim, and `ci/measurements.sh`
+reprints both rows on whatever machine you run it. Blind spot: the bench counts
+what ztext's allocator seam is asked for, so it cannot attribute a byte to
+FreeType rather than HarfBuzz, and it does not see the host allocator's own
+per-block overhead.
+
+What the split cannot save is also worth stating, and it is structural rather
+than measured: `FT_Size` carries the interpreter state and every scaled metric,
+so it is per size whatever you do, while `hb_font_t` is a thin scaling wrapper
+over an `hb_face_t` that owns the parse and lazily loads the OpenType tables.
+Sharing the `Font` is therefore nearly all of the HarfBuzz saving and only part
+of the FreeType one — which is why the number above is 56% and not 90%.
 
 The memory is not the main reason, though. The split is what puts a
 size-independent question — the family name, the glyph count, whether a
@@ -460,25 +475,27 @@ Run them yourself — the harness is committed:
 zig build bench -Doptimize=ReleaseFast -Dsanitize_c=false
 ```
 
-Numbers below are from that harness on macOS/aarch64 with Noto Sans at 32 px,
-reporting CPU time. Absolute values will differ on your machine; the ratio will
-not move much.
+Numbers below are from that harness on x86_64-windows-gnu with Noto Sans at
+32 px, reporting CPU time, over four consecutive runs of an unchanged tree.
+Absolute values will differ on your machine; the ratios will not move much.
 
 Timings vary by 30-40% run to run on a loaded machine, so they are quoted to
-one significant figure; the ratio is the stable part.
+two significant figures with the spread stated; the ratio is the stable part.
+The byte counts were identical to the byte in all four runs, which is what you
+would expect of an allocation total and is worth checking rather than assuming.
 
 | | Cost | Read this as |
 |---|---|---|
-| Shape a 43-character run | **~2 µs** | Reusing one `Shaper`. A separate test proves 500 warm shapes allocate **nothing**. |
-| Rasterise one glyph, A8 | **~1.5 µs** | Uncached; `FT_Load_Glyph` every time, and one memcpy of the result. Atlas it anyway. |
-| Rasterise one glyph, SDF | **~1.9 ms** | **~1300× the A8 cost**, and that ratio held across every run. |
-| One font, first face | 48 KB | The parse, plus everything the first size needs. |
-| Each additional size | **27 KB** | Against 47 KB for a single collapsed handle; see [Font and Face](#font-and-face-are-separate-and-why-the-bitmap-is-copied). |
+| Shape a 43-character run | **~2.5 µs** | 2.25-2.70 µs. Reusing one `Shaper`. A separate test proves 500 warm shapes allocate **nothing**. |
+| Rasterise one glyph, A8 | **~2.3 µs** | 2.16-2.50 µs. Uncached; `FT_Load_Glyph` every time, and one memcpy of the result. Atlas it anyway. |
+| Rasterise one glyph, SDF | **~2.6 ms** | **~1100× the A8 cost** (1091-1216 across the four runs). |
+| One font, first face | 34 349 B | The parse, plus everything the first size needs. |
+| Each additional size | **15 333 B** | Against 34 703 B for a single collapsed handle; see [Font and Face](#font-and-face-are-separate-and-why-the-bitmap-is-copied). |
 
 **On SDF specifically.** It is a bake-time tool and the ratio is not a typo.
-Two hundred glyphs is about four tenths of a second, once, into an atlas —
+Two hundred glyphs is a little over half a second, once, into an atlas —
 fine. Generating SDF glyphs during a frame would exhaust a 16 ms budget at
-**about eight glyphs**. The API exposes it because a distance field is the right way
+**about six glyphs**. The API exposes it because a distance field is the right way
 to draw text that scales, rotates or lives in world space; the number is here
 so nobody finds the cost out the hard way.
 

@@ -195,6 +195,55 @@ int main(int argc, char** argv) {
          four_sizes, (four_sizes - font_and_one_face) / 3u);
   for (size_t i = 0; i < 4; i++) ztextFaceDestroy(faces[i]);
   ztextFontDestroy(measured);
+
+  //--------------------------------------------------------------------------
+  // The other arm, without which the first is a number and not a comparison.
+  //
+  // README's memory table has two rows: what four sizes cost when they share
+  // one parsed font, and what they cost when each size carries its own. The
+  // second row had no arm here and was therefore uncited -- a figure with a
+  // harness named beside it that the harness did not produce.
+  //
+  // Four independent Fonts over the same bytes is exactly the handle a
+  // collapsed Font+Face design would give you: four full parses, four
+  // hb_face_t, four FT_Face. Everything is shaped and rendered with, on the
+  // same schedule as the shared-font arm, so the two rows differ in one thing
+  // only.
+  //--------------------------------------------------------------------------
+  const size_t before_collapsed = live_bytes;
+  ZtextFont* collapsed[4];
+  ZtextFace* collapsed_faces[4];
+  size_t collapsed_one = 0u;
+  for (size_t i = 0; i < 4; i++) {
+    collapsed[i] = NULL;
+    collapsed_faces[i] = NULL;
+    ztextFontCreateFromMemory(library, font, (size_t)file_size, 0,
+                              &collapsed[i]);
+    ztextFaceCreate(collapsed[i], 0, sizes[i], &collapsed_faces[i]);
+    ztextShaperShapeUtf8(shaper, collapsed_faces[i], sentence, sentence_length,
+                         0, sentence_length, &params);
+    ztextFaceRenderGlyph(collapsed_faces[i], glyphs[0], ZTEXT_RENDER_MODE_A8,
+                         ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
+    if (i == 0) collapsed_one = live_bytes - before_collapsed;
+  }
+  const size_t collapsed_four = live_bytes - before_collapsed;
+  printf("%-28s %9zu B   one collapsed handle at one size\n",
+         "collapsed handle, one size", collapsed_one);
+  printf("%-28s %9zu B   %zu B per additional size\n",
+         "collapsed handle, four sizes", collapsed_four,
+         (collapsed_four - collapsed_one) / 3u);
+  if (collapsed_four > four_sizes) {
+    printf("%-28s %9.0f%%   of a collapsed size, saved by sharing the font\n",
+           "per-size saving",
+           100.0 * (double)((collapsed_four - collapsed_one) / 3u -
+                            (four_sizes - font_and_one_face) / 3u) /
+               (double)((collapsed_four - collapsed_one) / 3u));
+  }
+  for (size_t i = 0; i < 4; i++) {
+    ztextFaceDestroy(collapsed_faces[i]);
+    ztextFontDestroy(collapsed[i]);
+  }
+
   ztextShaperDestroy(shaper);
 
   ztextFontDestroy(the_font);
