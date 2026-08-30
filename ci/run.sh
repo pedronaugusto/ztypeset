@@ -81,19 +81,18 @@ section 'Hygiene'
 run 'zig fmt (src, tests, build.zig)' zig fmt --check src tests/fonts.zig build.zig
 
 # The C sources have no formatter, so the one rule that is actually enforced is
-# enforced here. Eighty columns is not taste: these files are read in diffs and
-# side by side with the upstream headers they mirror.
-columns() {
-  local over
-  over=$(awk 'length($0) > 80 { printf "%s:%d: %d columns\n", FILENAME, FNR, length($0) }' \
-    ffi/*.h ffi/*.c 2>/dev/null)
-  [ -z "$over" ] || { printf '%s\n' "$over"; return 1; }
-}
-run 'C sources within 80 columns' columns
+# enforced here -- in ci/check-columns.sh, which the hosted workflow runs too,
+# because a rule with two implementations can disagree with itself.
+run 'C sources within 80 columns' ci/check-columns.sh
 
 # The null sweep is only worth having if it still covers everything. This
 # fails when the header grows an entry point the sweep never learned about.
 run 'null sweep covers every entry point' ci/api-surface.sh --sweep
+
+# And every entry point has every home it should, or a written reason for the
+# one it does not. Before this had an exit code it printed "1 with an unfilled
+# column" and nothing acted on it for as long as that was true.
+run 'every entry point has every home' ci/api-surface.sh --gaps
 
 #-----------------------------------------------------------------------------
 section 'Tests -- native'

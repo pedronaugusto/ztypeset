@@ -38,6 +38,22 @@ jobs:
       - name: Formatting
         run: zig fmt --check src tests/fonts.zig build.zig
 
+      # These three ran only in ci/run.sh, which is to say on whichever machine
+      # a person happened to run it on. Running them on every host also proves
+      # the scripts themselves are portable, which is not free: a shell script
+      # that has only ever run on one OS is an untested program.
+      - name: Source — C within 80 columns
+        shell: bash
+        run: ci/check-columns.sh
+
+      - name: Source — the null sweep covers every entry point
+        shell: bash
+        run: ci/api-surface.sh --sweep
+
+      - name: Source — every entry point has every home
+        shell: bash
+        run: ci/api-surface.sh --gaps
+
       # The sanitizer is opt-in, because a library must not force its runtime
       # into a consumer's link. ztext's own Debug run asks for it, and this is
       # what would catch UB in ztext's own C.

@@ -10,7 +10,8 @@
 #
 # This prints the surface with a column per home, so a change has a generated
 # checklist rather than a remembered one. `--gaps` shows only the rows with a
-# hole in them.
+# hole in them, and FAILS on any hole that has not been declared below -- a
+# report nobody has to act on is a report, not a gate.
 #
 # The ABI cross-check already proves the header and the externs agree; what it
 # cannot see is a wrapper that was never written or a README that still shows
@@ -18,9 +19,12 @@
 #
 # Usage:
 #   ci/api-surface.sh            # the whole surface
-#   ci/api-surface.sh --gaps     # only entry points missing a home
+#   ci/api-surface.sh --gaps     # only undeclared holes; exit 1 if there are any
 #   ci/api-surface.sh --sweep    # fail if the null sweep has fallen behind
 #   ci/api-surface.sh <name>     # every line mentioning one entry point
+#
+# Exit: 0 if every hole in the table is a declared one. Both --gaps and the
+# full listing use the same rule, so CI can run either.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -60,6 +64,25 @@ if [ "${1:-}" = "--sweep" ]; then
   exit 1
 fi
 
+# Holes that are deliberate, each with the reason it is deliberate. A "--"
+# genuinely is not always wrong -- an abi or debug entry point has no Zig
+# wrapper by design -- but until this list existed the difference between "no
+# wrapper because none is wanted" and "no wrapper because nobody wrote one" was
+# a judgement made afresh by whoever read the output, which is to say never.
+#
+# Anything NOT named here is a failure. Adding a line is cheap and is a
+# decision; leaving one out is caught.
+declared_gap() {
+  case "$1:$2" in
+    # The Zig Face carries its Font as a field (src/face.zig, Face.font),
+    # because a Zig handle can own the reference the C one has to hand back.
+    # Wrapping the accessor as well would be a second way to ask the same
+    # question, and the two could disagree after a change to either.
+    ztextFaceFont:wrap) return 0 ;;
+  esac
+  return 1
+}
+
 GAPS_ONLY=0
 [ "${1:-}" = "--gaps" ] && GAPS_ONLY=1
 
@@ -69,6 +92,8 @@ printf '%s%-34s %-4s %-4s %-4s %-4s %-4s%s\n' \
   "$BOLD" "entry point" "hdr" "impl" "c.zig" "wrap" "test" "$OFF"
 
 gaps=0
+declared_gaps=0
+undeclared_names=
 total=0
 for name in $names; do
   hdr=$(grep -c "ZTEXT_API[^;]*\b$name\b" ffi/ztext.h)
@@ -84,18 +109,38 @@ for name in $names; do
 
   mark() { [ "$1" -gt 0 ] && printf '%-4s' 'yes' || printf '%s%-4s%s' "$RED" '--' "$OFF"; }
 
-  missing=0
-  for v in "$impl" "$ext" "$wrap" "$tst"; do [ "$v" -eq 0 ] && missing=1; done
-  [ $missing -eq 1 ] && gaps=$((gaps + 1))
-  [ $GAPS_ONLY -eq 1 ] && [ $missing -eq 0 ] && continue
+  undeclared=0
+  declared=0
+  for column in impl ext wrap tst; do
+    value=${!column}
+    [ "$value" -gt 0 ] && continue
+    if declared_gap "$name" "$column"; then
+      declared=1
+    else
+      undeclared=1
+    fi
+  done
+  [ $declared -eq 1 ] && declared_gaps=$((declared_gaps + 1))
+  if [ $undeclared -eq 1 ]; then
+    gaps=$((gaps + 1))
+    undeclared_names="$undeclared_names $name"
+  fi
+  [ $GAPS_ONLY -eq 1 ] && [ $undeclared -eq 0 ] && continue
 
   printf '%-34s %-4s ' "$name" 'yes'
   mark "$impl"; printf ' '; mark "$ext"; printf ' '
   mark "$wrap"; printf ' '; mark "$tst"; printf '\n'
 done
 
-printf '\n%s%d entry points, %d with an unfilled column%s\n' \
-  "$DIM" "$total" "$gaps" "$OFF"
-printf '%sA "--" is not always wrong -- an abi/debug entry point has no wrapper%s\n' \
-  "$DIM" "$OFF"
-printf '%sby design -- but it should be a decision, not a surprise.%s\n' "$DIM" "$OFF"
+printf '\n%s%d entry points, %d declared empty columns, %d undeclared%s\n' \
+  "$DIM" "$total" "$declared_gaps" "$gaps" "$OFF"
+
+if [ $gaps -ne 0 ]; then
+  printf '%san entry point has a home nobody filled and nobody decided to leave%s\n' \
+    "$RED" "$OFF" >&2
+  printf '  %s\n' $undeclared_names >&2
+  printf 'Either write the missing home, or add the pair to declared_gap() in\n' >&2
+  printf 'this script with the reason it is deliberate.\n' >&2
+  exit 1
+fi
+exit 0
