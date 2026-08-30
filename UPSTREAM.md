@@ -5,9 +5,9 @@
 | | FreeType | HarfBuzz | SheenBidi | libunibreak |
 |---|---|---|---|---|
 | Source | <https://gitlab.freedesktop.org/freetype/freetype> | <https://github.com/harfbuzz/harfbuzz> | <https://github.com/Tehreer/SheenBidi> | <https://github.com/adah1972/libunibreak> |
-| Version | 2.14.3 | 14.3.1 | 3.0.0 | 7.0.0 |
-| Tag | `VER-2-14-3` | `14.3.1` | `v3.0.0` | `libunibreak_7_0` |
-| Commit | `0a0221a1347e2f1e07c395263540026e9a0aa7c7` | `ab5ecbb83985034a76214ac0b2b833dcd590d774` | `cfe430e7375a7845b679adae9d51dac6deaa8858` | `3ce4bfa3129ff3738046a44a6db533d2ce25af2b` |
+| Version | 2.14.3 | 14.4.0 | 3.0.0 | 7.0.0 |
+| Tag | `VER-2-14-3` | `14.4.0` | `v3.0.0` | `libunibreak_7_0` |
+| Commit | `0a0221a1347e2f1e07c395263540026e9a0aa7c7` | `36cb489cb02ce4b92099669ba9f9bea348eff93f` | `cfe430e7375a7845b679adae9d51dac6deaa8858` | `3ce4bfa3129ff3738046a44a6db533d2ce25af2b` |
 | Licence | **FTL** (see below) | Old MIT | Apache-2.0 | zlib |
 | Local | `libs/freetype` | `libs/harfbuzz` | `libs/sheenbidi` | `libs/libunibreak` |
 
@@ -144,7 +144,7 @@ calls.
 
 **`hb_ft_font_set_funcs` does not use the FT_Face you think it does.** It opens
 an FT_Face of its own, from an FT_Library of its own, out of the face's blob
-(`src/hb-ft.cc:1705`, `reference_ft_library`). Metrics would come from a
+(`src/hb-ft.cc:1714`, `reference_ft_library`). Metrics would come from a
 different face than the one being rasterised, which defeats the entire purpose
 of asking FreeType for them. ztext uses `hb_ft_font_create`, which wraps the
 face it is given.
@@ -193,7 +193,17 @@ and per-language entries both need a real face, so a host that uses
 allocation for each, once. ztext's own suite warms those in its fixture and
 then asserts the heap balances exactly.
 
-**Upstream tracks a stray `.pyc`** in `src/__pycache__/`, excluded here.
+**New in 14.4.0: `hb_set_intersects()`.** Recorded rather than adopted --
+ztext calls no `hb_set_*` entry point, because nothing it exposes hands a
+character or glyph set across the boundary. It is here so the surface change is
+on the record: the next time ztext needs to ask whether two coverage sets meet,
+this is the call, and it exists from 14.4.0 onwards.
+
+**A stray `.pyc` in `src/__pycache__/` is gone as of 14.4.0.** Upstream tracked
+one until then and it was excluded here. The exclusion is kept in
+`ci/verify-vendor.sh` because it costs nothing and an upstream that once
+committed build output can do it again; if the directory is absent, `diff -r -x`
+simply has nothing to skip.
 
 ### SheenBidi
 
@@ -251,21 +261,26 @@ It runs as its own CI job. Run it after any step below.
 
 1. Clone upstream at the new tag and copy the paths in "What was taken" over
    `libs/<project>/`, re-applying the exclusions.
-2. Update the table at the top of this file **and** the matching entries in
-   `ci/verify-vendor.sh` — the script fails any upstream whose pinned commit
-   does not appear here (it still checks the others, then exits non-zero), so
-   the two cannot drift apart silently.
+2. Update `src/pins.zig`, which is the one home for the version, tag and
+   commit. `ci/verify-vendor.sh` reads it, the suite asserts the LINKED
+   library reports exactly that version, and `ci/measurements.sh --check`
+   compares the table at the top of this file against it — so the pin, the
+   fetch, the compiled library and this document cannot drift apart. Update
+   the table here too; the check will tell you if you forget.
 3. Re-read "Known upstream behaviour" above and check each item still holds.
    Several are file-and-line references that a re-vendor can invalidate.
-4. `zig build test`. The `_Static_assert`s in `ffi/ztext_abi.c` fail the build
+4. Write down what you expect to move BEFORE running anything, from the
+   upstream's own NEWS for every release between the two pins. A prediction
+   made afterwards is a rationalisation.
+5. `zig build test`. The `_Static_assert`s in `ffi/ztext_abi.c` fail the build
    if a type ztext depends on has changed shape; the comptime cross-check in
    `src/abi_check.zig` fails the build if the Zig externs and `ffi/ztext.h`
    have drifted apart; `ztextAbiProbe` fails the test if the header and the
    compiled library disagree; the golden tests fail if shaping output moved.
    Bracket mirroring is pinned too, so a HarfBuzz that stopped applying rule
    L4 would fail rather than quietly render RTL brackets backwards.
-5. **A golden test failing after a re-vendor is information, not an obstacle.**
+6. **A golden test failing after a re-vendor is information, not an obstacle.**
    Read the diff before updating the numbers — a changed advance is a changed
    layout for every consumer.
-6. Add any new source files to the explicit lists in `build.zig` deliberately.
+7. Add any new source files to the explicit lists in `build.zig` deliberately.
    The lists exist so a re-vendor cannot silently change what gets compiled.
