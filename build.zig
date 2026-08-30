@@ -26,6 +26,15 @@ const freetype_sources = [_][]const u8{
     "libs/freetype/src/base/ftinit.c",
     "libs/freetype/src/base/ftmm.c",
     "libs/freetype/src/base/ftsystem.c",
+    // base extensions -- separate translation units upstream, each the
+    // implementation of entry points a header installed below declares.
+    // ci/header-link.sh is what decides this list: it references every
+    // declared entry point and makes the linker resolve it, so a header
+    // installed without its implementation fails rather than reaching a
+    // consumer. All three arrived that way.
+    "libs/freetype/src/base/ftfstype.c",
+    "libs/freetype/src/base/ftglyph.c",
+    "libs/freetype/src/base/ftpatent.c",
     // hinting
     "libs/freetype/src/autofit/autofit.c",
     "libs/freetype/src/pshinter/pshinter.c",
@@ -62,6 +71,7 @@ const freetype_public_headers = [_][]const u8{
     "fterrdef.h",
     "fterrors.h",
     "ftfntfmt.h",
+    "ftglyph.h",
     "ftimage.h",
     "ftincrem.h",
     "ftlcdfil.h",
@@ -160,6 +170,25 @@ const harfbuzz_sources = [_][]const u8{
 /// be configured with -- subsetting, Cairo, CoreText, DirectWrite, ICU,
 /// Graphite2, WASM -- and installing them advertises an API that compiles and
 /// then fails at link.
+///
+/// Upstream's `src/meson.build` does not build one library. It builds
+/// `libharfbuzz` and then four more beside it, each behind its own option and
+/// its own external dependencies: `libharfbuzz-subset` (`hb_subset_sources`),
+/// `-raster` (`hb_raster_sources`, libpng), `-vector` (`hb_vector_sources`,
+/// zlib) and `-gpu` (`hb_gpu_sources`, plus generated shader sources). ztext
+/// vendors `libharfbuzz`. So `hb-subset-depend.h`, `hb-raster.h`,
+/// `hb-vector.h` and `hb-gpu.h` are NOT installed here -- they are the public
+/// faces of libraries this package does not build, and each was installed with
+/// nothing behind it until ci/header-link.sh said so.
+///
+/// hb-subset-depend.h could not even be compiled: it opens with
+/// `#error "Include <hb-subset.h> instead."`, and hb-subset.h belongs to the
+/// subset library. The other three compile and then fail at link.
+///
+/// This is upstream's own division, not a ceiling ztext invented. Building any
+/// of the four is a decision about a dependency (libpng, zlib, a shader
+/// pipeline), and it is made by adding that library's sources here and its
+/// header below -- at which point the gate proves the two agree.
 const harfbuzz_public_headers = [_][]const u8{
     "hb-aat-layout.h",
     "hb-aat.h",
@@ -171,7 +200,6 @@ const harfbuzz_public_headers = [_][]const u8{
     "hb-face.h",
     "hb-font.h",
     "hb-ft.h",
-    "hb-gpu.h",
     "hb-map.h",
     "hb-ot-color.h",
     "hb-ot-deprecated.h",
@@ -186,15 +214,12 @@ const harfbuzz_public_headers = [_][]const u8{
     "hb-ot-var.h",
     "hb-ot.h",
     "hb-paint.h",
-    "hb-raster.h",
     "hb-script-list.h",
     "hb-set.h",
     "hb-shape-plan.h",
     "hb-shape.h",
     "hb-style.h",
-    "hb-subset-depend.h",
     "hb-unicode.h",
-    "hb-vector.h",
     "hb-version.h",
     "hb.h",
 };
