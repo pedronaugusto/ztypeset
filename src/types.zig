@@ -48,6 +48,13 @@ pub fn segmentationHas(mask: u32, kind: Segmentation) bool {
     return mask & bit == bit;
 }
 
+/// Bytes per pixel in `format`: 1 for `.a8` and `.sdf`, 3 for both LCD
+/// formats. The library's own answer rather than a switch here, so a build
+/// that names a format this wrapper does not still gets it right.
+pub fn bitmapChannels(format: BitmapFormat) u32 {
+    return c.ztextBitmapFormatChannels(format);
+}
+
 pub fn glyphHas(glyph: Glyph, flag: GlyphFlag) bool {
     const bit: u32 = @intCast(@intFromEnum(flag));
     return glyph.flags & bit != 0;
@@ -110,6 +117,68 @@ pub const Break = enum(u8) {
 };
 
 pub const Charmap = c.Charmap;
+
+/// A 2x2 linear map, y up: x' = xx*x + xy*y, y' = yx*x + yy*y. See
+/// `Face.setTransform`. The three builders below are free functions rather
+/// than methods because this IS the C struct -- one home, not a Zig copy of
+/// it that could drift.
+pub const Matrix = c.Matrix;
+
+pub const matrix_identity: Matrix = .{ .xx = 1, .xy = 0, .yx = 0, .yy = 1 };
+
+/// A rotation by `radians`, counter-clockwise with y up.
+pub fn rotation(radians: f32) Matrix {
+    const cos = @cos(radians);
+    const sin = @sin(radians);
+    return .{ .xx = cos, .xy = -sin, .yx = sin, .yy = cos };
+}
+
+/// A scale, which is also how a mirror is written: a negative factor.
+pub fn scaling(x: f32, y: f32) Matrix {
+    return .{ .xx = x, .xy = 0, .yx = 0, .yy = y };
+}
+
+/// A horizontal shear by `tangent` -- the same shape synthetic oblique
+/// applies, written out here because a caller composing a transform of their
+/// own needs it in the same form as the rest.
+pub fn shear(tangent: f32) Matrix {
+    return .{ .xx = 1, .xy = tangent, .yx = 0, .yy = 1 };
+}
+/// How the two ends of an open path are finished, how two segments meet at a
+/// corner, and which of the shapes a pen traced round a glyph is kept. See
+/// `Face.setStroke`.
+pub const LineCap = c.LineCap;
+pub const LineJoin = c.LineJoin;
+pub const StrokeStyle = c.StrokeStyle;
+
+/// A pen traced round every glyph a face draws. `radius` is HALF the pen's
+/// width, in PIXELS at the face's current size -- unlike synthetic bold's
+/// fraction of the em, and `ffi/ztext.h` has why. A zero radius is no stroke,
+/// and `stroke_none` is the value a face is created with.
+pub const Stroke = c.Stroke;
+
+pub const stroke_none: Stroke = .{
+    .radius = 0,
+    .miter_limit = 0,
+    .cap = .butt,
+    .join = .round,
+    .style = .band,
+};
+
+/// The pen a game UI draws outlined text with: a round join and cap, which
+/// cannot spike at any angle, and the glyph GROWN by the radius so it can be
+/// drawn in the outline's colour with the unstroked glyph over it. `radius`
+/// is in pixels. Use `.band` instead for a hollow letter in one pass.
+pub fn outline(radius: f32) Stroke {
+    return .{
+        .radius = radius,
+        .miter_limit = 0,
+        .cap = .round,
+        .join = .round,
+        .style = .grown,
+    };
+}
+
 pub const VisualRun = c.VisualRun;
 
 /// A maximal span of one script, in logical order. `script` is an ISO 15924

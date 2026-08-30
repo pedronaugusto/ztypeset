@@ -312,12 +312,11 @@ case_ "a covered prefix that breaks at a format character" \
 case_ "a bitmap that does not say which format it is" \
   ffi/ztext_raster.c \
   "says which format its bytes are in" \
-  "  out->format = (mode == ZTEXT_RENDER_MODE_SDF) ? ZTEXT_BITMAP_FORMAT_SDF
-                                                : ZTEXT_BITMAP_FORMAT_A8;" \
-  "  out->format = ZTEXT_BITMAP_FORMAT_A8;"
+  "  const ZtextBitmapFormat format = bitmapFormatOf(mode);" \
+  "  const ZtextBitmapFormat format = ZTEXT_BITMAP_FORMAT_A8;"
 
 case_ "a pixel size rounded to whole pixels" \
-  ffi/ztext_face.c \
+  ffi/ztext_core.c \
   "fractional pixel size is honoured" \
   "  return (int32_t)(pixels * 64.0f + 0.5f);" \
   "  return (int32_t)(pixels + 0.5f) * 64;"
@@ -370,6 +369,204 @@ case_ "the language the autohinter interns, left cold" \
   ffi/ztext_shape.c \
   "blocks leaked" \
   "  (void)hb_language_get_default();" \
+  ""
+
+printf '\n%sSubpixel rasterisation%s %s(pixels, samples and rows)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# An LCD bitmap has three numbers that all sound like "how wide is it": the
+# pixel count, the sample count, and the byte pitch. Confusing any two of them
+# lays the glyph out three times too wide or too tall, with no error anywhere.
+
+case_ "an LCD bitmap's width reported in samples" \
+  ffi/ztext_raster.c \
+  "an LCD bitmap is three samples per pixel" \
+  "  out->width = (mode == ZTEXT_RENDER_MODE_LCD) ? slot->bitmap.width / channels
+                                               : slot->bitmap.width;" \
+  "  out->width = slot->bitmap.width;"
+
+case_ "an LCD_V bitmap's height reported in sub-rows" \
+  ffi/ztext_raster.c \
+  "an LCD_V bitmap is three sub-rows per pixel row" \
+  "  out->height = (mode == ZTEXT_RENDER_MODE_LCD_V) ? slot->bitmap.rows / channels
+                                                  : slot->bitmap.rows;" \
+  "  out->height = slot->bitmap.rows;"
+
+# pitch is bytes per PIXEL row, which for LCD_V is three of FreeType's rows.
+# Left untripled, pitch * height addresses a third of the buffer.
+case_ "an LCD_V pitch that counts one of its three sub-rows" \
+  ffi/ztext_raster.c \
+  "an LCD_V bitmap is three sub-rows per pixel row" \
+  "  out->pitch = (int32_t)(slot->bitmap.width *
+                         ((mode == ZTEXT_RENDER_MODE_LCD_V) ? channels : 1u));" \
+  "  out->pitch = (int32_t)slot->bitmap.width;"
+
+# The mode asked for and the mode rendered are two different values, and the
+# format field describes the first. Rendered greyscale and labelled LCD, the
+# consumer reads one byte per pixel as three.
+case_ "a subpixel mode rendered as plain greyscale" \
+  ffi/ztext_raster.c \
+  "an LCD bitmap is three samples per pixel" \
+  "    case ZTEXT_RENDER_MODE_LCD:
+      return FT_RENDER_MODE_LCD;" \
+  "    case ZTEXT_RENDER_MODE_LCD:
+      return FT_RENDER_MODE_NORMAL;"
+
+# The channel count is what a consumer sizes its upload with.
+case_ "three bytes per pixel counted as one" \
+  ffi/ztext_raster.c \
+  "an LCD bitmap is three samples per pixel" \
+  "    case ZTEXT_BITMAP_FORMAT_LCD:
+    case ZTEXT_BITMAP_FORMAT_LCD_V:
+      return 3u;" \
+  "    case ZTEXT_BITMAP_FORMAT_LCD:
+    case ZTEXT_BITMAP_FORMAT_LCD_V:
+      return 1u;"
+
+printf '\n%sThe stroker%s %s(where the pen goes, and what it grows)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# Composition order. A pen traced before the synthetic styles is widened by
+# them; a pen traced after the caller's matrix is a pen in device space. Both
+# still draw an outlined glyph, so only a measurement can tell them apart.
+case_ "the pen traced before the styles it should follow" \
+  ffi/ztext_raster.c \
+  "the pen traces the styled glyph" \
+  "  const bool synthesised = applySynthetic(face, slot);
+  bool stroked = false;
+  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;" \
+  "  bool stroked = false;
+  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const bool synthesised = applySynthetic(face, slot);"
+
+case_ "the pen traced after the matrix instead of before it" \
+  ffi/ztext_raster.c \
+  "the matrix maps what it traced" \
+  "  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const bool transformed = applyTransform(face, slot);" \
+  "  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const bool transformed = false;
+  applyTransform(face, slot);"
+
+# A stroked glyph is a different SHAPE, so the ink metrics the extents are
+# read from have to be recomputed -- the same reason the other two steps do.
+case_ "a pen that reaches the pixels but not the measurements" \
+  ffi/ztext_raster.c \
+  "grows the glyph by 2R" \
+  "  if (synthesised || stroked || transformed) refreshInkMetrics(slot);" \
+  "  if (synthesised || transformed) refreshInkMetrics(slot);"
+
+# The outline the stroker exports into is sized for the LARGEST glyph so far.
+# Sized for the last one instead, a wide glyph after a narrow one overflows
+# or is truncated -- and FreeType writes as many points as it counted.
+case_ "an export buffer that is never grown after the first glyph" \
+  ffi/ztext_raster.c \
+  "grows to the widest of them" \
+  "  if (points <= face->stroked_points && contours <= face->stroked_contours) {
+    return ZTEXT_RESULT_OK;
+  }" \
+  "  if (face->stroked_points != 0u) {
+    return ZTEXT_RESULT_OK;
+  }"
+
+# Which side of a contour is "outside" is the font format's business. Swapped,
+# an inside rule grows the letter and an outline eats into it -- and both
+# still produce a plausible picture.
+case_ "the inside and outside borders swapped" \
+  ffi/ztext_raster.c \
+  "the glyph grown, shrunk, and the band between them" \
+  "    border = face->stroke.style == ZTEXT_STROKE_STYLE_SHRUNK
+                 ? FT_Outline_GetInsideBorder(&slot->outline)
+                 : FT_Outline_GetOutsideBorder(&slot->outline);" \
+  "    border = face->stroke.style == ZTEXT_STROKE_STYLE_SHRUNK
+                 ? FT_Outline_GetOutsideBorder(&slot->outline)
+                 : FT_Outline_GetInsideBorder(&slot->outline);"
+
+# The BAND keeps both contours; either solid style keeps one. Exporting both
+# for all three collapses the styles into one.
+case_ "every stroke style exporting both of the stroker's contours" \
+  ffi/ztext_raster.c \
+  "the glyph grown, shrunk, and the band between them" \
+  "  const bool whole = face->stroke.style == ZTEXT_STROKE_STYLE_BAND;" \
+  "  const bool whole = true;"
+
+# A cap, join or style this build does not name comes from a consumer built
+# against a newer header. Drawing something else instead is the silent
+# failure this package exists to refuse.
+case_ "a pen naming a cap this build does not have, accepted" \
+  ffi/ztext_raster.c \
+  "does not name should be refused" \
+  "    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE ||" \
+  "    if (0 ||"
+
+# A radius too large for 26.6 converts to zero, which draws no pen at all.
+case_ "a radius too large for the fixed point it is converted to" \
+  ffi/ztext_raster.c \
+  "a pen that cannot be drawn is refused" \
+  "    if (stroke->radius > 0.0f && ztextToFixed266(stroke->radius) == 0) {" \
+  "    if (0) {"
+
+printf '\n%sThe face transform%s %s(what a matrix reaches)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# The caller's 2x2 maps the glyph IMAGE, after the synthetic styles and
+# reaching no advance. Each of those three is a separate way to be wrong, and
+# none of them errors.
+
+case_ "the caller's matrix applied before the font's own styles" \
+  ffi/ztext_raster.c \
+  "composes after the synthetic styles" \
+  "  const bool synthesised = applySynthetic(face, slot);
+  bool stroked = false;
+  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const bool transformed = applyTransform(face, slot);" \
+  "  const bool transformed = applyTransform(face, slot);
+  const bool synthesised = applySynthetic(face, slot);
+  bool stroked = false;
+  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;"
+
+# xy and yx are indistinguishable under any diagonal matrix, which is why a
+# shear is in the test.
+case_ "the two off-diagonal terms of the matrix swapped" \
+  ffi/ztext_raster.c \
+  "maps the ink and leaves every advance in text space" \
+  "  matrix.xy = toFixed16(face->transform.xy);
+  matrix.yx = toFixed16(face->transform.yx);" \
+  "  matrix.xy = toFixed16(face->transform.yx);
+  matrix.yx = toFixed16(face->transform.xy);"
+
+# FreeType's own FT_Set_Transform does exactly this. It cannot be done here:
+# a shaped run's advances come from HarfBuzz, which has no matrix, so one side
+# would move and the other would not.
+case_ "the advance transformed too, the way FT_Set_Transform does" \
+  ffi/ztext_raster.c \
+  "leaves every advance in text space" \
+  "  FT_Outline_Transform(&slot->outline, &matrix);
+  return true;" \
+  "  FT_Outline_Transform(&slot->outline, &matrix);
+  FT_Vector_Transform(&slot->advance, &matrix);
+  slot->metrics.horiAdvance = slot->advance.x;
+  return true;"
+
+# The one field of a face whose zero is not its default.
+case_ "a face whose matrix starts at the memset's zero" \
+  ffi/ztext_face.c \
+  "created with the identity" \
+  "  face->transform.xx = 1.0f;
+  face->transform.yy = 1.0f;" \
+  ""
+
+case_ "a matrix that is not made of numbers, taken at face value" \
+  ffi/ztext_raster.c \
+  "is not made of numbers is refused" \
+  "    if (!isFiniteStrength(matrix->xx) || !isFiniteStrength(matrix->xy) ||
+        !isFiniteStrength(matrix->yx) || !isFiniteStrength(matrix->yy)) {
+      return ZTEXT_RESULT_INVALID_ARGUMENT;
+    }" \
   ""
 
 printf '\n%sCharacter maps%s %s(which one is selected)%s\n' \

@@ -201,6 +201,24 @@ int main(int argc, char** argv) {
   CHECK(bitmap.pixels == NULL, "a refused render wrote pixels");
   REFUSES_OUT(ztextFaceRenderGlyph(NULL, 1, ZTEXT_RENDER_MODE_A8,
                                    ZTEXT_HINTING_NORMAL, 0, 0, NULL));
+  // Not a handle call at all, so there is no NULL to pass -- what it must
+  // never do is answer for a value this build does not name.
+  CHECK(ztextBitmapFormatChannels((ZtextBitmapFormat)999) == 0u,
+        "channels of an unnamed bitmap format");
+
+  ZtextStroke stroke;
+  memset(&stroke, 0xAB, sizeof(stroke));
+  REFUSES(ztextFaceSetStroke(NULL, NULL));
+  REFUSES(ztextFaceStroke(NULL, &stroke));
+  CHECK(stroke.radius == 0.0f, "a refused stroke query wrote a value");
+  REFUSES_OUT(ztextFaceStroke(NULL, NULL));
+
+  ZtextMatrix matrix;
+  memset(&matrix, 0xAB, sizeof(matrix));
+  REFUSES(ztextFaceSetTransform(NULL, NULL));
+  REFUSES(ztextFaceTransform(NULL, &matrix));
+  CHECK(matrix.xx == 0.0f, "a refused transform query wrote a value");
+  REFUSES_OUT(ztextFaceTransform(NULL, NULL));
   REFUSES(ztextFaceSetSyntheticBold(NULL, ZTEXT_SYNTHETIC_BOLD_DEFAULT));
   REFUSES(ztextFaceSetSyntheticOblique(NULL, ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT));
 

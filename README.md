@@ -616,11 +616,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**122 tests**, executed twice. The second pass runs the same binary with
+**146 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **244/244 passed**.
+rather than being believed. So `zig build test` reports **292/292 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -716,7 +716,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 83 entry points with
+And `tests/null_sweep.c` calls **every one of the 88 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -944,7 +944,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **63** deliberate bugs, one at a time, to a copy of the tree, and
+applies **81** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -955,6 +955,9 @@ asserts a **named** test catches each:
 | Metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
+| The stroker | the pen traced before the synthetic styles or after the matrix, a stroked glyph that reaches the pixels but not the measurements, an export buffer never grown after the first glyph, the inside and outside borders swapped, every style exporting the whole pen, and a cap or radius this build cannot draw accepted |
+| Subpixel rasterisation | an LCD bitmap's width reported in samples, an LCD_V bitmap's height reported in sub-rows, an LCD_V pitch that counts one of its three sub-rows, a subpixel mode rendered as plain greyscale, and three bytes per pixel counted as one |
+| The face transform | the caller's matrix applied before the font's own styles, the two off-diagonal terms swapped, the advance transformed the way FT_Set_Transform does, a face whose matrix starts at the memset's zero, and a matrix that is not made of numbers taken at face value |
 | Character maps | every map reported as the first one, whichever is selected reported as the first, an encoding the font has no map for accepted, and an index past the end clamped instead of refused |
 | Synthetic styles | a style applied to the ink and not to the shaping, emboldening asked for in place so the advance never moves, the lazily built font never told what style it was born into, a restyled face that still passes for the one a run was shaped against, a strength quantised back to the one weight upstream ships, and a strength that is not a number taken at face value |
 | Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
@@ -1066,6 +1069,34 @@ Exposed today:
 - **Glyph outlines as paths**: `decomposeOutline` walks `FT_Outline_Decompose`
   through move-to/line-to/conic-to/cubic-to/close callbacks, points in 26.6,
   for a host that fills its own shapes rather than sampling a bitmap.
+- **Subpixel rasterisation**: `.lcd` and `.lcd_v` beside `.a8` and `.sdf`,
+  three coverage samples per pixel for a panel whose stripes run horizontally
+  or vertically. FreeType's **Harmony** mode — three samples a third of a pixel
+  apart rather than one sample through a filter — because
+  `FT_CONFIG_OPTION_SUBPIXEL_RENDERING` is off, which is upstream's default and
+  needs no filter to be chosen; see `ffi/ztext_ftoption.h` for the whole
+  choice. `width`, `height`, `left` and `top` are in **pixels** in every
+  format and `pitch` is bytes per pixel row, so `pitch * height` is the buffer
+  and no consumer has to know which of the three numbers FreeType counts in
+  samples
+- **A pen traced round every glyph** (`setStroke`): FreeType's stroker, with a
+  radius in pixels, a line cap, a line join and a miter limit, and three
+  styles, named for what each one is: the glyph **grown** by the radius (the
+  bottom layer of two-pass outlined text, and what `ztext.outline(radius)`
+  selects), the glyph **shrunk** by it, or the hollow **band** the pen sweeps
+  between the two. It runs at
+  glyph loading, so `glyphExtents`, `renderGlyph` and `decomposeOutline` all
+  see one stroked outline; it moves no advance, because a stroked glyph is
+  wider than its ink box and the run is still laid out on the font's own
+  advances. `ztext.outline(radius)` is the pen a game UI wants
+- **A 2x2 transform per face** (`setTransform`): rotation, scale, mirror,
+  shear, composed after the synthetic styles so emboldening stays isotropic in
+  the font's own space. It maps the glyph **image** and no advance — neither
+  the face's nor a shaped run's — because a shaped advance comes from HarfBuzz,
+  which has no matrix to be told about, and moving one side without the other
+  would make the two disagree by exactly the caller's matrix. The model is the
+  usual one: lay the run out in text space, then map pen positions and glyph
+  images together
 - **Synthetic bold and oblique**, for a family with no bold or italic face of
   its own. Both are amounts rather than switches -- a fraction of the em and a
   shear factor, with `synthetic_bold_default` and `synthetic_oblique_default`

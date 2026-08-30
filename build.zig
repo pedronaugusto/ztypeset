@@ -35,6 +35,7 @@ const freetype_sources = [_][]const u8{
     "libs/freetype/src/base/ftfstype.c",
     "libs/freetype/src/base/ftglyph.c",
     "libs/freetype/src/base/ftpatent.c",
+    "libs/freetype/src/base/ftstroke.c",
     // hinting
     "libs/freetype/src/autofit/autofit.c",
     "libs/freetype/src/pshinter/pshinter.c",
@@ -58,8 +59,9 @@ const freetype_sources = [_][]const u8{
 /// silent one.
 /// Only headers whose implementation is in `freetype_sources`. A header for a
 /// module ztext does not compile would compile fine for a consumer and then
-/// fail at link with an undefined symbol -- `FT_Stroker_New` was the one that
-/// made the point.
+/// fail at link with an undefined symbol -- `ftsynth.h` is the standing
+/// example: `FT_GlyphSlot_Embolden` is declared there, `ftsynth.c` is not
+/// compiled here, and the header is therefore not installed.
 const freetype_public_headers = [_][]const u8{
     "freetype.h",
     "ftadvanc.h",
@@ -85,6 +87,7 @@ const freetype_public_headers = [_][]const u8{
     "ftrender.h",
     "ftsizes.h",
     "ftsnames.h",
+    "ftstroke.h",
     "ftsystem.h",
     "fttrigon.h",
     "fttypes.h",

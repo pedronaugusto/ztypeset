@@ -388,6 +388,54 @@ pub const Face = struct {
         return out;
     }
 
+    /// Sets this face's 2x2 transform, or clears it with null.
+    ///
+    /// Applied AFTER any synthetic bold or oblique, so emboldening stays
+    /// isotropic in the font's own space rather than being stretched by the
+    /// caller's map. It reaches the glyph IMAGE and no advance at all --
+    /// neither this face's nor a shaped run's -- so the model is the usual
+    /// one: lay the run out in text space, then map pen positions and glyph
+    /// images together. `ffi/ztext.h` has why, at length.
+    pub fn setTransform(self: Face, matrix: ?types.Matrix) err.Error!void {
+        if (matrix) |m| {
+            try err.check(c.ztextFaceSetTransform(self.handle, &m));
+        } else {
+            try err.check(c.ztextFaceSetTransform(self.handle, null));
+        }
+    }
+
+    /// This face's transform, the identity for one that has none.
+    pub fn transform(self: Face) err.Error!types.Matrix {
+        var out: types.Matrix = undefined;
+        try err.check(c.ztextFaceTransform(self.handle, &out));
+        return out;
+    }
+
+    /// Sets the pen traced round every glyph this face draws, or clears it
+    /// with null.
+    ///
+    /// `types.outline(radius)` is the pen outlined text wants. Composition is
+    /// fixed: synthetic bold and oblique first, because they are part of the
+    /// font's design; then the pen; then `setTransform`'s matrix. No advance
+    /// moves -- a stroked glyph is wider than its ink box by the radius on
+    /// each side and the run is still laid out on the font's own advances --
+    /// so this stales no measurement. `glyphExtents`, `renderGlyph` and
+    /// `decomposeOutline` all see the one stroked outline.
+    pub fn setStroke(self: Face, pen: ?types.Stroke) err.Error!void {
+        if (pen) |s| {
+            try err.check(c.ztextFaceSetStroke(self.handle, &s));
+        } else {
+            try err.check(c.ztextFaceSetStroke(self.handle, null));
+        }
+    }
+
+    /// This face's pen, `types.stroke_none` for one that has none.
+    pub fn stroke(self: Face) err.Error!types.Stroke {
+        var out: types.Stroke = undefined;
+        try err.check(c.ztextFaceStroke(self.handle, &out));
+        return out;
+    }
+
     /// Fakes a bold weight for a face with no bold of its own.
     ///
     /// `strength` is a fraction of the EM rather than a pixel count, so it

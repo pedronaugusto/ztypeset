@@ -990,6 +990,136 @@ int main(int argc, char** argv) {
           "every contour opened should be closed exactly once");
   }
 
+  phase("subpixel");
+  // Three samples per pixel, and the pixel dimensions still in pixels.
+  if (glyphs != NULL && glyph_count > 0) {
+    CHECK(ztextBitmapFormatChannels(ZTEXT_BITMAP_FORMAT_A8) == 1u,
+          "A8 should be one byte per pixel");
+    CHECK(ztextBitmapFormatChannels(ZTEXT_BITMAP_FORMAT_LCD) == 3u,
+          "LCD should be three bytes per pixel");
+
+    ZtextGlyphBitmap grey;
+    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_NONE, 0,
+                                  0, &grey));
+    const uint32_t grey_width = grey.width;
+    const uint32_t grey_height = grey.height;
+
+    ZtextGlyphBitmap lcd;
+    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTEXT_RENDER_MODE_LCD, ZTEXT_HINTING_NONE, 0,
+                                  0, &lcd));
+    CHECK(lcd.format == ZTEXT_BITMAP_FORMAT_LCD,
+          "an LCD render should say which format its bytes are in");
+    CHECK(lcd.width >= grey_width && lcd.width <= grey_width + 2u,
+          "an LCD bitmap's width should be in pixels, not samples");
+    CHECK(lcd.height == grey_height, "an LCD bitmap should be as tall as A8");
+    CHECK(lcd.pitch == (int32_t)(3u * lcd.width),
+          "pitch should be bytes per pixel row");
+
+    ZtextGlyphBitmap lcd_v;
+    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTEXT_RENDER_MODE_LCD_V, ZTEXT_HINTING_NONE,
+                                  0, 0, &lcd_v));
+    CHECK(lcd_v.format == ZTEXT_BITMAP_FORMAT_LCD_V,
+          "an LCD_V render should say which format its bytes are in");
+    CHECK(lcd_v.height >= grey_height && lcd_v.height <= grey_height + 2u,
+          "an LCD_V bitmap's height should be in pixels, not sub-rows");
+  }
+
+  phase("transform");
+  // A 2x2 map applied to the glyph image, and to no advance.
+  if (glyphs != NULL && glyph_count > 0) {
+    ZtextMatrix identity;
+    CHECK_OK(ztextFaceTransform(face, &identity));
+    CHECK(identity.xx == 1.0f && identity.xy == 0.0f && identity.yx == 0.0f &&
+              identity.yy == 1.0f,
+          "a face should be created with the identity transform");
+
+    ZtextExtents upright;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+                                   &upright));
+
+    ZtextMatrix wide;
+    wide.xx = 2.0f;
+    wide.xy = 0.0f;
+    wide.yx = 0.0f;
+    wide.yy = 1.0f;
+    CHECK_OK(ztextFaceSetTransform(face, &wide));
+    ZtextExtents stretched;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+                                   &stretched));
+    CHECK(stretched.x_max - stretched.x_min > upright.x_max - upright.x_min,
+          "a 2x horizontal map should widen the ink");
+    CHECK(stretched.x_advance == upright.x_advance,
+          "a transform should leave the advance in text space");
+
+    ZtextMatrix bad;
+    bad.xx = 1.0f;
+    bad.xy = (float)NAN;
+    bad.yx = 0.0f;
+    bad.yy = 1.0f;
+    CHECK(ztextFaceSetTransform(face, &bad) == ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a transform that is not made of numbers should be refused");
+
+    CHECK_OK(ztextFaceSetTransform(face, NULL));
+    ZtextExtents restored;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+                                   &restored));
+    CHECK(restored.x_max == upright.x_max,
+          "clearing a transform should put the glyph back");
+  }
+
+  phase("stroke");
+  // A pen traced round the glyph: it grows the ink and moves no advance, and
+  // a cap this build does not name is refused rather than defaulted.
+  if (glyphs != NULL && glyph_count > 0) {
+    ZtextStroke none;
+    CHECK_OK(ztextFaceStroke(face, &none));
+    CHECK(none.radius == 0.0f, "a face should be created with no pen");
+
+    ZtextExtents bare;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+                                   &bare));
+
+    ZtextStroke pen;
+    pen.radius = 3.0f;
+    pen.miter_limit = 0.0f;
+    pen.cap = ZTEXT_LINE_CAP_BUTT;
+    pen.join = ZTEXT_LINE_JOIN_BEVEL;
+    pen.style = ZTEXT_STROKE_STYLE_BAND;
+    CHECK_OK(ztextFaceSetStroke(face, &pen));
+
+    ZtextStroke read_back;
+    CHECK_OK(ztextFaceStroke(face, &read_back));
+    CHECK(read_back.radius == 3.0f && read_back.join == ZTEXT_LINE_JOIN_BEVEL,
+          "a pen should read back as it was set");
+
+    ZtextExtents stroked;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+                                   &stroked));
+    CHECK(stroked.x_max > bare.x_max && stroked.x_min < bare.x_min,
+          "a pen should grow the ink on both sides");
+    CHECK(stroked.x_advance == bare.x_advance,
+          "a pen should leave the advance alone");
+
+    ZtextStroke unnamed = pen;
+    unnamed.cap = (ZtextLineCap)99;
+    CHECK(ztextFaceSetStroke(face, &unnamed) == ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a cap this build does not name should be refused");
+    unnamed = pen;
+    unnamed.style = (ZtextStrokeStyle)99;
+    CHECK(ztextFaceSetStroke(face, &unnamed) == ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a stroke style this build does not name should be refused");
+
+    CHECK_OK(ztextFaceSetStroke(face, NULL));
+    ZtextExtents unstroked;
+    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+                                   &unstroked));
+    CHECK(unstroked.x_max == bare.x_max,
+          "clearing a pen should put the glyph back");
+  }
+
   phase("charmaps");
   // Which character map is selected decides what ztextFontGlyphIndex answers.
   // FreeType selects a Unicode one when it opens the font.

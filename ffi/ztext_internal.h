@@ -19,6 +19,7 @@
 #include FT_MULTIPLE_MASTERS_H
 #include FT_SIZES_H
 #include FT_OUTLINE_H
+#include FT_STROKER_H
 #include FT_TRUETYPE_TABLES_H
 
 #include <hb.h>
@@ -106,6 +107,16 @@ ZtextResult ztextInstallSheenbidiAllocator(void);
 /// A process-unique, never-reused value, for detecting that a handle a caller
 /// passed is not the one an earlier call was made against.
 uint64_t ztextNextGeneration(void);
+
+/// Pixels to FreeType's 26.6, rounded to nearest. Returns 0 for anything out
+/// of range, including NaN -- so the comparisons are written positively
+/// rather than as negated bounds, and 0 is never a value the caller meant.
+///
+/// One home for the conversion because there are two callers with the same
+/// requirement: a face's pixel size and a stroke's radius are both a positive
+/// length in pixels that FreeType takes in 26.6, and two copies of it could
+/// round or clamp differently.
+int32_t ztextToFixed266(float pixels);
 
 //===----------------------------------------------------------------------===//
 // Face activation
@@ -374,6 +385,33 @@ struct ZtextFace {
   /// amounts are only ZTEXT_SYNTHETIC_*_DEFAULT.
   float synthetic_bold;
   float synthetic_oblique;
+
+  /// The pen traced round every glyph this face draws; radius 0 for none.
+  /// See ztextFaceSetStroke.
+  ZtextStroke stroke;
+
+  /// FreeType's stroker, built on the first glyph that needs one and kept
+  /// for the face's life. It carries no per-glyph state between calls --
+  /// FT_Stroker_Set rewinds it -- so one per face is exactly the reuse
+  /// FreeType intends, and a per-glyph FT_Stroker_New would allocate its
+  /// internal borders again for every character on the screen.
+  FT_Stroker stroker;
+
+  /// The stroked outline of the glyph loaded last, owned by this face.
+  ///
+  /// FreeType's stroker exports into an FT_Outline the caller sizes, and an
+  /// FT_Outline carries no capacity of its own -- so the capacity is kept
+  /// here and the outline is only reallocated when a glyph needs more than
+  /// the largest one so far. Valid when `stroked_points` is non-zero.
+  FT_Outline stroked;
+  FT_UInt stroked_points;
+  FT_UInt stroked_contours;
+
+  /// The caller's 2x2, applied after the two above. The identity for a face
+  /// that has none -- stored rather than flagged, because "has one" is
+  /// exactly "is not the identity" and a flag could disagree with the matrix
+  /// beside it.
+  ZtextMatrix transform;
 
   /// The last rasterised glyph, COPIED out of the font's shared glyph slot.
   ///

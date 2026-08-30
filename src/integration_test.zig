@@ -2358,6 +2358,566 @@ test "decomposeOutline refuses an incomplete callback set" {
 }
 
 //=============================================================================
+// Subpixel rasterisation
+//=============================================================================
+
+test "an LCD bitmap is three samples per pixel, and says so" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('W');
+    const grey = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    const grey_width = grey.width;
+    const grey_height = grey.height;
+
+    const lcd = try face.renderGlyph(glyph, .lcd, .none, 0, 0);
+    try std.testing.expectEqual(ztext.BitmapFormat.lcd, lcd.format);
+    try std.testing.expectEqual(@as(u32, 3), ztext.bitmapChannels(lcd.format));
+    try std.testing.expectEqual(@as(u32, 1), ztext.bitmapChannels(.a8));
+
+    // width is in PIXELS, in every format. FreeType counts an LCD bitmap's
+    // width in samples, so a wrapper that passed its number on would report a
+    // glyph three times too wide -- the subpixel renderer pads by at most a
+    // pixel either side, never by a factor.
+    try std.testing.expect(lcd.width >= grey_width);
+    try std.testing.expect(lcd.width <= grey_width + 2);
+    try std.testing.expectEqual(grey_height, lcd.height);
+    // And pitch is bytes per pixel row, so pitch * height is the buffer.
+    try std.testing.expectEqual(@as(i32, @intCast(3 * lcd.width)), lcd.pitch);
+}
+
+test "an LCD_V bitmap is three sub-rows per pixel row, and says so" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('W');
+    const grey = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    const grey_width = grey.width;
+    const grey_height = grey.height;
+
+    const lcd = try face.renderGlyph(glyph, .lcd_v, .none, 0, 0);
+    try std.testing.expectEqual(ztext.BitmapFormat.lcd_v, lcd.format);
+    try std.testing.expectEqual(grey_width, lcd.width);
+    try std.testing.expect(lcd.height >= grey_height);
+    try std.testing.expect(lcd.height <= grey_height + 2);
+    try std.testing.expectEqual(@as(i32, @intCast(3 * lcd.width)), lcd.pitch);
+}
+
+test "the three subpixel samples are three samples, not one repeated" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('W');
+    const lcd = try face.renderGlyph(glyph, .lcd, .none, 0, 0);
+    const pixels = lcd.pixels.?;
+    const pitch: usize = @intCast(lcd.pitch);
+
+    // A stem edge covers its three stripes by different amounts -- that IS
+    // subpixel rendering, and a build that rendered once and copied the byte
+    // three times would pass every size check above and none of this.
+    var differing: usize = 0;
+    for (0..lcd.height) |y| {
+        for (0..lcd.width) |x| {
+            const at = y * pitch + 3 * x;
+            if (pixels[at] != pixels[at + 1] or pixels[at + 1] != pixels[at + 2]) {
+                differing += 1;
+            }
+        }
+    }
+    try std.testing.expect(differing > 0);
+}
+
+test "a subpixel render honours the hinting it was asked for" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    // Every hinting mode is a legal request in every non-SDF mode, and each
+    // produces ink. Normal hinting targets the subpixel grid; light is its
+    // own target and unrelated to the render mode.
+    const glyph = face.font.glyphIndex('H');
+    for ([_]ztext.RenderMode{ .lcd, .lcd_v }) |mode| {
+        for ([_]ztext.Hinting{ .normal, .light, .none }) |hinting| {
+            const bitmap = try face.renderGlyph(glyph, mode, hinting, 0, 0);
+            try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
+            try std.testing.expect(bitmap.pixels != null);
+        }
+    }
+}
+
+//=============================================================================
+// The stroker
+//=============================================================================
+
+/// A pen with no curves in it: straight-line joins and caps, so a stroked
+/// outline made of straight segments stays made of straight segments.
+///
+/// That matters for the measurements below. Ink extents come from FreeType's
+/// CONTROL box, which for an arc lies outside the arc -- with round joins the
+/// numbers would carry an overshoot that depends on the glyph. `H` is all
+/// straight lines, and a bevelled, butt-capped pen keeps it that way, so a
+/// radius of R widens the box by exactly 2R.
+fn squarePen(radius: f32) ztext.Stroke {
+    return .{
+        .radius = radius,
+        .miter_limit = 0,
+        .cap = .butt,
+        .join = .bevel,
+        .style = .grown,
+    };
+}
+
+fn inkedPixels(bitmap: ztext.GlyphBitmap) usize {
+    const pixels = bitmap.pixels orelse return 0;
+    const pitch: usize = @intCast(bitmap.pitch);
+    var inked: usize = 0;
+    for (0..bitmap.height) |y| {
+        for (0..bitmap.width) |x| {
+            if (pixels[y * pitch + x] != 0) inked += 1;
+        }
+    }
+    return inked;
+}
+
+test "a face has no pen until one is set, and null puts the glyph back" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    try std.testing.expectEqual(ztext.stroke_none, try face.stroke());
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+
+    try face.setStroke(squarePen(4));
+    try std.testing.expectEqual(@as(f32, 4), (try face.stroke()).radius);
+    try std.testing.expectEqual(ztext.LineJoin.bevel, (try face.stroke()).join);
+    try std.testing.expect((try face.glyphExtents(glyph, .none)).x_max > plain.x_max);
+
+    try face.setStroke(null);
+    try std.testing.expectEqual(ztext.stroke_none, try face.stroke());
+    const restored = try face.glyphExtents(glyph, .none);
+    try std.testing.expectEqual(plain.x_min, restored.x_min);
+    try std.testing.expectEqual(plain.x_max, restored.x_max);
+    try std.testing.expectEqual(plain.y_max, restored.y_max);
+    try std.testing.expectEqual(plain.y_min, restored.y_min);
+
+    // A zero radius is the same as no pen at all, so a caller can turn one
+    // off without a null.
+    try face.setStroke(squarePen(0));
+    try std.testing.expectEqual(plain.x_max, (try face.glyphExtents(glyph, .none)).x_max);
+}
+
+test "a pen of radius R grows the glyph by 2R and moves no advance" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+    const plain_shaped = try shapedAdvance(fixture, face, false);
+    const plain_shaped_ft = try shapedAdvance(fixture, face, true);
+
+    const radius: f32 = 4;
+    try face.setStroke(squarePen(radius));
+    const grown = try face.glyphExtents(glyph, .none);
+
+    // Half the pen's width on each side, in both axes. The tolerance is the
+    // 26.6 grid the outline lives on, not a fudge factor.
+    try std.testing.expectApproxEqAbs(plain.x_min - radius, grown.x_min, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.x_max + radius, grown.x_max, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.y_min - radius, grown.y_min, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.y_max + radius, grown.y_max, 2.0 / 64.0);
+
+    // The ink is wider than the advance now, and that is what outlined text
+    // looks like: the run is still laid out on the font's own advances, on
+    // both sides of the shaping boundary.
+    try std.testing.expectEqual(plain.x_advance, grown.x_advance);
+    // Each metrics source against itself: HarfBuzz scales advances linearly
+    // from design units and FreeType rounds them onto the pixel grid, so the
+    // two disagree about this run with or without a pen. What must not move
+    // is either one across the change.
+    try std.testing.expectEqual(plain_shaped, try shapedAdvance(fixture, face, false));
+    try std.testing.expectEqual(plain_shaped_ft, try shapedAdvance(fixture, face, true));
+}
+
+test "a pen reaches the pixels and the decomposed outline, not only extents" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    const plain_width = plain_bitmap.width;
+    const plain_height = plain_bitmap.height;
+
+    var plain_points = OutlineCollector{};
+    const plain_funcs = outlineFuncsInto(&plain_points);
+    try face.decomposeOutline(glyph, .none, &plain_funcs);
+
+    try face.setStroke(squarePen(4));
+    const grown_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    try std.testing.expect(grown_bitmap.width > plain_width);
+    try std.testing.expect(grown_bitmap.height > plain_height);
+
+    var grown_points = OutlineCollector{};
+    const grown_funcs = outlineFuncsInto(&grown_points);
+    try face.decomposeOutline(glyph, .none, &grown_funcs);
+    try std.testing.expect(grown_points.max_x - grown_points.min_x >
+        plain_points.max_x - plain_points.min_x);
+
+    // The three readers agree because there is one stroked outline, not three
+    // that had to be kept in step.
+    const grown = try face.glyphExtents(glyph, .none);
+    try std.testing.expectApproxEqAbs(
+        @as(f32, @floatFromInt(grown_points.max_x)) / 64.0,
+        grown.x_max,
+        1.0 / 64.0,
+    );
+}
+
+test "the glyph grown, shrunk, and the band between them" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    // Big enough that the stems are several times the pen. The inward contour
+    // of a stem thinner than the pen turns itself inside out -- that is what
+    // upstream produces, and ffi/ztext.h says so -- and this test is about
+    // the case where the pen fits.
+    try face.setPixelSize(128, 128);
+    const glyph = face.font.glyphIndex('H');
+    const radius: f32 = 4;
+
+    const plain = try face.glyphExtents(glyph, .none);
+    const plain_inked = inkedPixels(try face.renderGlyph(glyph, .a8, .none, 0, 0));
+
+    var pen = squarePen(radius);
+    pen.style = .grown;
+    try face.setStroke(pen);
+    const grown = try face.glyphExtents(glyph, .none);
+    const grown_inked = inkedPixels(try face.renderGlyph(glyph, .a8, .none, 0, 0));
+
+    pen.style = .shrunk;
+    try face.setStroke(pen);
+    const shrunk = try face.glyphExtents(glyph, .none);
+    const shrunk_inked = inkedPixels(try face.renderGlyph(glyph, .a8, .none, 0, 0));
+
+    pen.style = .band;
+    try face.setStroke(pen);
+    const band = try face.glyphExtents(glyph, .none);
+    const band_inked = inkedPixels(try face.renderGlyph(glyph, .a8, .none, 0, 0));
+
+    // GROWN pushes the outline out by the radius on every side, SHRUNK pulls
+    // it in by the same, and the BAND runs between them -- so the band's box
+    // is the grown one.
+    try std.testing.expectApproxEqAbs(plain.x_min - radius, grown.x_min, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.x_max + radius, grown.x_max, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.y_min - radius, grown.y_min, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.y_max + radius, grown.y_max, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.x_min + radius, shrunk.x_min, 2.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.x_max - radius, shrunk.x_max, 2.0 / 64.0);
+    try std.testing.expectEqual(grown.x_min, band.x_min);
+    try std.testing.expectEqual(grown.x_max, band.x_max);
+
+    // A bounding box cannot tell the band from the grown glyph -- they share
+    // one. The ink can: the band is hollow, and the hole is exactly what the
+    // shrunk glyph fills.
+    try std.testing.expect(grown_inked > plain_inked);
+    try std.testing.expect(grown_inked > band_inked);
+    try std.testing.expect(band_inked > 0);
+    try std.testing.expect(shrunk_inked < plain_inked);
+    try std.testing.expect(shrunk_inked > 0);
+    // The band and the shrunk glyph together cover the grown one, counting
+    // their shared boundary twice.
+    try std.testing.expect(band_inked + shrunk_inked >= grown_inked);
+}
+
+test "the pen traces the styled glyph, and the matrix maps what it traced" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const radius: f32 = 6;
+
+    // What the pen CONTRIBUTES to the width, measured rather than modelled.
+    const widthOf = struct {
+        fn f(f_: ztext.Face, g: u32) !f32 {
+            const e = try f_.glyphExtents(g, .none);
+            return e.x_max - e.x_min;
+        }
+    }.f;
+
+    const plain = try widthOf(face, glyph);
+    try face.setStroke(squarePen(radius));
+    const plain_stroked = try widthOf(face, glyph);
+    try face.setStroke(null);
+    const upright_gain = plain_stroked - plain;
+
+    // Upright, `H` is all vertical edges, so a bevelled pen pushes the two
+    // outermost ones sideways by exactly its radius: the gain is 2R.
+    try std.testing.expectApproxEqAbs(2 * radius, upright_gain, 4.0 / 64.0);
+
+    // Sheared 45 degrees, those edges are slanted, and a pen pushes a slanted
+    // edge sideways by LESS than its radius -- so the gain must come out
+    // SMALLER than upright. Traced before the shear instead, the pen's own
+    // 2R would be sheared along with the glyph and the gain would come out
+    // 2 * slant * R LARGER. The two answers are 8.5 px and 24 px here; the
+    // assertion only has to separate "less than 2R" from "more".
+    const slant: f32 = 1.0;
+    try face.setSyntheticOblique(slant);
+    const leaned = try widthOf(face, glyph);
+    try face.setStroke(squarePen(radius));
+    const leaned_stroked = try widthOf(face, glyph);
+    try face.setStroke(null);
+    try face.setSyntheticOblique(0);
+    const leaned_gain = leaned_stroked - leaned;
+
+    try std.testing.expect(leaned_gain < upright_gain);
+    try std.testing.expect(leaned_gain > upright_gain / 2);
+
+    // The same question on the other side of the pen. Stroked THEN mapped by
+    // 3x, the gain is stretched to 3 * 2R; mapped first, it would still be
+    // 2R -- 24 px against 12.
+    try face.setTransform(ztext.scaling(3, 1));
+    const wide = try widthOf(face, glyph);
+    try face.setStroke(squarePen(radius));
+    const wide_stroked = try widthOf(face, glyph);
+    try face.setStroke(null);
+    try face.setTransform(null);
+
+    try std.testing.expectApproxEqAbs(
+        3 * upright_gain,
+        wide_stroked - wide,
+        8.0 / 64.0,
+    );
+}
+
+test "a pen that cannot be drawn is refused, and a glyph with no ink is left alone" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const bad = [_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) };
+    for (bad) |value| {
+        var pen = squarePen(4);
+        pen.radius = value;
+        try std.testing.expectError(ztext.Error.InvalidArgument, face.setStroke(pen));
+        pen = squarePen(4);
+        pen.miter_limit = value;
+        try std.testing.expectError(ztext.Error.InvalidArgument, face.setStroke(pen));
+    }
+    // Larger than FreeType's 26.6 can hold: refused rather than silently
+    // converted to zero, which would read as "no stroke".
+    try std.testing.expectError(ztext.Error.InvalidArgument, face.setStroke(squarePen(1.0e6)));
+    // None of that left a pen behind.
+    try std.testing.expectEqual(ztext.stroke_none, try face.stroke());
+
+    // A space has no path to trace, and stroking nothing is still nothing.
+    try face.setStroke(squarePen(4));
+    const space = face.font.glyphIndex(' ');
+    const bitmap = try face.renderGlyph(space, .a8, .none, 0, 0);
+    try std.testing.expectEqual(@as(u32, 0), bitmap.width);
+    try std.testing.expectEqual(@as(u32, 0), bitmap.height);
+}
+
+test "a pen outlives the glyphs it drew, and grows to the widest of them" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    // The face keeps one stroked outline and one stroker across glyphs, so a
+    // small glyph after a large one must not read the large one's points --
+    // and a large one after a small one must not be truncated to it.
+    try face.setStroke(squarePen(3));
+    const order = "iWmlM.W";
+    var widths: [order.len]f32 = undefined;
+    for (order, 0..) |ch, i| {
+        const extents = try face.glyphExtents(face.font.glyphIndex(ch), .none);
+        widths[i] = extents.x_max - extents.x_min;
+    }
+    // Measured the other way round, every glyph must come out the same: a
+    // buffer sized for the previous glyph would truncate the wider ones, and
+    // a count left over from it would inflate the narrower ones.
+    var i = order.len;
+    while (i > 0) {
+        i -= 1;
+        const extents = try face.glyphExtents(face.font.glyphIndex(order[i]), .none);
+        try std.testing.expectEqual(widths[i], extents.x_max - extents.x_min);
+    }
+}
+
+//=============================================================================
+// The face transform
+//=============================================================================
+
+test "a face is created with the identity, and null clears back to it" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    try std.testing.expectEqual(ztext.matrix_identity, try face.transform());
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+
+    try face.setTransform(ztext.scaling(2, 1));
+    try std.testing.expectEqual(@as(f32, 2), (try face.transform()).xx);
+    try face.setTransform(null);
+    try std.testing.expectEqual(ztext.matrix_identity, try face.transform());
+
+    // Cleared means cleared: the glyph is the one it was.
+    const restored = try face.glyphExtents(glyph, .none);
+    try std.testing.expectEqual(plain.x_min, restored.x_min);
+    try std.testing.expectEqual(plain.x_max, restored.x_max);
+    try std.testing.expectEqual(plain.y_max, restored.y_max);
+
+    // Explicitly setting the identity is the same as clearing it.
+    try face.setTransform(ztext.matrix_identity);
+    try std.testing.expectEqual(plain.x_max, (try face.glyphExtents(glyph, .none)).x_max);
+}
+
+test "a transform maps the ink and leaves every advance in text space" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+    const plain_shaped = try shapedAdvance(fixture, face, false);
+
+    try face.setTransform(ztext.scaling(2, 1));
+    const wide = try face.glyphExtents(glyph, .none);
+    try face.setTransform(null);
+
+    // The ink doubles horizontally and does not move vertically.
+    try std.testing.expectApproxEqAbs(
+        2 * (plain.x_max - plain.x_min),
+        wide.x_max - wide.x_min,
+        2.0 / 64.0,
+    );
+    try std.testing.expectApproxEqAbs(plain.y_max, wide.y_max, 1.0 / 64.0);
+
+    // A shear, which is the only shape that can tell the two off-diagonal
+    // terms apart: xy leans the glyph along x as y rises, and yx would lean
+    // it along y instead. A diagonal matrix cannot see the difference.
+    try face.setTransform(ztext.shear(0.5));
+    const leaned = try face.glyphExtents(glyph, .none);
+    try face.setTransform(null);
+    try std.testing.expect(leaned.x_max > plain.x_max);
+    try std.testing.expectApproxEqAbs(plain.y_max, leaned.y_max, 1.0 / 64.0);
+    try std.testing.expectApproxEqAbs(plain.y_min, leaned.y_min, 1.0 / 64.0);
+
+    // The advance does not, on either side of the boundary: FreeType's own
+    // FT_Set_Transform would have doubled this one, and a shaped run's
+    // advances -- which come from HarfBuzz, with no matrix to be told about --
+    // could not have followed it.
+    try face.setTransform(ztext.scaling(2, 1));
+    try std.testing.expectEqual(plain.x_advance, (try face.glyphExtents(glyph, .none)).x_advance);
+    try std.testing.expectEqual(plain_shaped, try shapedAdvance(fixture, face, false));
+    try face.setTransform(null);
+}
+
+test "a transform reaches render and outline decomposition, not only extents" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    const plain_width = plain_bitmap.width;
+
+    var plain_points = OutlineCollector{};
+    const plain_funcs = outlineFuncsInto(&plain_points);
+    try face.decomposeOutline(glyph, .none, &plain_funcs);
+
+    try face.setTransform(ztext.scaling(2, 1));
+    const wide_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
+    var wide_points = OutlineCollector{};
+    const wide_funcs = outlineFuncsInto(&wide_points);
+    try face.decomposeOutline(glyph, .none, &wide_funcs);
+    try face.setTransform(null);
+
+    try std.testing.expect(wide_bitmap.width > plain_width);
+    try std.testing.expect(wide_points.max_x - wide_points.min_x >
+        plain_points.max_x - plain_points.min_x);
+}
+
+test "a transform composes after the synthetic styles, not before" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+
+    // Emboldening is isotropic: it adds the same amount to width and to
+    // height, in the FONT's space.
+    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    const bold = try face.glyphExtents(glyph, .none);
+    const grew_x = (bold.x_max - bold.x_min) - (plain.x_max - plain.x_min);
+    const grew_y = (bold.y_max - bold.y_min) - (plain.y_max - plain.y_min);
+    try std.testing.expectApproxEqAbs(grew_x, grew_y, 2.0 / 64.0);
+
+    // Under a 2x horizontal map, the whole bold glyph doubles -- the widening
+    // included. Applied the other way round, the widening would be added
+    // after the stretch and the width would grow by grew_x rather than by
+    // 2 * grew_x.
+    try face.setTransform(ztext.scaling(2, 1));
+    const bold_wide = try face.glyphExtents(glyph, .none);
+    try face.setTransform(null);
+    try face.setSyntheticBold(0);
+
+    try std.testing.expectApproxEqAbs(
+        2 * (bold.x_max - bold.x_min),
+        bold_wide.x_max - bold_wide.x_min,
+        2.0 / 64.0,
+    );
+}
+
+test "a transform that is not made of numbers is refused" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const bad = [_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) };
+    for (bad) |value| {
+        for (0..4) |i| {
+            var matrix = ztext.matrix_identity;
+            switch (i) {
+                0 => matrix.xx = value,
+                1 => matrix.xy = value,
+                2 => matrix.yx = value,
+                else => matrix.yy = value,
+            }
+            try std.testing.expectError(ztext.Error.InvalidArgument, face.setTransform(matrix));
+        }
+    }
+    // Refused, and the face is where it was.
+    try std.testing.expectEqual(ztext.matrix_identity, try face.transform());
+}
+
+//=============================================================================
 // Character maps
 //=============================================================================
 

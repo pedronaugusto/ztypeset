@@ -1517,6 +1517,23 @@ typedef enum ZtextRenderMode {
   /// rising inside. See README for what it costs and what it is good for --
   /// measured, not assumed.
   ZTEXT_RENDER_MODE_SDF = 1,
+  /// Subpixel coverage for an LCD whose stripes run horizontally: three bytes
+  /// per pixel, one per stripe, in the panel's own left-to-right order.
+  ///
+  /// This build renders it in FreeType's HARMONY mode -- three coverage
+  /// samples a third of a pixel apart rather than one sample through a filter
+  /// -- because FT_CONFIG_OPTION_SUBPIXEL_RENDERING is off, which is
+  /// upstream's default. Harmony needs no filter to be chosen and produces no
+  /// colour fringing of its own; the alternative is a COMPILE-time FreeType
+  /// option and not a runtime one, so it is not a choice ztext could offer
+  /// both of. See ffi/ztext_ftoption.h.
+  ///
+  /// Which stripe order a panel has is the consumer's to know: ztext hands
+  /// back the three samples in geometric order and does not reverse them for
+  /// a BGR panel, because it cannot know.
+  ZTEXT_RENDER_MODE_LCD = 2,
+  /// The same, for a panel whose stripes run vertically.
+  ZTEXT_RENDER_MODE_LCD_V = 3,
 } ZtextRenderMode;
 
 typedef enum ZtextHinting {
@@ -1529,6 +1546,52 @@ typedef enum ZtextHinting {
   /// No hinting. Required for SDF, which wants unhinted outlines.
   ZTEXT_HINTING_NONE = 2,
 } ZtextHinting;
+
+/// A 2x2 linear map applied to every glyph this face draws.
+///
+/// x' = xx*x + xy*y and y' = yx*x + yy*y, with y UP, which is FreeType's
+/// convention and the one every coordinate ztext reports uses. The identity is
+/// { 1, 0, 0, 1 }, and a face is created with it.
+///
+/// There is deliberately no translation here. A glyph is shifted by
+/// ztextFaceRenderGlyph's offset_x and offset_y, which is where sub-pixel
+/// positioning already lives; a second way to say the same thing is a second
+/// place for it to be said differently.
+typedef struct ZtextMatrix {
+  float xx;
+  float xy;
+  float yx;
+  float yy;
+} ZtextMatrix;
+
+/// Sets this face's transform, or clears it when `matrix` is NULL. Reading it
+/// back gives the identity for a face that has none.
+///
+/// This is FreeType's FT_Set_Transform, applied where ztext can compose it
+/// correctly: AFTER any synthetic bold or oblique, so emboldening stays
+/// isotropic in the font's own space instead of being stretched by whatever
+/// the caller is mapping into. Hinting still happens in the untransformed
+/// space, as it does upstream, because the outline is loaded and hinted before
+/// this runs.
+///
+/// It reaches the glyph IMAGE and nothing else, and that is a decision rather
+/// than an omission. ztextFaceGlyphExtents, ztextFaceRenderGlyph and
+/// ztextFaceDecomposeOutline agree on one transformed glyph; every ADVANCE --
+/// this face's, and every advance a shaped run reports -- stays in the text's
+/// own space. FreeType's FT_Set_Transform does transform the advance, but a
+/// shaped run's advances come from HarfBuzz, which has no matrix to be told
+/// about, so transforming one and not the other would make the two disagree
+/// by exactly the caller's matrix. The model this leaves is the one every
+/// shaping stack uses: lay the run out in text space, then map the whole run
+/// -- pen positions and glyph images together -- with the same matrix.
+///
+/// Nothing is validated beyond being finite. A singular matrix produces an
+/// empty glyph, which is what a collapsed transform means, and a mirrored one
+/// is a legitimate thing to ask for.
+ZTEXT_API ZtextResult ztextFaceSetTransform(ZtextFace* face,
+                                            const ZtextMatrix* matrix);
+ZTEXT_API ZtextResult ztextFaceTransform(const ZtextFace* face,
+                                         ZtextMatrix* out);
 
 /// FreeType's own reference emboldening: 0x0AAA/65536 of the em, which is
 /// what FT_GlyphSlot_Embolden applies. HarfBuzz documents 0.01 to 0.05 as the
@@ -1569,6 +1632,133 @@ ZTEXT_API ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face,
                                                 float strength);
 ZTEXT_API ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face,
                                                    float slant);
+
+/// How the two ends of an open path are finished. FreeType's
+/// FT_Stroker_LineCap, restated so a consumer switches on ztext's own enum.
+///
+/// A glyph contour is closed, so this is only reached where a contour is
+/// left open -- which FreeType's stroker does at a path it cannot close.
+typedef enum ZtextLineCap {
+  /// Stop dead at the end point.
+  ZTEXT_LINE_CAP_BUTT = 0,
+  /// A half-disc of the pen's radius.
+  ZTEXT_LINE_CAP_ROUND = 1,
+  /// A half-square of the pen's radius.
+  ZTEXT_LINE_CAP_SQUARE = 2,
+} ZtextLineCap;
+
+/// How two segments meet at a corner. FreeType's FT_Stroker_LineJoin.
+typedef enum ZtextLineJoin {
+  /// An arc of the pen's radius. Never spikes, at any angle.
+  ZTEXT_LINE_JOIN_ROUND = 0,
+  /// Cut straight across the corner.
+  ZTEXT_LINE_JOIN_BEVEL = 1,
+  /// A miter that falls back to a bevel past `miter_limit` -- the join XPS
+  /// and PostScript specify, and FreeType's FT_STROKER_LINEJOIN_MITER.
+  ZTEXT_LINE_JOIN_MITER = 2,
+  /// A miter TRIMMED at `miter_limit` rather than dropped, which is what SVG
+  /// and PDF specify. FreeType's FT_STROKER_LINEJOIN_MITER_FIXED.
+  ZTEXT_LINE_JOIN_MITER_FIXED = 3,
+} ZtextLineJoin;
+
+/// Which of the three shapes a pen traced round a glyph is kept.
+///
+/// The stroker walks each contour and produces two of them, the contour
+/// pushed OUT by the radius and the contour pushed IN by it, wound against
+/// each other. Keeping both gives the band between them; keeping either one
+/// alone gives a solid shape. All three are named for what they ARE rather
+/// than for which of FreeType's borders they came from, because what a caller
+/// chooses between is three pictures.
+///
+/// The measurements quoted below are Noto Sans `H` at 128 px with a radius
+/// of 4, whose stems are several times the pen.
+typedef enum ZtextStrokeStyle {
+  /// The BAND the pen sweeps along the glyph's contour: 2R wide, centred on
+  /// the outline, hollow in the middle. A genuinely outlined letter, in one
+  /// pass. FreeType's FT_Glyph_Stroke.
+  ///
+  /// Measured: the ink box is the glyph's own grown by the radius on every
+  /// side, and it inks 4255 pixels against the grown shape's 4762 -- the
+  /// difference being the hole.
+  ///
+  /// The hole closes when a stem is thinner than the pen, because the inward
+  /// contour then turns itself inside out. At 32 px with the same radius --
+  /// stems of about 3 px against a pen of 4 -- this band and
+  /// ZTEXT_STROKE_STYLE_GROWN measure identical, to the pixel.
+  ZTEXT_STROKE_STYLE_BAND = 0,
+  /// The glyph GROWN by the radius, solid: the outward contour and everything
+  /// inside it. FT_Glyph_StrokeBorder's outside border.
+  ///
+  /// This is the bottom layer of the two-pass outlined text every game UI
+  /// draws -- render it in the outline's colour, then the unstroked glyph on
+  /// top -- and it is what `ztext.outline(radius)` selects.
+  ///
+  /// Measured: ink box [-0.891, 24.578] against the glyph's [3.109, 20.578]
+  /// at 32 px, exactly the radius on each side.
+  ZTEXT_STROKE_STYLE_GROWN = 1,
+  /// The glyph SHRUNK by the radius, solid: the inward contour and everything
+  /// inside it. FT_Glyph_StrokeBorder's inside border.
+  ///
+  /// Measured: the ink box comes in by exactly the radius on each side, and
+  /// it inks less than the unstroked glyph. A stem thinner than the pen is a
+  /// stem this contour cannot stay inside of, and FreeType does not clip it
+  /// -- it self-intersects, and the box comes out WIDER than the glyph rather
+  /// than narrower. That is the shape upstream produces, reported as it is.
+  ZTEXT_STROKE_STYLE_SHRUNK = 2,
+} ZtextStrokeStyle;
+
+/// A pen traced around every glyph this face draws.
+typedef struct ZtextStroke {
+  /// HALF the pen's width, in PIXELS at this face's current size. 0 or less
+  /// turns stroking off, and is what a face is created with.
+  ///
+  /// Pixels, where ztextFaceSetSyntheticBold takes a fraction of the em, and
+  /// the difference is the point rather than an inconsistency: synthetic bold
+  /// fakes a WEIGHT, which is a property of the design and has to hold across
+  /// sizes, while a stroke is an ornament drawn for a display -- a one-pixel
+  /// outline is legible at 12px and at 72px, and an em fraction would make it
+  /// invisible at one and a slab at the other. It is also FreeType's unit for
+  /// FT_Stroker_Set. A caller who does want it to scale multiplies by the
+  /// ppem it asked for.
+  float radius;
+
+  /// How far a miter join may run past the corner before ZTEXT_LINE_JOIN_MITER
+  /// gives up and bevels, or ZTEXT_LINE_JOIN_MITER_FIXED trims -- as a
+  /// multiple of `radius`. Ignored by the other two joins. 0 or less means
+  /// FreeType's own default of 4, which is also SVG's and PostScript's.
+  float miter_limit;
+
+  ZtextLineCap cap;
+  ZtextLineJoin join;
+  ZtextStrokeStyle style;
+} ZtextStroke;
+
+/// Sets this face's stroke, or clears it when `stroke` is NULL or its radius
+/// is 0. Reading it back gives a zero radius for a face that has none.
+///
+/// This is FreeType's stroker (FT_Stroker_ParseOutline and its exports) run
+/// at glyph LOADING, so ztextFaceGlyphExtents, ztextFaceRenderGlyph and
+/// ztextFaceDecomposeOutline all agree on one stroked glyph -- the outline
+/// that is measured is the outline that is drawn. Composition is fixed and
+/// stated once: synthetic bold and oblique first, because they are part of
+/// the font's design; then the pen; then the caller's matrix, which maps the
+/// finished shape. A pen applied before emboldening would be widened by the
+/// emboldening, and one applied after the matrix would be a pen in device
+/// space -- both are legitimate effects, and neither is what "outline this
+/// text" means.
+///
+/// No ADVANCE moves, and no advance should: a stroked glyph is wider than its
+/// ink box by the radius on each side, and the run it belongs to is still
+/// laid out on the font's own advances. That is FreeType's behaviour for
+/// FT_Glyph_Stroke too. It also means a face's stroke does not change what a
+/// SHAPED run reports, so setting one does not stale an existing measurement.
+///
+/// Hinting happens before this, on the unstroked outline, as it does for the
+/// matrix. A radius that is not a finite number, or a `style`, `cap` or
+/// `join` this build does not name, is ZTEXT_RESULT_INVALID_ARGUMENT.
+ZTEXT_API ZtextResult ztextFaceSetStroke(ZtextFace* face,
+                                         const ZtextStroke* stroke);
+ZTEXT_API ZtextResult ztextFaceStroke(const ZtextFace* face, ZtextStroke* out);
 
 /// Callbacks for ztextFaceDecomposeOutline, one per outline command. Points
 /// are in 26.6 fixed point, at this face's current size. Modelled on
@@ -1613,7 +1803,22 @@ typedef enum ZtextBitmapFormat {
   /// outline and larger values are inside. The ramp's half-width in pixels is
   /// the library's SDF spread -- see ztextLibrarySetSdfSpread.
   ZTEXT_BITMAP_FORMAT_SDF = 1,
+  /// Three bytes per pixel, side by side: the pixel at (x, y) is the three
+  /// bytes at `pixels[y * pitch + 3 * x]`.
+  ZTEXT_BITMAP_FORMAT_LCD = 2,
+  /// Three bytes per pixel, one above the other: the pixel at (x, y) is
+  /// `pixels[y * pitch + k * width + x]` for k of 0, 1, 2. That is FreeType's
+  /// own layout -- three sub-rows per pixel row -- restated rather than
+  /// repacked, so no consumer pays for a shuffle it may not want.
+  ZTEXT_BITMAP_FORMAT_LCD_V = 3,
 } ZtextBitmapFormat;
+
+/// Bytes per pixel in `format`: 1 for A8 and SDF, 3 for both LCD formats.
+///
+/// A function rather than a table in this comment, because a consumer that
+/// switches on the format has a default branch this build's newest value would
+/// fall through. 0 for a value this build does not name.
+ZTEXT_API uint32_t ztextBitmapFormatChannels(ZtextBitmapFormat format);
 
 typedef struct ZtextGlyphBitmap {
   /// Owned by the FACE, and valid until the next ztextFaceRenderGlyph on it.
@@ -1638,11 +1843,15 @@ typedef struct ZtextGlyphBitmap {
   /// First after the pointer on purpose: it has to be read before the pixels
   /// it describes are interpreted.
   ZtextBitmapFormat format;
+  /// The glyph's size in PIXELS, in every format -- not in bytes and not in
+  /// FreeType's rows, both of which are three times this for one of the LCD
+  /// formats. `left` and `top` are in pixels too, so the three agree.
   uint32_t width;
   uint32_t height;
-  /// Bytes per row. Always positive and always tightly packed, because the
-  /// copy above normalises FreeType's bottom-up bitmaps on the way out -- so
-  /// a consumer cannot render upside down by ignoring a sign.
+  /// Bytes per PIXEL ROW, so `pitch * height` is the buffer's size in every
+  /// format. Always positive and always tightly packed, because the copy
+  /// above normalises FreeType's bottom-up bitmaps on the way out -- so a
+  /// consumer cannot render upside down by ignoring a sign.
   int32_t pitch;
   /// Pen-relative position of the bitmap's top-left corner, in pixels, y-up.
   int32_t left;
@@ -1657,6 +1866,11 @@ typedef struct ZtextGlyphBitmap {
 /// SDF mode forces unhinted loading regardless of `hinting`, because a hinted
 /// outline produces a distance field that does not match the shape at other
 /// sizes -- which is the only reason to want one.
+///
+/// The two LCD modes hint against the subpixel grid they are about to be
+/// sampled on (FT_LOAD_TARGET_LCD and FT_LOAD_TARGET_LCD_V) when `hinting` is
+/// normal. Light hinting is its own target, unrelated to the render mode, and
+/// is honoured as asked in every mode.
 ///
 /// `offset_x`/`offset_y` place the glyph at a fractional pixel offset, in
 /// 26.6 fixed point -- the unit FreeType uses and shaping advances already
@@ -1776,6 +1990,10 @@ typedef struct ZtextAbiLayout {
 
   uint32_t charmap_size;
   uint32_t charmap_align;
+  uint32_t matrix_size;
+  uint32_t matrix_align;
+  uint32_t stroke_size;
+  uint32_t stroke_align;
 
   uint32_t visual_run_size;
   uint32_t visual_run_align;
@@ -1817,6 +2035,12 @@ typedef struct ZtextAbiLayout {
   uint32_t hinting_last;
   uint32_t bitmap_format_size;
   uint32_t bitmap_format_last;
+  uint32_t line_cap_size;
+  uint32_t line_cap_last;
+  uint32_t line_join_size;
+  uint32_t line_join_last;
+  uint32_t stroke_style_size;
+  uint32_t stroke_style_last;
   uint32_t encoding_size;
   uint32_t encoding_last;
   /// ZtextSegmentation is a bit mask, so `segmentation_last` is

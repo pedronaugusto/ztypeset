@@ -108,9 +108,21 @@ pub const synthetic_bold_default = c.synthetic_bold_default;
 pub const synthetic_oblique_default = c.synthetic_oblique_default;
 
 pub const Charmap = types_mod.Charmap;
+pub const Matrix = types_mod.Matrix;
+pub const matrix_identity = types_mod.matrix_identity;
+pub const rotation = types_mod.rotation;
+pub const scaling = types_mod.scaling;
+pub const shear = types_mod.shear;
+pub const LineCap = types_mod.LineCap;
+pub const LineJoin = types_mod.LineJoin;
+pub const StrokeStyle = types_mod.StrokeStyle;
+pub const Stroke = types_mod.Stroke;
+pub const stroke_none = types_mod.stroke_none;
+pub const outline = types_mod.outline;
 pub const Glyph = types_mod.Glyph;
 pub const GlyphFlag = types_mod.GlyphFlag;
 pub const glyphHas = types_mod.glyphHas;
+pub const bitmapChannels = types_mod.bitmapChannels;
 pub const Segmentation = types_mod.Segmentation;
 pub const segmentation = types_mod.segmentation;
 pub const segmentationHas = types_mod.segmentationHas;
@@ -364,7 +376,7 @@ test "the C library agrees with the extern declarations in c.zig" {
     );
     try std.testing.expectEqual(@as(u32, @sizeOf(c.RenderMode)), layout.render_mode_size);
     try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.RenderMode.sdf))),
+        @as(u32, @intCast(@intFromEnum(c.RenderMode.lcd_v))),
         layout.render_mode_last,
     );
     try std.testing.expectEqual(@as(u32, @sizeOf(c.Hinting)), layout.hinting_size);
@@ -377,7 +389,7 @@ test "the C library agrees with the extern declarations in c.zig" {
         layout.bitmap_format_size,
     );
     try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.BitmapFormat.sdf))),
+        @as(u32, @intCast(@intFromEnum(c.BitmapFormat.lcd_v))),
         layout.bitmap_format_last,
     );
     try std.testing.expectEqual(
