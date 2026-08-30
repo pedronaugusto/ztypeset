@@ -110,7 +110,7 @@ Measured on x86_64-windows, both the gnu and the MSVC ABI:
 |---|---|---|---|
 | `ZtextGlyph` | 24 B | 28 B | `flags` at offset 8, after `cluster` |
 | `ZtextGlyphBitmap` | 32 B | 40 B | `format` at offset 8, immediately after `pixels` — it has to be read before they are interpreted |
-| `ZtextAbiLayout` | 192 B | 224 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
+| `ZtextAbiLayout` | 192 B | 232 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
 
 `ZtextMetric` reports a **count** rather than a last value, alone among the
 enums in the handshake: its enumerators are four-character OpenType tags, so
@@ -124,6 +124,29 @@ says.
 
 ### Changed
 
+- **Text may be UTF-8, UTF-16 or UTF-32.** Every entry point that takes text
+  takes a `ZtextEncoding` with it, and every offset and length beside it — a
+  run's, a line's, a glyph's cluster, an index into a break array — is counted
+  in that encoding's code units. All three upstreams take all three natively
+  (SheenBidi's `SBStringEncoding`, libunibreak's `set_*_utf8/utf16/utf32`,
+  `hb_buffer_add_utf8/utf16/utf32`), so ztext transcodes nothing and a host
+  whose strings are UTF-16 pays no copy, no allocation and no offset mapping.
+  Three entry points are renamed rather than duplicated, because an adapter
+  taking UTF-8 alone would be a second way to say the same thing:
+  `ztextShaperShapeUtf8` → `ztextShaperShape`, `ztextParagraphCreateUtf8` →
+  `ztextParagraphCreate`, and `ztextFontCoveredPrefix` gains the same
+  parameter. `ztextParagraphEncoding` reports what a paragraph was built from,
+  because a run list is routinely passed on without its text.
+- **`ZTEXT_RESULT_INVALID_UTF8` is `ZTEXT_RESULT_INVALID_TEXT`** (same value,
+  3), and the Zig error `InvalidUtf8` is `InvalidText`: it now means "not
+  well-formed in the encoding it was passed in", which for UTF-16 is an
+  unpaired surrogate and for UTF-32 is a unit that is not a scalar value.
+- **Zig callers never name an encoding.** `Paragraph.init`, `Shaper.shape`,
+  `Shaper.shapeRun` and `Font.coveredPrefix` take the text itself, and the
+  encoding is read off the slice's ELEMENT type — `u8`, `u16` or `u32`. The
+  one mistake the C ABI cannot prevent, text in one encoding declared as
+  another, does not compile here. The cost is that `&.{ 0xFF, 0xFE }` no
+  longer infers a `[]const u8`: write `&[_]u8{ ... }`.
 - **`ztext.setAllocator` takes a `std.mem.Allocator` by value.** It took a
   `*const std.mem.Allocator` whose pointee the caller had to keep alive for
   longer than a caller can compute: the C side copies the bridge — `user`

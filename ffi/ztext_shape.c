@@ -144,10 +144,11 @@ static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
   return true;
 }
 
-ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
-                                 const char* text, size_t length,
-                                 size_t run_offset, size_t run_length,
-                                 const ZtextShapeParams* params) {
+ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
+                             const void* text, size_t length,
+                             ZtextEncoding encoding, size_t run_offset,
+                             size_t run_length,
+                             const ZtextShapeParams* params) {
   if (shaper == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
 
   // Invalidate before validating. With the reset further down, an argument
@@ -162,7 +163,13 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
 
   if (face == NULL || params == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
   if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  // HarfBuzz counts text in unsigned int.
+  // Zero for an encoding this build does not name, which is how a consumer
+  // compiled against a newer header is refused rather than misread.
+  if (ztextEncodingUnitSize(encoding) == 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  // HarfBuzz counts text in unsigned int, in code units of whichever
+  // hb_buffer_add_* it is given.
   if (length > (size_t)INT_MAX) return ZTEXT_RESULT_INVALID_ARGUMENT;
   if (params->feature_count != 0u && params->features == NULL) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
@@ -171,11 +178,14 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
   // range that looks valid.
   if (run_offset > length) return ZTEXT_RESULT_INVALID_ARGUMENT;
   if (run_length > length - run_offset) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (!ztextIsValidUtf8(text, length)) return ZTEXT_RESULT_INVALID_UTF8;
+  if (!ztextTextIsWellFormed(text, length, encoding)) {
+    return ZTEXT_RESULT_INVALID_TEXT;
+  }
   // A run that starts or ends inside a character would hand HarfBuzz half of
   // one. Refused rather than shaped, as everywhere else that takes a range.
-  if (ztextSplitsUtf8Character(text, length, run_offset) ||
-      ztextSplitsUtf8Character(text, length, run_offset + run_length)) {
+  if (ztextTextSplitsCharacter(text, length, encoding, run_offset) ||
+      ztextTextSplitsCharacter(text, length, encoding,
+                               run_offset + run_length)) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
 
@@ -191,8 +201,21 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
   // The WHOLE text goes in and only the run is selected. HarfBuzz shapes the
   // item range and uses everything around it as context, which is what makes
   // joining correct across a boundary the host chose.
-  hb_buffer_add_utf8(buffer, text, (int)length, (unsigned int)run_offset,
-                     (int)run_length);
+  switch (encoding) {
+    case ZTEXT_ENCODING_UTF16:
+      hb_buffer_add_utf16(buffer, (const uint16_t*)text, (int)length,
+                          (unsigned int)run_offset, (int)run_length);
+      break;
+    case ZTEXT_ENCODING_UTF32:
+      hb_buffer_add_utf32(buffer, (const uint32_t*)text, (int)length,
+                          (unsigned int)run_offset, (int)run_length);
+      break;
+    case ZTEXT_ENCODING_UTF8:
+    default:
+      hb_buffer_add_utf8(buffer, (const char*)text, (int)length,
+                         (unsigned int)run_offset, (int)run_length);
+      break;
+  }
   if (!hb_buffer_allocation_successful(buffer)) {
     return ZTEXT_RESULT_OUT_OF_MEMORY;
   }

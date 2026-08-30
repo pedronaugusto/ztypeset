@@ -11,8 +11,9 @@ wired together, with no renderer, no atlas and no layout engine attached.
 - Fonts load **from memory**. There is no path-based API at all — a host
   feeding fonts out of an asset pack has bytes, not paths — and a font parsed
   once serves every size you draw it at.
-- Shape a UTF-8 run → glyph ids, advances, offsets, and a cluster map in **byte
-  offsets**.
+- Shape a run of **UTF-8, UTF-16 or UTF-32** → glyph ids, advances, offsets,
+  and a cluster map in **code-unit offsets** of whichever encoding you passed.
+  All three upstreams take all three natively, so ztext transcodes nothing.
 - Bidi paragraph → ordered visual runs, plus script itemisation, so mixed text
   can be split into runs a shaper can actually take — and **per line**, because
   UAX #9 applies rules L1 and L2 over a line and not over a paragraph.
@@ -405,10 +406,11 @@ software. ztext's job is narrower and it should be said plainly:
   overflow-checked arithmetic in the allocator and the array helper, and
   refusing a font larger than HarfBuzz's `unsigned int` blob length rather than
   truncating it.
-- **Validating UTF-8 before either library sees it.** HarfBuzz substitutes
-  U+FFFD for malformed input and SheenBidi has its own recovery. Reasonable for
-  a text editor, wrong for an engine reading a localisation table, where
-  malformed bytes mean the table is corrupt. ztext returns `InvalidUtf8`.
+- **Validating the text before either library sees it**, in whichever of the
+  three encodings it arrived in. HarfBuzz substitutes U+FFFD for malformed
+  input and SheenBidi has its own recovery. Reasonable for a text editor,
+  wrong for an engine reading a localisation table, where malformed input
+  means the table is corrupt. ztext returns `InvalidText`.
 - **Turning failures into typed errors**, and separating *"this format is not
   compiled in"* from *"these bytes are broken"* — the first tells you to
   re-cook, the second to go looking for corruption.
@@ -582,11 +584,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**113 tests**, executed twice. The second pass runs the same binary with
+**116 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **226/226 passed**.
+rather than being believed. So `zig build test` reports **232/232 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -596,9 +598,9 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
   kerning in Latin, cursive joining and mark attachment in Arabic, right-to-left
   without joining in Hebrew — with features switched off to prove the
   difference is real.
-- **Cluster maps**: byte offsets in range, never pointing at a UTF-8
-  continuation byte, monotone in visual order, and a ligature carrying the
-  cluster of the first character it swallowed.
+- **Cluster maps**: code-unit offsets in range, never pointing inside a
+  character, monotone in visual order, and a ligature carrying the cluster of
+  the first character it swallowed.
 - **Bidi**: base-level resolution both ways, visual runs that tile the
   paragraph exactly once with no byte dropped or doubled, and script runs that
   are contiguous and complete.
@@ -621,7 +623,8 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
   18.25, 18.5 and 18.75 px are strictly increasing, and FreeType's
   whole-pixel grid-fitting of *face* metrics is pinned separately so it does
   not read as a bug.
-- **Hostile input**: malformed UTF-8 of eight shapes, non-font bytes, truncated
+- **Hostile input**: malformed UTF-8 of eight shapes, an unpaired UTF-16
+  surrogate, a UTF-32 unit that is not a scalar, non-font bytes, truncated
   prefixes, and byte mutations across the table directory — each of which must
   produce a typed error or behave, never crash.
 - **A font FreeType accepts and HarfBuzz rejects** — a doctored sfnt version
@@ -676,7 +679,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 75 entry points with
+And `tests/null_sweep.c` calls **every one of the 76 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -904,7 +907,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **43** deliberate bugs, one at a time, to a copy of the tree, and
+applies **47** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -915,6 +918,7 @@ asserts a **named** test catches each:
 | Metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
+| Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, an allocator slot taken per install rather than per allocator, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed — planted where `ztextSetAllocator` warms them, since nothing warms up by hand any more |
@@ -976,9 +980,10 @@ Exposed today:
   Ideographic Variation Sequences
 - Shaping a run: direction, script, language, OpenType features, cluster level,
   and a choice of metrics source (HarfBuzz's tables or FreeType's)
-- Cluster maps in byte offsets, shaped-run extents, per-glyph extents
-- Bidi paragraphs: base level, per-byte levels, visual runs
-- Bidi **lines**: any byte range of a paragraph reordered on its own terms,
+- Cluster maps in code-unit offsets, shaped-run extents, per-glyph extents
+- Bidi paragraphs: base level, per-code-unit levels, visual runs
+- Bidi **lines**: any code-unit range of a paragraph reordered on its own
+  terms,
   which is what rules L1 and L2 require of anything that wraps
 - Script itemisation, and the two intersected into **shaping runs** — spans
   uniform in direction *and* script, in the order they are drawn

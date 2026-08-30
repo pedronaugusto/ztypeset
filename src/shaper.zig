@@ -1,9 +1,10 @@
-//! Shaping one run of UTF-8 through HarfBuzz.
+//! Shaping one run of text through HarfBuzz.
 
 const std = @import("std");
 const c = @import("c.zig");
 const err = @import("error.zig");
 const types = @import("types.zig");
+const text_mod = @import("text.zig");
 const face_mod = @import("face.zig");
 
 /// What to shape and how.
@@ -70,9 +71,11 @@ pub const Shaper = struct {
     /// This does not itemise: split mixed-direction or mixed-script text with
     /// `bidi.Paragraph` first and call this once per run.
     ///
-    /// `text` is rejected with `InvalidUtf8` if it is malformed, rather than
-    /// silently substituting replacement characters the way HarfBuzz would.
-    /// Returns the shaped glyphs, so the borrow is visibly tied to this call.
+    /// `text` is a slice of `u8`, `u16` or `u32`, and its element type is
+    /// what says which encoding it is in. It is rejected with `InvalidText`
+    /// if it is malformed, rather than silently substituting replacement
+    /// characters the way HarfBuzz would. Returns the shaped glyphs, so the
+    /// borrow is visibly tied to this call.
     ///
     /// The slice is owned by the shaper and is invalidated by the next `shape`
     /// on it -- not merely overwritten: the array is grown in place and a
@@ -81,17 +84,19 @@ pub const Shaper = struct {
     pub fn shape(
         self: Shaper,
         target: face_mod.Face,
-        text: []const u8,
+        text: anytype,
         params: Params,
     ) err.Error![]const types.Glyph {
+        const view = text_mod.view(text);
         const c_params = params.toC();
-        try err.check(c.ztextShaperShapeUtf8(
+        try err.check(c.ztextShaperShape(
             self.handle,
             target.handle,
-            text.ptr,
-            text.len,
+            view.ptr,
+            view.len,
+            view.encoding,
             0,
-            text.len,
+            view.len,
             &c_params,
         ));
         return self.glyphs();
@@ -108,24 +113,28 @@ pub const Shaper = struct {
     /// whole class of error.
     ///
     /// `direction` and `script` come from the run, because that is what a run
-    /// is for; `params` supplies the rest. Cluster values are byte offsets
-    /// into `text`, so they index the slice you already have.
+    /// is for; `params` supplies the rest. Cluster values are code-unit
+    /// offsets into `text`, so they index the slice you already have -- and
+    /// `text` must be in the encoding its `Paragraph` was built from, since
+    /// `run`'s offsets are counted in that.
     pub fn shapeRun(
         self: Shaper,
         target: face_mod.Face,
-        text: []const u8,
+        text: anytype,
         run: types.ShapingRun,
         params: Params,
     ) err.Error![]const types.Glyph {
+        const view = text_mod.view(text);
         var with_run = params;
         with_run.direction = if (run.level % 2 == 0) .ltr else .rtl;
         with_run.script = run.script;
         const c_params = with_run.toC();
-        try err.check(c.ztextShaperShapeUtf8(
+        try err.check(c.ztextShaperShape(
             self.handle,
             target.handle,
-            text.ptr,
-            text.len,
+            view.ptr,
+            view.len,
+            view.encoding,
             run.offset,
             run.length,
             &c_params,

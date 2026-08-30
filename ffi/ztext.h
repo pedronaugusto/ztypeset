@@ -145,9 +145,9 @@ typedef enum ZtextResult {
   /// A NULL handle, a zero-length buffer, an out-of-range index, or a
   /// non-finite scalar.
   ZTEXT_RESULT_INVALID_ARGUMENT = 2,
-  /// The text was not well-formed UTF-8. Checked by ztext before any of it
-  /// reaches HarfBuzz or SheenBidi.
-  ZTEXT_RESULT_INVALID_UTF8 = 3,
+  /// The text was not well-formed in the ZtextEncoding it was passed with.
+  /// Checked by ztext before any of it reaches HarfBuzz or SheenBidi.
+  ZTEXT_RESULT_INVALID_TEXT = 3,
   /// FreeType refused the bytes: not a font, truncated, or structurally
   /// broken.
   ZTEXT_RESULT_BAD_FONT = 4,
@@ -181,6 +181,38 @@ ZTEXT_API const char* ztextResultName(ZtextResult result);
 /// error -- a logger running elsewhere sees "". Borrowed, overwritten by the
 /// next failing call, and for diagnostics only: never branch on it.
 ZTEXT_API const char* ztextLastErrorDetail(void);
+
+//===----------------------------------------------------------------------===//
+// Text
+//
+// Every entry point that takes text takes an encoding with it, and every
+// offset and length that describes that text -- a run's, a line's, a glyph's
+// cluster, an index into a break array -- is counted in the CODE UNITS of
+// that encoding. Bytes for UTF-8, uint16_t for UTF-16, uint32_t for UTF-32.
+//
+// All three are here because all three upstreams take all three natively:
+// SheenBidi's SBStringEncoding, libunibreak's utf8/utf16/utf32 entry point
+// per algorithm, and hb_buffer_add_utf8/utf16/utf32. Transcoding on the way
+// in would cost a copy, an allocation and a second set of offsets to map
+// back, and would be paid by every host whose strings are UTF-16 -- which is
+// every Windows, Java, C# and JavaScript host. ztext transcodes nothing.
+//
+// Text is validated in its declared encoding before any of it reaches an
+// upstream, and malformed text is ZTEXT_RESULT_INVALID_TEXT rather than
+// U+FFFD: substituting a replacement character is a decision about a host's
+// data that a text engine is not in a position to make.
+//===----------------------------------------------------------------------===//
+
+typedef enum ZtextEncoding {
+  /// `const char*`. One to four bytes per character.
+  ZTEXT_ENCODING_UTF8 = 0,
+  /// `const uint16_t*`, native byte order, a surrogate PAIR per character
+  /// above U+FFFF. An unpaired surrogate is not well-formed.
+  ZTEXT_ENCODING_UTF16 = 1,
+  /// `const uint32_t*`, native byte order, one unit per character. A unit
+  /// above U+10FFFF or inside the surrogate range is not well-formed.
+  ZTEXT_ENCODING_UTF32 = 2,
+} ZtextEncoding;
 
 //===----------------------------------------------------------------------===//
 // Allocator seam
@@ -469,8 +501,8 @@ ZTEXT_API uint32_t ztextFontVariantGlyphIndex(const ZtextFont* font,
 ZTEXT_API uint32_t ztextFontGlyphCount(const ZtextFont* font);
 ZTEXT_API uint32_t ztextFontUnitsPerEm(const ZtextFont* font);
 
-/// How many leading bytes of `utf8` this font can draw, for a host walking its
-/// own fallback list.
+/// How many leading code units of `text` this font can draw, for a host
+/// walking its own fallback list.
 ///
 /// ztext does not own that list, because which font to fall back to is a
 /// policy question -- a UI's answer differs from a document reader's, and both
@@ -491,10 +523,11 @@ ZTEXT_API uint32_t ztextFontUnitsPerEm(const ZtextFont* font);
 /// means this font cannot start the text at all -- move on. It is never
 /// partial through a character.
 ///
-/// Rejects malformed UTF-8 with ZTEXT_RESULT_INVALID_UTF8, like everything
-/// else that takes text.
+/// Rejects malformed text with ZTEXT_RESULT_INVALID_TEXT, like everything
+/// else that takes text. `length` and `*out` are in `encoding`'s code units.
 ZTEXT_API ZtextResult ztextFontCoveredPrefix(const ZtextFont* font,
-                                             const char* utf8, size_t length,
+                                             const void* text, size_t length,
+                                             ZtextEncoding encoding,
                                              size_t* out);
 
 // Variable fonts.
@@ -860,8 +893,9 @@ typedef enum ZtextClusterLevel {
   ZTEXT_CLUSTER_LEVEL_GRAPHEMES = 3,
 } ZtextClusterLevel;
 
-/// One OpenType feature setting. `start`/`end` are byte offsets into the run
-/// the feature applies to; use 0 and ZTEXT_FEATURE_GLOBAL for the whole run.
+/// One OpenType feature setting. `start`/`end` are code-unit offsets into the
+/// run the feature applies to; use 0 and ZTEXT_FEATURE_GLOBAL for the whole
+/// run.
 typedef struct ZtextFeature {
   /// ZTEXT_TAG('l','i','g','a') and friends.
   uint32_t tag;
@@ -941,9 +975,10 @@ typedef enum ZtextGlyphFlag {
 /// current size, y-up.
 typedef struct ZtextGlyph {
   uint32_t glyph_id;
-  /// Byte offset into the UTF-8 passed to ztextShaperShapeUtf8 -- not a
-  /// codepoint index. Several glyphs may share a cluster (one character
-  /// decomposing) and several characters may share one (a ligature).
+  /// Code-unit offset into the text passed to ztextShaperShape, in that
+  /// text's own encoding -- not a codepoint index. Several glyphs may share a
+  /// cluster (one character decomposing) and several characters may share one
+  /// (a ligature).
   uint32_t cluster;
   /// An OR of ZtextGlyphFlag, 0 when none of them applies. Always produced;
   /// see ZtextGlyphFlag for why "always" is part of the contract.
@@ -957,13 +992,13 @@ typedef struct ZtextGlyph {
 ZTEXT_API ZtextResult ztextShaperCreate(ZtextShaper** out);
 ZTEXT_API void ztextShaperDestroy(ZtextShaper* shaper);
 
-/// Shapes one run of UTF-8 with one face, one direction and one script.
+/// Shapes one run of text with one face, one direction and one script.
 ///
 /// This is a run shaper, not a paragraph shaper: it does not itemise. Split
 /// text into runs with ztextParagraph* first, then call this once per run.
 ///
-/// The text is validated as UTF-8 before HarfBuzz sees it and rejected with
-/// ZTEXT_RESULT_INVALID_UTF8 if it is malformed, rather than silently
+/// The text is validated in `encoding` before HarfBuzz sees it and rejected
+/// with ZTEXT_RESULT_INVALID_TEXT if it is malformed, rather than silently
 /// substituting replacement characters.
 ///
 /// Results replace whatever the shaper held before.
@@ -982,12 +1017,14 @@ ZTEXT_API void ztextShaperDestroy(ZtextShaper* shaper);
 ///
 /// To shape a standalone string, pass 0 and `length`.
 ///
-/// Cluster values are byte offsets into `text` -- the whole buffer, not the
-/// run -- so they index the same slice a ZtextShapingRun's offsets do.
-ZTEXT_API ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
-                                           const char* text, size_t length,
-                                           size_t run_offset, size_t run_length,
-                                           const ZtextShapeParams* params);
+/// `length`, `run_offset`, `run_length` and every cluster value are in
+/// `encoding`'s code units. Cluster values index `text` -- the whole buffer,
+/// not the run -- so they index the same slice a ZtextShapingRun's offsets do.
+ZTEXT_API ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
+                                       const void* text, size_t length,
+                                       ZtextEncoding encoding,
+                                       size_t run_offset, size_t run_length,
+                                       const ZtextShapeParams* params);
 
 /// Number of glyphs from the last successful shape.
 ZTEXT_API size_t ztextShaperGlyphCount(const ZtextShaper* shaper);
@@ -1060,8 +1097,8 @@ typedef enum ZtextBaseDirection {
 } ZtextBaseDirection;
 
 /// A maximal span of one embedding level, in VISUAL order: run 0 is leftmost
-/// for an LTR base, rightmost for RTL. Offsets are byte offsets into the
-/// paragraph text.
+/// for an LTR base, rightmost for RTL. Offsets are code-unit offsets into the
+/// paragraph text, in the paragraph's own encoding.
 typedef struct ZtextVisualRun {
   uint32_t offset;
   uint32_t length;
@@ -1069,7 +1106,8 @@ typedef struct ZtextVisualRun {
   uint8_t level;
 } ZtextVisualRun;
 
-/// A maximal span of one script, in LOGICAL order. Offsets are byte offsets.
+/// A maximal span of one script, in LOGICAL order. Offsets are code-unit
+/// offsets, in the paragraph's own encoding.
 typedef struct ZtextScriptRun {
   uint32_t offset;
   uint32_t length;
@@ -1097,32 +1135,46 @@ typedef struct ZtextShapingRun {
   uint8_t level;
 } ZtextShapingRun;
 
-/// Analyses one paragraph of UTF-8.
+/// Analyses one paragraph of text.
+///
+/// `length` is in `encoding`'s code units, and so is every offset the
+/// paragraph reports afterwards.
 ///
 /// `text` is read during the call only; the paragraph copies what it needs and
 /// does not borrow the buffer. That differs from ztextFontCreateFromMemory on
 /// purpose -- a paragraph is small and copying it removes a lifetime the
 /// caller would otherwise have to track.
 ///
-/// Rejects malformed UTF-8 with ZTEXT_RESULT_INVALID_UTF8. Text containing a
+/// Rejects malformed text with ZTEXT_RESULT_INVALID_TEXT. Text containing a
 /// paragraph separator is analysed as a single paragraph up to the first one;
 /// split beforehand if that is not what you want.
-ZTEXT_API ZtextResult ztextParagraphCreateUtf8(const char* text, size_t length,
-                                               ZtextBaseDirection base,
-                                               ZtextParagraph** out);
+ZTEXT_API ZtextResult ztextParagraphCreate(const void* text, size_t length,
+                                           ZtextEncoding encoding,
+                                           ZtextBaseDirection base,
+                                           ZtextParagraph** out);
 
 ZTEXT_API void ztextParagraphDestroy(ZtextParagraph* paragraph);
 
-/// Byte length actually analysed, which is at most `length` -- less if the
-/// text contained a paragraph separator.
+/// Length actually analysed, in the paragraph's own code units, which is at
+/// most the `length` passed in -- less if the text contained a paragraph
+/// separator.
 ZTEXT_API size_t ztextParagraphLength(const ZtextParagraph* paragraph);
+
+/// The encoding this paragraph was created with, which is the unit every
+/// offset and length it reports is counted in.
+///
+/// Reported rather than remembered by the caller: a run list outlives the call
+/// that made it and is routinely passed on alone, and reading a UTF-16
+/// paragraph's offsets as bytes indexes half a character.
+ZTEXT_API ZtextEncoding ztextParagraphEncoding(
+    const ZtextParagraph* paragraph);
 
 /// Resolved base embedding level: even for LTR, odd for RTL.
 ZTEXT_API uint8_t ztextParagraphBaseLevel(const ZtextParagraph* paragraph);
 
-/// Borrowed per-byte embedding levels, one entry per byte of
-/// ztextParagraphLength. Continuation bytes of a multi-byte character carry
-/// the same level as its first byte.
+/// Borrowed per-code-unit embedding levels, one entry per unit of
+/// ztextParagraphLength. Every unit of a multi-unit character carries the same
+/// level as its first.
 ///
 /// These are the levels UAX #9 resolves over the PARAGRAPH, before rule L1
 /// resets trailing whitespace for a particular line. Where the two differ, a
@@ -1140,7 +1192,7 @@ ZTEXT_API const uint8_t* ztextParagraphLevels(
 // These are here for the same reason bidi is: they are pure functions of the
 // text and the Unicode character database, not decisions about layout. ztext
 // already owns UAX #9; owning that and not UAX #14 and #29 would be an
-// arbitrary line, and it would leave ztextLineCreate -- which takes a byte
+// arbitrary line, and it would leave ztextLineCreate -- which takes a unit
 // range -- with no way for a caller to find one.
 //
 // The division of labour is the same as everywhere else here. ztext says where
@@ -1157,21 +1209,21 @@ ZTEXT_API const uint8_t* ztextParagraphLevels(
 /// The three values a break entry can hold.
 ///
 /// Macros rather than an enum, and that is deliberate: these live in arrays of
-/// one byte per text byte, and C does not let you fix an enum's width. An
+/// one byte per code unit, and C does not let you fix an enum's width. An
 /// int-sized enum beside a uint8_t array would be a type that cannot hold its
 /// own values -- the kind of near-miss this package spends its guards on.
 ///
-/// No boundary here. Also what a byte inside a multi-byte character reports,
-/// since a break there is never a break.
+/// No boundary here. Also what a code unit inside a multi-unit character
+/// reports, since a break there is never a break.
 #define ZTEXT_BREAK_NONE 0u
 /// A boundary is permitted here.
 #define ZTEXT_BREAK_ALLOWED 1u
-/// A boundary is REQUIRED here. Line breaks only -- a paragraph's last byte is
-/// always mandatory, and so is a U+2028 LINE SEPARATOR within it.
+/// A boundary is REQUIRED here. Line breaks only -- a paragraph's last code
+/// unit is always mandatory, and so is a U+2028 LINE SEPARATOR within it.
 #define ZTEXT_BREAK_MANDATORY 2u
 
-/// Borrowed, one ZTEXT_BREAK_* value per byte of ztextParagraphLength,
-/// describing the boundary AFTER that byte. NULL for an empty paragraph.
+/// Borrowed, one ZTEXT_BREAK_* value per code unit of ztextParagraphLength,
+/// describing the boundary AFTER that unit. NULL for an empty paragraph.
 ///
 /// So a line may run from `start` to `i + 1` whenever `line_breaks[i]` is not
 /// ZTEXT_BREAK_NONE. Valid until the paragraph is destroyed.
@@ -1237,7 +1289,7 @@ ZTEXT_API const ZtextShapingRun* ztextParagraphShapingRuns(
 //===----------------------------------------------------------------------===//
 // Lines
 //
-// One byte range of a paragraph, reordered as its own line.
+// One code-unit range of a paragraph, reordered as its own line.
 //
 // This exists because bidi reordering is not a property of a paragraph alone.
 // UAX #9 resolves embedding levels over the paragraph (rules P through I), but
@@ -1259,16 +1311,15 @@ ZTEXT_API const ZtextShapingRun* ztextParagraphShapingRuns(
 
 typedef struct ZtextLine ZtextLine;
 
-/// Reorders `paragraph`'s bytes `[offset, offset + length)` as one line.
+/// Reorders `paragraph`'s units `[offset, offset + length)` as one line.
 ///
-/// Offsets are byte offsets into the paragraph, and the runs come back with
-/// paragraph-relative offsets too -- not line-relative -- so they index the
-/// same buffer the caller already has.
+/// Offsets are code-unit offsets into the paragraph, in the paragraph's own
+/// encoding, and the runs come back with paragraph-relative offsets too -- not
+/// line-relative -- so they index the same buffer the caller already has.
 ///
 /// A zero-length line is legal and has no runs. A range that ends past
-/// ztextParagraphLength, or that starts or ends in the middle of a UTF-8
-/// character, is ZTEXT_RESULT_INVALID_ARGUMENT rather than a silent
-/// half-character.
+/// ztextParagraphLength, or that starts or ends in the middle of a character,
+/// is ZTEXT_RESULT_INVALID_ARGUMENT rather than a silent half-character.
 ///
 /// The line copies what it needs, so it holds no reference to the paragraph
 /// and may outlive it.
@@ -1576,6 +1627,8 @@ typedef struct ZtextAbiLayout {
   uint32_t hinting_last;
   uint32_t bitmap_format_size;
   uint32_t bitmap_format_last;
+  uint32_t encoding_size;
+  uint32_t encoding_last;
   /// ZtextGlyphFlag is a bit mask, so `glyph_flag_last` is
   /// ZTEXT_GLYPH_FLAG_DEFINED -- the OR of every flag -- rather than the
   /// highest single flag. A consumer masking with the value it reads here

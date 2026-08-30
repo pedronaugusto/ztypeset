@@ -14,6 +14,7 @@ const std = @import("std");
 const c = @import("c.zig");
 const err = @import("error.zig");
 const types = @import("types.zig");
+const text_mod = @import("text.zig");
 
 /// One analysed paragraph.
 ///
@@ -22,7 +23,12 @@ const types = @import("types.zig");
 pub const Paragraph = struct {
     handle: *c.Paragraph,
 
-    /// Analyses one paragraph of UTF-8.
+    /// Analyses one paragraph.
+    ///
+    /// `text` is a slice of `u8`, `u16` or `u32` -- UTF-8, UTF-16 or UTF-32 --
+    /// and its element type is what says which. Every offset and length this
+    /// paragraph reports afterwards is counted in those code units, so a
+    /// UTF-16 paragraph's runs index the `[]const u16` you passed.
     ///
     /// `text` is read during the call only; the paragraph copies what it
     /// needs, so there is no lifetime to track afterwards. That differs from
@@ -32,9 +38,16 @@ pub const Paragraph = struct {
     /// The algorithm is defined per paragraph, so text containing a paragraph
     /// separator is analysed up to the first one. `length()` reports how much
     /// was covered.
-    pub fn init(text: []const u8, base: types.BaseDirection) err.Error!Paragraph {
+    pub fn init(text: anytype, base: types.BaseDirection) err.Error!Paragraph {
+        const view = text_mod.view(text);
         var handle: *c.Paragraph = undefined;
-        try err.check(c.ztextParagraphCreateUtf8(text.ptr, text.len, base, &handle));
+        try err.check(c.ztextParagraphCreate(
+            view.ptr,
+            view.len,
+            view.encoding,
+            base,
+            &handle,
+        ));
         return .{ .handle = handle };
     }
 
@@ -42,10 +55,20 @@ pub const Paragraph = struct {
         c.ztextParagraphDestroy(self.handle);
     }
 
-    /// Bytes actually analysed, which is at most the input length -- less if
-    /// the text contained a paragraph separator.
+    /// Code units actually analysed, which is at most the input length --
+    /// less if the text contained a paragraph separator.
     pub fn length(self: Paragraph) usize {
         return c.ztextParagraphLength(self.handle);
+    }
+
+    /// The encoding this paragraph was built from, which is the unit every
+    /// offset and length above is counted in.
+    ///
+    /// A run list is routinely passed on without the text it came from, and
+    /// reading a UTF-16 paragraph's offsets as bytes indexes half a
+    /// character. This is what a consumer checks against.
+    pub fn encoding(self: Paragraph) types.Encoding {
+        return c.ztextParagraphEncoding(self.handle);
     }
 
     /// Resolved base embedding level: even for left-to-right, odd for
@@ -59,8 +82,8 @@ pub const Paragraph = struct {
         return if (self.baseLevel() % 2 == 0) .ltr else .rtl;
     }
 
-    /// Per-byte embedding levels. Continuation bytes carry the same level as
-    /// the first byte of their character.
+    /// Per-code-unit embedding levels. Every unit of a multi-unit character
+    /// carries the same level as its first.
     ///
     /// These are resolved over the PARAGRAPH, before rule L1 resets trailing
     /// whitespace for a particular line. Where the two differ, `Line`'s visual
@@ -72,8 +95,8 @@ pub const Paragraph = struct {
         return ptr[0..len];
     }
 
-    /// Where a line MAY break, one entry per byte, describing the boundary
-    /// AFTER that byte.
+    /// Where a line MAY break, one entry per code unit, describing the
+    /// boundary AFTER that unit.
     ///
     /// ztext says where a break is permitted; you decide where one happens,
     /// because that needs a width. The loop is: walk the non-`.none` positions,
@@ -148,14 +171,14 @@ pub const Paragraph = struct {
         return ptr[0..count];
     }
 
-    /// Reorders one byte range of this paragraph as its own line.
+    /// Reorders one range of this paragraph as its own line.
     ///
-    /// Use this for anything that wraps. `offset` and `len` are bytes within
-    /// the paragraph, and the runs come back with paragraph-relative offsets
-    /// too, so they index the same slice you already have.
+    /// Use this for anything that wraps. `offset` and `len` are code units
+    /// within the paragraph, and the runs come back with paragraph-relative
+    /// offsets too, so they index the same slice you already have.
     ///
     /// A range that ends past `length()`, or that starts or ends inside a
-    /// UTF-8 character, is `error.InvalidArgument`.
+    /// character, is `error.InvalidArgument`.
     pub fn line(self: Paragraph, offset: usize, len: usize) err.Error!Line {
         var handle: *c.Line = undefined;
         try err.check(c.ztextLineCreate(self.handle, offset, len, &handle));
@@ -181,12 +204,12 @@ pub const Line = struct {
         c.ztextLineDestroy(self.handle);
     }
 
-    /// Byte offset of this line within its paragraph.
+    /// Code-unit offset of this line within its paragraph.
     pub fn offset(self: Line) usize {
         return c.ztextLineOffset(self.handle);
     }
 
-    /// Byte length of this line.
+    /// Length of this line, in the paragraph's code units.
     pub fn length(self: Line) usize {
         return c.ztextLineLength(self.handle);
     }

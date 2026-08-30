@@ -140,32 +140,50 @@ void ztextSetErrorDetail(const char* detail);
 ZtextResult ztextFromFtError(FT_Error error);
 
 //===----------------------------------------------------------------------===//
-// UTF-8
+// Text
+//
+// The one place in ztext that knows how the three encodings differ. Every
+// entry point that takes text goes through these four, so an encoding cannot
+// be handled in three places and forgotten in a fourth.
 //
 // HarfBuzz substitutes U+FFFD for malformed input and SheenBidi has its own
 // recovery; both are reasonable for a text editor and wrong for an engine
-// reading a localisation table, where malformed bytes mean the table is
+// reading a localisation table, where malformed input means the table is
 // corrupt and should say so. ztext validates first and refuses.
 //===----------------------------------------------------------------------===//
 
-/// True if `text[0..length]` is well-formed UTF-8: no overlong encodings, no
-/// surrogate halves, nothing above U+10FFFF, no truncated sequence at the end.
-bool ztextIsValidUtf8(const char* text, size_t length);
+/// Bytes in one code unit of `encoding`: 1, 2 or 4.
+///
+/// 0 for a value this build does not name, which is how every entry point
+/// validates the enum -- a consumer compiled against a newer header cannot
+/// smuggle an encoding past a switch that has no arm for it.
+size_t ztextEncodingUnitSize(ZtextEncoding encoding);
 
-/// Decodes one scalar from `text`, which must already be VALID UTF-8, and
-/// returns how many bytes it took. Never returns 0, so a loop over it always
-/// terminates.
-size_t ztextDecodeUtf8(const char* text, size_t length, uint32_t* out);
+/// True if `length` code units at `text` are well-formed in `encoding`: no
+/// overlong UTF-8, no unpaired surrogate in either UTF-8 or UTF-16, nothing
+/// above U+10FFFF, no truncated sequence at the end.
+///
+/// True for a zero length whatever `text` is, and false for a NULL `text`
+/// with a non-zero one.
+bool ztextTextIsWellFormed(const void* text, size_t length,
+                           ZtextEncoding encoding);
 
-/// True if `index` is inside `text[0..length]` and lands on a UTF-8
-/// continuation byte -- the one way a caller-given byte range can slice a
-/// character in half. False for `index >= length`, which is what lets a
-/// caller check both ends of a half-open range with the same call.
+/// Decodes the character starting at code unit `index` of already-VALIDATED
+/// text, and returns how many units it spans. Never returns 0, so a loop over
+/// it always terminates.
+size_t ztextTextDecode(const void* text, size_t length, ZtextEncoding encoding,
+                       size_t index, uint32_t* out);
+
+/// True if code unit `index` falls INSIDE a character rather than on a
+/// boundary -- the one way a caller-given range can slice a character in
+/// half. False for `index >= length`, which is what lets a caller check both
+/// ends of a half-open range with the same call.
 ///
 /// Shared by ztext_shape.c (a shaped run) and ztext_bidi.c (a line), which
 /// both refuse a range that would split a character rather than shape or
 /// reorder half of one.
-bool ztextSplitsUtf8Character(const char* text, size_t length, size_t index);
+bool ztextTextSplitsCharacter(const void* text, size_t length,
+                              ZtextEncoding encoding, size_t index);
 
 //===----------------------------------------------------------------------===//
 // Growable array
@@ -373,7 +391,8 @@ struct ZtextShaper {
 };
 
 struct ZtextParagraph {
-  /// The caller's bytes, copied.
+  /// The caller's code units, copied. `length` counts UNITS, not bytes; the
+  /// allocation is `length * ztextEncodingUnitSize(encoding)` bytes.
   ///
   /// SheenBidi's SBAlgorithm stores the SBCodepointSequence it was given BY
   /// VALUE, and that struct holds a bare pointer to the caller's buffer; the
@@ -382,9 +401,15 @@ struct ZtextParagraph {
   /// resolved types and levels alone -- but that is a property of the pinned
   /// version, not a contract, and the documented promise is that a paragraph
   /// borrows nothing. One allocation buys that outright, and it is also what
-  /// lets ztextLineCreate reject a byte range that would split a character.
+  /// lets ztextLineCreate reject a range that would split a character.
+  ///
+  /// Typed as char* because it is a byte buffer whose interpretation is
+  /// `encoding`'s; it is cast to uint16_t* or uint32_t* at the two seams that
+  /// read characters out of it, both of which go through ztext_core.c's text
+  /// helpers.
   char* text;
   size_t length;
+  ZtextEncoding encoding;
   uint8_t base_level;
 
   /// Retained for the paragraph's lifetime so lines can be created from it
@@ -399,7 +424,7 @@ struct ZtextParagraph {
   SBParagraphRef sb_paragraph;
 
   /// Where a line MAY break (UAX #14), where a grapheme cluster ends and
-  /// where a word ends (UAX #29), one byte each per byte of `length`.
+  /// where a word ends (UAX #29), one byte each per CODE UNIT of `length`.
   ///
   /// Computed at creation rather than on demand, so every accessor stays
   /// infallible like the rest of the paragraph's. Three bytes per byte of
