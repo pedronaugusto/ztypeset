@@ -371,6 +371,51 @@ uint32_t ztextFontVariantGlyphIndex(const ZtextFont* font, uint32_t codepoint,
       font->ft, (FT_ULong)codepoint, (FT_ULong)variation_selector);
 }
 
+uint32_t ztextFontCharmapCount(const ZtextFont* font) {
+  if (font == NULL) return 0u;
+  return (uint32_t)font->ft->num_charmaps;
+}
+
+ZtextResult ztextFontCharmap(const ZtextFont* font, uint32_t index,
+                             ZtextCharmap* out) {
+  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  memset(out, 0, sizeof(*out));
+  if (font == NULL || index >= (uint32_t)font->ft->num_charmaps) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  const FT_CharMap map = font->ft->charmaps[index];
+  out->platform_id = (uint16_t)map->platform_id;
+  out->encoding_id = (uint16_t)map->encoding_id;
+  out->encoding = (uint32_t)map->encoding;
+  return ZTEXT_RESULT_OK;
+}
+
+uint32_t ztextFontActiveCharmap(const ZtextFont* font) {
+  if (font == NULL || font->ft->charmap == NULL) {
+    return ZTEXT_CHARMAP_INDEX_NONE;
+  }
+  // Not a stored index: FreeType finds it by identity in the same array
+  // ztextFontCharmap reads, so the two cannot drift apart.
+  const FT_Int index = FT_Get_Charmap_Index(font->ft->charmap);
+  return index < 0 ? ZTEXT_CHARMAP_INDEX_NONE : (uint32_t)index;
+}
+
+ZtextResult ztextFontSelectCharmap(ZtextFont* font, uint32_t index) {
+  if (font == NULL || index >= (uint32_t)font->ft->num_charmaps) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  const FT_Error error = FT_Set_Charmap(font->ft, font->ft->charmaps[index]);
+  return ztextFromFtError(error);
+}
+
+ZtextResult ztextFontSelectCharmapEncoding(ZtextFont* font,
+                                           uint32_t encoding) {
+  if (font == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  const FT_Error error =
+      FT_Select_Charmap(font->ft, (FT_Encoding)encoding);
+  return ztextFromFtError(error);
+}
+
 uint32_t ztextFontGlyphCount(const ZtextFont* font) {
   return font == NULL ? 0u : (uint32_t)font->ft->num_glyphs;
 }

@@ -158,6 +158,23 @@ pub fn withVariationSequences(
     try f14.appendSlice(gpa, body.items);
     std.mem.writeInt(u32, f14.items[2..6], @intCast(f14.items.len), .big);
 
+    return withExtraCmapSubtable(gpa, ttf, 0, 5, f14.items);
+}
+
+/// A copy of `ttf` whose cmap carries one extra `(platform, encoding)` record
+/// pointing at `subtable`, which the caller has already built.
+///
+/// The subtables cannot simply be repointed, which is why this exists rather
+/// than a few lines at each caller: their offsets are relative to the start of
+/// the cmap, so one more encoding record moves every one of them by eight
+/// bytes.
+fn withExtraCmapSubtable(
+    gpa: std.mem.Allocator,
+    ttf: []const u8,
+    platform: u16,
+    encoding: u16,
+    subtable: []const u8,
+) ![]u8 {
     // ---- the cmap this font already has ----------------------------------
     const num_tables = readU16(ttf, 4);
     var record: usize = 0;
@@ -192,7 +209,9 @@ pub fn withVariationSequences(
     // the font's ordinary lookups all return .notdef while the variation
     // sequences work perfectly. Sorted, (0,5) sits before (3,1) and the
     // backwards walk finds the format-4 charmap first, which is why every
-    // real font with variation sequences works.
+    // real font with variation sequences works. The same sort is what keeps a
+    // (3,0) symbol record below (3,1), so adding one does not change which
+    // map a font opens with.
     const Record = struct {
         platform: u16,
         encoding: u16,
@@ -218,11 +237,9 @@ pub fn withVariationSequences(
             .is_new = false,
         });
     }
-    // Platform 0, encoding 5 is what FreeType looks for; see
-    // find_variant_selector_charmap in libs/freetype/src/base/ftobjs.c.
     try records.append(gpa, .{
-        .platform = 0,
-        .encoding = 5,
+        .platform = platform,
+        .encoding = encoding,
         .old_off = 0,
         .is_new = true,
     });
@@ -259,7 +276,7 @@ pub fn withVariationSequences(
         }
         try new_offsets.append(gpa, found);
     }
-    const f14_off: u32 = @intCast(records_len + data.items.len);
+    const new_off: u32 = @intCast(records_len + data.items.len);
 
     var new_cmap: std.ArrayList(u8) = .empty;
     defer new_cmap.deinit(gpa);
@@ -268,10 +285,10 @@ pub fn withVariationSequences(
     for (records.items, new_offsets.items) |r, off| {
         try put16(&new_cmap, gpa, r.platform);
         try put16(&new_cmap, gpa, r.encoding);
-        try put32(&new_cmap, gpa, if (r.is_new) f14_off else off);
+        try put32(&new_cmap, gpa, if (r.is_new) new_off else off);
     }
     try new_cmap.appendSlice(gpa, data.items);
-    try new_cmap.appendSlice(gpa, f14.items);
+    try new_cmap.appendSlice(gpa, subtable);
 
     try out.appendSlice(gpa, new_cmap.items);
 
@@ -282,6 +299,46 @@ pub fn withVariationSequences(
     std.mem.writeInt(u32, out.items[record + 12 ..][0..4], @intCast(new_cmap.items.len), .big);
 
     return out.toOwnedSlice(gpa);
+}
+
+//===----------------------------------------------------------------------===//
+// A font with an MS Symbol character map, built here
+//===----------------------------------------------------------------------===//
+
+/// A copy of `ttf` carrying one extra cmap subtable at (3, 0), FreeType's
+/// FT_ENCODING_MS_SYMBOL, mapping `first` and the codes after it to `glyphs`.
+/// The caller owns the returned bytes.
+///
+/// None of the four fonts above has a non-Unicode charmap -- the test that
+/// uses this asserts that of the font it starts from rather than trusting it
+/// -- so without one, selecting a charmap could be observed only as a refusal.
+/// A symbol map is the case the entry point exists for: an icon font whose
+/// glyphs are reachable through no Unicode character at all.
+pub fn withSymbolCmap(
+    gpa: std.mem.Allocator,
+    ttf: []const u8,
+    first: u16,
+    glyphs: []const u16,
+) ![]u8 {
+    std.debug.assert(glyphs.len > 0);
+
+    // Subtable format 6, "trimmed table mapping": uint16 format, length,
+    // language, firstCode and entryCount, then one glyph id per code. The
+    // smallest subtable the format has, and enough for a symbol map, whose
+    // codes are one contiguous run in the 0xF000 private-use block by
+    // convention.
+    var sub: std.ArrayList(u8) = .empty;
+    defer sub.deinit(gpa);
+    try put16(&sub, gpa, 6);
+    try put16(&sub, gpa, @intCast(10 + 2 * glyphs.len));
+    try put16(&sub, gpa, 0);
+    try put16(&sub, gpa, first);
+    try put16(&sub, gpa, @intCast(glyphs.len));
+    for (glyphs) |glyph| try put16(&sub, gpa, glyph);
+
+    // Platform 3, encoding 0 is the pair FreeType reads as
+    // FT_ENCODING_MS_SYMBOL (tt_get_cmap_info, libs/freetype/src/sfnt/ttcmap.c).
+    return withExtraCmapSubtable(gpa, ttf, 3, 0, sub.items);
 }
 
 /// Length of the cmap subtable at `off`, whose home is the format's own

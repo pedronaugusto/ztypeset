@@ -110,7 +110,8 @@ Measured on x86_64-windows, both the gnu and the MSVC ABI:
 |---|---|---|---|
 | `ZtextGlyph` | 24 B | 28 B | `flags` at offset 8, after `cluster` |
 | `ZtextGlyphBitmap` | 32 B | 40 B | `format` at offset 8, immediately after `pixels` — it has to be read before they are interpreted |
-| `ZtextAbiLayout` | 192 B | 240 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `segmentation_size`, `segmentation_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
+| `ZtextCharmap` | — | 8 B | new: `platform_id`, `encoding_id`, `encoding` |
+| `ZtextAbiLayout` | 192 B | 248 B | `charmap_size`, `charmap_align`, `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `segmentation_size`, `segmentation_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
 
 `ZtextMetric` reports a **count** rather than a last value, alone among the
 enums in the handshake: its enumerators are four-character OpenType tags, so
@@ -136,6 +137,24 @@ says.
   `ztextParagraphSegmentation` reports what ran, so an absent array is never
   mistaken for a text with no boundaries. A bit this build has no name for is
   `ZTEXT_RESULT_INVALID_ARGUMENT`, as an unknown encoding is.
+- **Which character map a font uses is now a choice.** `ztextFontCharmapCount`,
+  `ztextFontCharmap`, `ztextFontActiveCharmap`, `ztextFontSelectCharmap` and
+  `ztextFontSelectCharmapEncoding`, with `ZtextCharmap` carrying the
+  `(platform_id, encoding_id)` pair the font records and FreeType's reading of
+  it as a four-character tag (`ZTEXT_CHARMAP_UNICODE`,
+  `ZTEXT_CHARMAP_MS_SYMBOL` and the rest of `FT_Encoding`, republished). Zig:
+  `Font.charmapCount`, `charmap`, `activeCharmap`, `selectCharmap`,
+  `selectCharmapEncoding`, `ztext.Charmap` and the tag constants.
+
+  FreeType selects a Unicode map when it opens a font, which is what every
+  previous version got and could not change. An icon font whose glyphs live
+  only in a (3, 0) MS Symbol map has no Unicode map to select, so its glyphs
+  were reachable by index alone. The selection governs `ztextFontGlyphIndex`
+  and `ztextFontCoveredPrefix`; it does not reach shaping, because HarfBuzz
+  maps characters through its own reader of the same tables and never consults
+  FreeType's selection. Selecting an encoding the font does not carry is
+  `ZTEXT_RESULT_INVALID_ARGUMENT`, which is how "does this font have a symbol
+  map" is asked.
 - **`ztextShaperShapeRun` / `Shaper.shapeRun(face, paragraph, run, params)`** —
   shape one run of a paragraph, with the paragraph as its own text. It removes
   three things at once: a run applied to the wrong buffer cannot be expressed,

@@ -372,6 +372,50 @@ case_ "the language the autohinter interns, left cold" \
   "  (void)hb_language_get_default();" \
   ""
 
+printf '\n%sCharacter maps%s %s(which one is selected)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# A font may carry several character maps, and which one is selected decides
+# what every lookup answers. Each mutation here leaves a plausible answer in
+# place of the right one.
+
+case_ "every map reported as the first one" \
+  ffi/ztext_face.c \
+  "reaches glyphs no Unicode character maps to" \
+  "  const FT_CharMap map = font->ft->charmaps[index];" \
+  "  const FT_CharMap map = font->ft->charmaps[0];"
+
+case_ "whichever map is selected reported as the first" \
+  ffi/ztext_face.c \
+  "reaches glyphs no Unicode character maps to" \
+  "  const FT_Int index = FT_Get_Charmap_Index(font->ft->charmap);
+  return index < 0 ? ZTEXT_CHARMAP_INDEX_NONE : (uint32_t)index;" \
+  "  return 0u;"
+
+# The refusal is the answer to \"does this font have a symbol map\". Accept
+# silently and a caller believes it selected one.
+case_ "an encoding this font has no map for, accepted" \
+  ffi/ztext_face.c \
+  "lists its character maps" \
+  "  const FT_Error error =
+      FT_Select_Charmap(font->ft, (FT_Encoding)encoding);
+  return ztextFromFtError(error);" \
+  "  (void)FT_Select_Charmap(font->ft, (FT_Encoding)encoding);
+  return ZTEXT_RESULT_OK;"
+
+case_ "a charmap index past the end quietly clamped" \
+  ffi/ztext_face.c \
+  "lists its character maps" \
+  "  if (font == NULL || index >= (uint32_t)font->ft->num_charmaps) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  const FT_CharMap map = font->ft->charmaps[index];" \
+  "  if (font == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (index >= (uint32_t)font->ft->num_charmaps) {
+    index = (uint32_t)font->ft->num_charmaps - 1u;
+  }
+  const FT_CharMap map = font->ft->charmaps[index];"
+
 printf '\n%sSynthetic styles%s %s(two upstreams, one weight)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

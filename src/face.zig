@@ -140,6 +140,39 @@ pub const Font = struct {
         return c.ztextFontVariantGlyphIndex(self.handle, codepoint, selector);
     }
 
+    /// How many character maps this font declares. Which one is selected
+    /// decides what `glyphIndex` and `coveredPrefix` answer; shaping never
+    /// consults it. See `ffi/ztext.h` for why that is a property of the two
+    /// upstreams rather than a choice.
+    pub fn charmapCount(self: Font) u32 {
+        return c.ztextFontCharmapCount(self.handle);
+    }
+
+    /// The character map at `index`, which must be below `charmapCount`.
+    pub fn charmap(self: Font, index: u32) err.Error!types.Charmap {
+        var out: types.Charmap = undefined;
+        try err.check(c.ztextFontCharmap(self.handle, index, &out));
+        return out;
+    }
+
+    /// Which map is selected, or null when none is.
+    pub fn activeCharmap(self: Font) ?u32 {
+        const index = c.ztextFontActiveCharmap(self.handle);
+        return if (index == c.charmap_index_none) null else index;
+    }
+
+    /// Selects one by index.
+    pub fn selectCharmap(self: Font, index: u32) err.Error!void {
+        try err.check(c.ztextFontSelectCharmap(self.handle, index));
+    }
+
+    /// Selects one by encoding -- `ztext.charmap_ms_symbol` and friends.
+    /// `error.InvalidArgument` when this font carries no such map, which is
+    /// how "does this font have a symbol map" is asked.
+    pub fn selectCharmapEncoding(self: Font, encoding: u32) err.Error!void {
+        try err.check(c.ztextFontSelectCharmapEncoding(self.handle, encoding));
+    }
+
     pub fn glyphCount(self: Font) u32 {
         return c.ztextFontGlyphCount(self.handle);
     }

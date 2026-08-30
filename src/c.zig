@@ -95,6 +95,25 @@ pub const Direction = enum(c_int) {
 /// The values a break entry holds. Byte-sized, because they live in an array
 /// of one byte per text byte; `types.Break` is the enum a caller reads them
 /// through. Declared here so the ABI cross-check pairs each with its macro.
+/// FreeType's own FT_Encoding values, as four-character tags; see
+/// `ffi/ztext.h`. The one home for each is the header -- these are compared
+/// against it, name by name, by `src/abi_check.zig`.
+pub const charmap_none: u32 = 0x00000000;
+pub const charmap_ms_symbol: u32 = 0x73796D62;
+pub const charmap_unicode: u32 = 0x756E6963;
+pub const charmap_sjis: u32 = 0x736A6973;
+pub const charmap_prc: u32 = 0x67622020;
+pub const charmap_big5: u32 = 0x62696735;
+pub const charmap_wansung: u32 = 0x77616E73;
+pub const charmap_johab: u32 = 0x6A6F6861;
+pub const charmap_adobe_standard: u32 = 0x41444F42;
+pub const charmap_adobe_expert: u32 = 0x41444245;
+pub const charmap_adobe_custom: u32 = 0x41444243;
+pub const charmap_adobe_latin_1: u32 = 0x6C617431;
+pub const charmap_old_latin_2: u32 = 0x6C617432;
+pub const charmap_apple_roman: u32 = 0x61726D6E;
+pub const charmap_index_none: u32 = 0xFFFFFFFF;
+
 /// FreeType's and HarfBuzz's own reference synthetic styles; see
 /// `ffi/ztext.h`. Fractions of the em, not pixels.
 pub const synthetic_bold_default: f32 = 0.041656494;
@@ -236,6 +255,12 @@ pub const Extents = extern struct {
     y_advance: f32,
 };
 
+pub const Charmap = extern struct {
+    platform_id: u16,
+    encoding_id: u16,
+    encoding: u32,
+};
+
 pub const VisualRun = extern struct {
     offset: u32,
     length: u32,
@@ -337,6 +362,8 @@ pub const AbiLayout = extern struct {
     extents_size: u32,
     extents_align: u32,
 
+    charmap_size: u32,
+    charmap_align: u32,
     visual_run_size: u32,
     visual_run_align: u32,
     script_run_size: u32,
@@ -436,6 +463,11 @@ pub extern fn ztextFontVariantGlyphIndex(
     codepoint: u32,
     variation_selector: u32,
 ) u32;
+pub extern fn ztextFontCharmapCount(font: *const Font) u32;
+pub extern fn ztextFontCharmap(font: *const Font, index: u32, out: *Charmap) Result;
+pub extern fn ztextFontActiveCharmap(font: *const Font) u32;
+pub extern fn ztextFontSelectCharmap(font: *Font, index: u32) Result;
+pub extern fn ztextFontSelectCharmapEncoding(font: *Font, encoding: u32) Result;
 pub extern fn ztextFontGlyphCount(font: *const Font) u32;
 pub extern fn ztextFontUnitsPerEm(font: *const Font) u32;
 pub extern fn ztextFontCoveredPrefix(

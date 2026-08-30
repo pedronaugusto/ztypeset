@@ -990,6 +990,33 @@ int main(int argc, char** argv) {
           "every contour opened should be closed exactly once");
   }
 
+  phase("charmaps");
+  // Which character map is selected decides what ztextFontGlyphIndex answers.
+  // FreeType selects a Unicode one when it opens the font.
+  {
+    const uint32_t charmap_count = ztextFontCharmapCount(the_font);
+    CHECK(charmap_count >= 1u, "a font should declare at least one charmap");
+    const uint32_t active = ztextFontActiveCharmap(the_font);
+    CHECK(active != ZTEXT_CHARMAP_INDEX_NONE,
+          "a font with a cmap should open with one selected");
+    ZtextCharmap map;
+    CHECK_OK(ztextFontCharmap(the_font, active, &map));
+    CHECK(map.encoding == ZTEXT_CHARMAP_UNICODE,
+          "the map a font opens with should be a Unicode one");
+    CHECK(ztextFontCharmap(the_font, charmap_count, &map) ==
+              ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a charmap index past the end should be refused");
+    CHECK(ztextFontSelectCharmap(the_font, charmap_count) ==
+              ZTEXT_RESULT_INVALID_ARGUMENT,
+          "selecting a charmap index past the end should be refused");
+    CHECK(ztextFontSelectCharmapEncoding(the_font, ZTEXT_CHARMAP_MS_SYMBOL) ==
+              ZTEXT_RESULT_INVALID_ARGUMENT,
+          "selecting an encoding this font has no map for should be refused");
+    CHECK(ztextFontActiveCharmap(the_font) == active,
+          "a refused selection should leave the selection where it was");
+    CHECK_OK(ztextFontSelectCharmap(the_font, active));
+  }
+
   phase("synthetic");
   // Synthetic bold widens the advance; synthetic oblique moves the ink
   // without touching it. Reset each afterwards so nothing below inherits it.

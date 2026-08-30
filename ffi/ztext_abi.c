@@ -174,6 +174,9 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->extents_size = (uint32_t)sizeof(ZtextExtents);
   out->extents_align = (uint32_t)_Alignof(ZtextExtents);
 
+  out->charmap_size = (uint32_t)sizeof(ZtextCharmap);
+  out->charmap_align = (uint32_t)_Alignof(ZtextCharmap);
+
   out->visual_run_size = (uint32_t)sizeof(ZtextVisualRun);
   out->visual_run_align = (uint32_t)_Alignof(ZtextVisualRun);
   out->script_run_size = (uint32_t)sizeof(ZtextScriptRun);
