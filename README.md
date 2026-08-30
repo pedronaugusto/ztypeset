@@ -716,7 +716,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 78 entry points with
+And `tests/null_sweep.c` calls **every one of the 83 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -944,7 +944,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **59** deliberate bugs, one at a time, to a copy of the tree, and
+applies **63** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -955,6 +955,8 @@ asserts a **named** test catches each:
 | Metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
+| Character maps | every map reported as the first one, whichever is selected reported as the first, an encoding the font has no map for accepted, and an index past the end clamped instead of refused |
+| Synthetic styles | a style applied to the ink and not to the shaping, emboldening asked for in place so the advance never moves, the lazily built font never told what style it was born into, a restyled face that still passes for the one a run was shaped against, a strength quantised back to the one weight upstream ships, and a strength that is not a number taken at face value |
 | Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
 | Segmentation | every pass run whatever was asked for, an unnamed segmentation bit accepted and ignored, the word array laid over the line array |
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for, a paragraph run shaped left to right whatever its level, a direction the run and the caller both set, a hand-built run trusted about its own bounds |
@@ -1016,6 +1018,14 @@ Exposed today:
   and `Font.variantGlyphIndex` for a base character plus a **variation
   selector** — cmap format 14, the mechanism behind U+FE0E/U+FE0F and the
   Ideographic Variation Sequences
+- **Which character map is selected**: `charmapCount`, `charmap`,
+  `activeCharmap`, `selectCharmap` and `selectCharmapEncoding`. FreeType
+  selects a Unicode one when it opens a font, so a caller who never touches
+  this gets Unicode; an icon font whose glyphs live only in a (3, 0) **MS
+  Symbol** map has no Unicode map to select, and without a way to say so its
+  glyphs are reachable by index alone. The selection governs `glyphIndex` and
+  `coveredPrefix` and never reaches shaping, because HarfBuzz maps characters
+  through its own reader of the same tables
 - Shaping a run: direction, script, language, OpenType features, cluster level,
   and a choice of metrics source (HarfBuzz's tables or FreeType's)
 - Cluster maps in code-unit offsets, shaped-run extents, per-glyph extents

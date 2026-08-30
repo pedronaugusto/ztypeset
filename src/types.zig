@@ -109,6 +109,7 @@ pub const Break = enum(u8) {
     mandatory = c.break_mandatory,
 };
 
+pub const Charmap = c.Charmap;
 pub const VisualRun = c.VisualRun;
 
 /// A maximal span of one script, in logical order. `script` is an ISO 15924

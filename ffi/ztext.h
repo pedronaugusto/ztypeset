@@ -466,11 +466,94 @@ ZTEXT_API void ztextFontDestroy(ZtextFont* font);
 ZTEXT_API const char* ztextFontFamilyName(const ZtextFont* font);
 ZTEXT_API const char* ztextFontStyleName(const ZtextFont* font);
 
-/// Glyph index for a Unicode scalar in the font's character map, or 0
+/// Glyph index for a character in the font's SELECTED character map, or 0
 /// (.notdef) if it has none. Shaping does its own mapping; this is for callers
 /// checking coverage before choosing a fallback font.
+///
+/// The argument is a Unicode scalar for as long as a Unicode charmap is
+/// selected, which is the default and what almost every font wants. Select a
+/// non-Unicode one -- an icon font's MS Symbol map, say -- and the argument is
+/// a code in THAT encoding instead; see ztextFontSelectCharmap.
 ZTEXT_API uint32_t ztextFontGlyphIndex(const ZtextFont* font,
                                        uint32_t codepoint);
+
+//===----------------------------------------------------------------------===//
+// Character maps
+//
+// A font may carry several, and which one is selected decides what
+// ztextFontGlyphIndex and ztextFontCoveredPrefix answer. FreeType selects a
+// Unicode one when it opens the font, so a caller who never touches this gets
+// Unicode -- but an icon font whose glyphs live only in a (3, 0) MS Symbol map
+// has no Unicode map to select, and without a way to say so its glyphs are
+// reachable by index alone.
+//
+// Shaping is NOT affected: HarfBuzz does its own Unicode mapping from the same
+// tables and never consults FreeType's selection. That is a property of the
+// two upstreams rather than a choice ztext made, and it is why this is a font
+// operation rather than a face one.
+//===----------------------------------------------------------------------===//
+
+/// FreeType's reading of a (platform, encoding) pair, as a four-character tag.
+/// These are FT_Encoding's own values, republished so a consumer need not
+/// include FreeType's headers to name one.
+#define ZTEXT_CHARMAP_NONE 0u
+#define ZTEXT_CHARMAP_MS_SYMBOL ZTEXT_TAG('s', 'y', 'm', 'b')
+#define ZTEXT_CHARMAP_UNICODE ZTEXT_TAG('u', 'n', 'i', 'c')
+#define ZTEXT_CHARMAP_SJIS ZTEXT_TAG('s', 'j', 'i', 's')
+#define ZTEXT_CHARMAP_PRC ZTEXT_TAG('g', 'b', ' ', ' ')
+#define ZTEXT_CHARMAP_BIG5 ZTEXT_TAG('b', 'i', 'g', '5')
+#define ZTEXT_CHARMAP_WANSUNG ZTEXT_TAG('w', 'a', 'n', 's')
+#define ZTEXT_CHARMAP_JOHAB ZTEXT_TAG('j', 'o', 'h', 'a')
+#define ZTEXT_CHARMAP_ADOBE_STANDARD ZTEXT_TAG('A', 'D', 'O', 'B')
+#define ZTEXT_CHARMAP_ADOBE_EXPERT ZTEXT_TAG('A', 'D', 'B', 'E')
+#define ZTEXT_CHARMAP_ADOBE_CUSTOM ZTEXT_TAG('A', 'D', 'B', 'C')
+#define ZTEXT_CHARMAP_ADOBE_LATIN_1 ZTEXT_TAG('l', 'a', 't', '1')
+#define ZTEXT_CHARMAP_OLD_LATIN_2 ZTEXT_TAG('l', 'a', 't', '2')
+#define ZTEXT_CHARMAP_APPLE_ROMAN ZTEXT_TAG('a', 'r', 'm', 'n')
+
+/// The index no charmap has, answered by ztextFontActiveCharmap for a font
+/// with none selected -- which is a state FreeType allows and a font with no
+/// character map at all is in.
+#define ZTEXT_CHARMAP_INDEX_NONE 0xFFFFFFFFu
+
+typedef struct ZtextCharmap {
+  /// The pair exactly as the font's `cmap` records it, unfiltered: (3, 1) is
+  /// Windows Unicode BMP, (3, 0) is Windows Symbol, (0, x) is Apple Unicode.
+  uint16_t platform_id;
+  uint16_t encoding_id;
+  /// What FreeType makes of that pair: one of ZTEXT_CHARMAP_* above, or
+  /// ZTEXT_CHARMAP_NONE for a pair it has no name for. Two records can share
+  /// one encoding, and two encodings can name the same subtable, so this is
+  /// the value to select by and the pair above is the value to display.
+  uint32_t encoding;
+} ZtextCharmap;
+
+/// How many character maps this font declares, and what the one at `index`
+/// is. `index` must be below the count; anything else is
+/// ZTEXT_RESULT_INVALID_ARGUMENT, and `out` is zeroed either way.
+ZTEXT_API uint32_t ztextFontCharmapCount(const ZtextFont* font);
+ZTEXT_API ZtextResult ztextFontCharmap(const ZtextFont* font, uint32_t index,
+                                       ZtextCharmap* out);
+
+/// Which one is selected, as an index into the same list, or
+/// ZTEXT_CHARMAP_INDEX_NONE when none is.
+ZTEXT_API uint32_t ztextFontActiveCharmap(const ZtextFont* font);
+
+/// Selects one, by index or by encoding.
+///
+/// By ENCODING is the form to reach for: a font's records are in its own
+/// order, so an index is only meaningful next to the list it came from, while
+/// ZTEXT_CHARMAP_MS_SYMBOL means the same thing in every font. Selecting an
+/// encoding no charmap of this font carries is
+/// ZTEXT_RESULT_INVALID_ARGUMENT, so "this font has a symbol map" is a
+/// question this answers rather than one the caller has to walk the list for.
+///
+/// The selection belongs to the FONT, so every face built from it sees it, and
+/// it changes nothing about a run already shaped -- shaping never went through
+/// here.
+ZTEXT_API ZtextResult ztextFontSelectCharmap(ZtextFont* font, uint32_t index);
+ZTEXT_API ZtextResult ztextFontSelectCharmapEncoding(ZtextFont* font,
+                                                     uint32_t encoding);
 
 /// Glyph index for a base character followed by a VARIATION SELECTOR, or 0 if
 /// the font names no glyph for that exact pair.
@@ -1690,6 +1773,9 @@ typedef struct ZtextAbiLayout {
   uint32_t face_metrics_align;
   uint32_t extents_size;
   uint32_t extents_align;
+
+  uint32_t charmap_size;
+  uint32_t charmap_align;
 
   uint32_t visual_run_size;
   uint32_t visual_run_align;

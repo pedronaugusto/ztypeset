@@ -124,6 +124,17 @@ int main(int argc, char** argv) {
   CHECK(ztextFontGlyphCount(NULL) == 0u, "glyph count of NULL");
   CHECK(ztextFontUnitsPerEm(NULL) == 0u, "units per em of NULL");
   CHECK(ztextFontAxisCount(NULL) == 0u, "axis count of NULL");
+  CHECK(ztextFontCharmapCount(NULL) == 0u, "charmap count of NULL");
+  CHECK(ztextFontActiveCharmap(NULL) == ZTEXT_CHARMAP_INDEX_NONE,
+        "active charmap of NULL");
+
+  ZtextCharmap charmap;
+  memset(&charmap, 0xAB, sizeof(charmap));
+  REFUSES(ztextFontCharmap(NULL, 0u, &charmap));
+  CHECK(charmap.encoding == 0u, "a refused charmap query wrote a value");
+  REFUSES_OUT(ztextFontCharmap(NULL, 0u, NULL));
+  REFUSES(ztextFontSelectCharmap(NULL, 0u));
+  REFUSES(ztextFontSelectCharmapEncoding(NULL, ZTEXT_CHARMAP_UNICODE));
 
   size_t covered = 999u;
   REFUSES(ztextFontCoveredPrefix(NULL, "abc", 3, ZTEXT_ENCODING_UTF8,

@@ -2358,6 +2358,122 @@ test "decomposeOutline refuses an incomplete callback set" {
 }
 
 //=============================================================================
+// Character maps
+//=============================================================================
+
+test "a font lists its character maps and says which one is selected" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const font = try fixture.library.createFont(fonts.latin, 0);
+    defer font.deinit();
+
+    // FreeType selects a Unicode map when it opens a font, so a caller who
+    // never touches this gets Unicode.
+    try std.testing.expect(font.charmapCount() >= 1);
+    const active = font.activeCharmap().?;
+    try std.testing.expect(active < font.charmapCount());
+    try std.testing.expectEqual(ztext.charmap_unicode, (try font.charmap(active)).encoding);
+
+    // Every map this font has is a Unicode one -- asserted rather than
+    // assumed, because it is what makes the fixture in the next test
+    // necessary.
+    for (0..font.charmapCount()) |i| {
+        const map = try font.charmap(@intCast(i));
+        try std.testing.expectEqual(ztext.charmap_unicode, map.encoding);
+        try std.testing.expect(map.platform_id == 0 or map.platform_id == 3);
+    }
+
+    // An encoding the font does not carry is a refusal, which is how "does
+    // this font have a symbol map" is asked.
+    try std.testing.expectError(
+        ztext.Error.InvalidArgument,
+        font.selectCharmapEncoding(ztext.charmap_ms_symbol),
+    );
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.charmap(font.charmapCount()));
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.selectCharmap(font.charmapCount()));
+    // Refused, and the selection is where it was.
+    try std.testing.expectEqual(active, font.activeCharmap().?);
+}
+
+test "a symbol charmap reaches glyphs no Unicode character maps to" {
+    const gpa = std.testing.allocator;
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const plain = try fixture.library.createFont(fonts.latin, 0);
+    defer plain.deinit();
+    const a_glyph: u32 = plain.glyphIndex('A');
+    try std.testing.expect(a_glyph != 0);
+    try std.testing.expectEqual(@as(u32, 0), plain.glyphIndex(0xF041));
+
+    // An icon font's shape: one glyph reachable only through a private-use
+    // code in a (3, 0) map.
+    const bytes = try fonts.withSymbolCmap(gpa, fonts.latin, 0xF041, &.{@intCast(a_glyph)});
+    defer gpa.free(bytes);
+    const font = try fixture.library.createFont(bytes, 0);
+    defer font.deinit();
+
+    try std.testing.expectEqual(plain.charmapCount() + 1, font.charmapCount());
+
+    // The extra record does not change which map the font opens with: the
+    // sort in tests/fonts.zig keeps (3, 0) below (3, 1), and FreeType walks
+    // the list backwards looking for a Unicode one.
+    const unicode_index = font.activeCharmap().?;
+    try std.testing.expectEqual(ztext.charmap_unicode, (try font.charmap(unicode_index)).encoding);
+    try std.testing.expectEqual(a_glyph, font.glyphIndex('A'));
+    try std.testing.expectEqual(@as(u32, 0), font.glyphIndex(0xF041));
+
+    // Selected, the argument is a symbol code rather than a Unicode scalar --
+    // both directions, so this cannot pass by answering the same glyph for
+    // everything.
+    try font.selectCharmapEncoding(ztext.charmap_ms_symbol);
+    const symbol_index = font.activeCharmap().?;
+    try std.testing.expect(symbol_index != unicode_index);
+    const map = try font.charmap(symbol_index);
+    try std.testing.expectEqual(@as(u16, 3), map.platform_id);
+    try std.testing.expectEqual(@as(u16, 0), map.encoding_id);
+    try std.testing.expectEqual(ztext.charmap_ms_symbol, map.encoding);
+    try std.testing.expectEqual(a_glyph, font.glyphIndex(0xF041));
+    try std.testing.expectEqual(@as(u32, 0), font.glyphIndex('A'));
+
+    // By index is the same selection as by encoding.
+    try font.selectCharmap(symbol_index);
+    try std.testing.expectEqual(symbol_index, font.activeCharmap().?);
+    try font.selectCharmap(unicode_index);
+    try std.testing.expectEqual(a_glyph, font.glyphIndex('A'));
+}
+
+test "the selected charmap reaches coverage, and never reaches shaping" {
+    const gpa = std.testing.allocator;
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const plain = try fixture.library.createFont(fonts.latin, 0);
+    defer plain.deinit();
+    const a_glyph: u32 = plain.glyphIndex('A');
+
+    const bytes = try fonts.withSymbolCmap(gpa, fonts.latin, 0xF041, &.{@intCast(a_glyph)});
+    defer gpa.free(bytes);
+    const font = try fixture.library.createFont(bytes, 0);
+    defer font.deinit();
+    const face = try font.face(0, ppem);
+    defer face.deinit();
+
+    try std.testing.expectEqual(@as(usize, 1), try font.coveredPrefix("A"));
+    try font.selectCharmapEncoding(ztext.charmap_ms_symbol);
+    // Coverage goes through the same lookup, so it moves with the selection.
+    try std.testing.expectEqual(@as(usize, 0), try font.coveredPrefix("A"));
+
+    // Shaping does not. HarfBuzz maps characters from the same tables through
+    // its own reader and never consults FreeType's selection, so a symbol map
+    // selected for icon lookups cannot silently change what text shapes to.
+    const glyphs = try fixture.shaper.shape(face, "A", .{ .direction = .ltr });
+    try std.testing.expectEqual(@as(usize, 1), glyphs.len);
+    try std.testing.expectEqual(a_glyph, glyphs[0].glyph_id);
+}
+
+//=============================================================================
 // Synthetic bold and oblique
 //=============================================================================
 

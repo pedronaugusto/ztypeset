@@ -85,11 +85,29 @@ pub fn warmup() void {
 pub const setAllocator = memory_mod.setAllocator;
 pub const resetAllocator = memory_mod.resetAllocator;
 
+/// FreeType's own character-map encodings, as four-character tags; see
+/// `Font.selectCharmapEncoding`.
+pub const charmap_none = c.charmap_none;
+pub const charmap_ms_symbol = c.charmap_ms_symbol;
+pub const charmap_unicode = c.charmap_unicode;
+pub const charmap_sjis = c.charmap_sjis;
+pub const charmap_prc = c.charmap_prc;
+pub const charmap_big5 = c.charmap_big5;
+pub const charmap_wansung = c.charmap_wansung;
+pub const charmap_johab = c.charmap_johab;
+pub const charmap_adobe_standard = c.charmap_adobe_standard;
+pub const charmap_adobe_expert = c.charmap_adobe_expert;
+pub const charmap_adobe_custom = c.charmap_adobe_custom;
+pub const charmap_adobe_latin_1 = c.charmap_adobe_latin_1;
+pub const charmap_old_latin_2 = c.charmap_old_latin_2;
+pub const charmap_apple_roman = c.charmap_apple_roman;
+
 /// FreeType's and HarfBuzz's own reference synthetic styles, as fractions of
 /// the em; see `Face.setSyntheticBold`.
 pub const synthetic_bold_default = c.synthetic_bold_default;
 pub const synthetic_oblique_default = c.synthetic_oblique_default;
 
+pub const Charmap = types_mod.Charmap;
 pub const Glyph = types_mod.Glyph;
 pub const GlyphFlag = types_mod.GlyphFlag;
 pub const glyphHas = types_mod.glyphHas;
