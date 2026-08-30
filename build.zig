@@ -690,6 +690,20 @@ pub fn build(b: *std.Build) void {
     tests.root_module.link_libc = true;
     tests.root_module.addIncludePath(b.path("ffi"));
 
+    // The documented examples and the documents that quote them, as bytes the
+    // suite can compare. src/example_test.zig is the one home for the rule;
+    // these three names are how it reaches the files, since @embedFile cannot
+    // leave its own module's directory.
+    tests.root_module.addAnonymousImport("example_quickstart", .{
+        .root_source_file = b.path("examples/quickstart.zig"),
+    });
+    tests.root_module.addAnonymousImport("example_readme", .{
+        .root_source_file = b.path("README.md"),
+    });
+    tests.root_module.addAnonymousImport("example_module_doc", .{
+        .root_source_file = b.path("src/ztext.zig"),
+    });
+
     const test_step = b.step("test", "Run the ztext test suite");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
@@ -743,6 +757,24 @@ pub fn build(b: *std.Build) void {
     // The harness behind README's measurements, so those numbers can be
     // reproduced rather than taken on trust. Not part of `test`: timings are
     // not assertions, and a loaded machine would fail them.
+    // The documented example, compiled and run. An example that no longer
+    // compiles is a red build here rather than a reader's afternoon, and
+    // src/example_test.zig is what keeps README.md and the module doc quoting
+    // this file rather than paraphrasing it.
+    const quickstart = b.addExecutable(.{
+        .name = "ztext-quickstart",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/quickstart.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ztext", .module = module },
+                .{ .name = "fonts", .module = fonts_module },
+            },
+        }),
+    });
+    test_step.dependOn(&b.addRunArtifact(quickstart).step);
+
     const bench = b.addExecutable(.{
         .name = "ztext-bench",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),

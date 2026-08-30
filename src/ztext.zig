@@ -6,10 +6,14 @@
 //! this reusable.
 //!
 //! ```zig
+//! const ztext = @import("ztext");
+//!
 //! // Warm the caches the upstreams keep for the life of the process, so a
 //! // tracking allocator installed next sees only ztext's working set.
 //! ztext.warmup();
 //!
+//! // A pointer, and it must outlive every handle: each Library captures the
+//! // allocator it was created with.
 //! const gpa = gpa_state.allocator();
 //! try ztext.setAllocator(&gpa);
 //! defer ztext.resetAllocator();
@@ -17,12 +21,13 @@
 //! const library = try ztext.Library.init();
 //! defer library.deinit();
 //!
-//! // The bytes are BORROWED and must outlive the font. The font and its
-//! // faces must be destroyed before the library, but not before each other.
+//! // The bytes are BORROWED and must outlive the font. The font and its faces
+//! // must be destroyed before the library, but not before each other.
 //! const font = try library.createFont(font_bytes, 0);
 //! defer font.deinit();
 //!
-//! // A face is the font at one size; make one per size you draw.
+//! // A face is the font at one size. Make one per size you draw; a second size
+//! // costs a size, not another parse.
 //! const face = try font.face(0, 16);
 //! defer face.deinit();
 //!
@@ -32,16 +37,17 @@
 //! const paragraph = try ztext.Paragraph.init(text, .auto);
 //! defer paragraph.deinit();
 //!
-//! // shapingRuns, not visualRuns: a visual run can span several scripts, and
+//! // shapingRuns, not visualRuns: one visual run can span several scripts, and
 //! // HarfBuzz shapes one script at a time.
 //! for (paragraph.shapingRuns()) |run| {
-//!     const glyphs = try shaper.shape(face, text[run.offset..][0..run.length], .{
-//!         .direction = ztext.runDirection(run.level),
-//!         .script = run.script,
-//!     });
+//!     // shapeRun, not shape: the WHOLE text goes in and the run selects part
+//!     // of it, so HarfBuzz can see the characters either side. Direction and
+//!     // script come from the run, because that is what a run is for.
+//!     const glyphs = try shaper.shapeRun(face, text, run, .{});
 //!     for (glyphs) |glyph| {
 //!         const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
-//!         _ = bitmap; // ... into your atlas, before this face's next render.
+//!         // ... into your atlas, before the next call on this face.
+//!         _ = bitmap;
 //!     }
 //! }
 //! ```
@@ -179,6 +185,10 @@ test {
     // the shipped module never analyses it and never runs translate-c.
     _ = @import("abi_check.zig");
     _ = @import("pins.zig");
+    // Reads README.md, this file and examples/quickstart.zig, so it belongs
+    // here for the same reason abi_check does: the shipped module must not
+    // embed the repository's documentation.
+    _ = @import("example_test.zig");
 }
 
 test "the C library agrees with the extern declarations in c.zig" {
