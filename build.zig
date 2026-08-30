@@ -304,6 +304,25 @@ const ztext_sources = [_][]const u8{
     "ffi/ztext_abi.c",
 };
 
+/// The three environment variables HarfBuzz reads, set to values that change
+/// what it does. Every run they are applied to must produce exactly the result
+/// it produces without them -- which is true only because `harfbuzz_defines`
+/// passes -DHB_NO_GETENV, and false the moment someone removes it.
+///
+/// One home for the three names: two run steps need them, and a list with two
+/// copies is a list that can disagree with itself.
+fn setHostileEnvironment(run: *std.Build.Step.Run) void {
+    // The fallback shaper: no OpenType layout at all.
+    run.setEnvironmentVariable("HB_SHAPER_LIST", "fallback");
+    // FreeType's font funcs instead of the OpenType ones. They allocate an
+    // FT_Face of their own, outside ztext's allocator and outside its
+    // lifetime.
+    run.setEnvironmentVariable("HB_FONT_FUNCS", "ft");
+    // A face loader that does not exist. Inert today because ztext never
+    // opens a face by file name, and here so that it stays inert.
+    run.setEnvironmentVariable("HB_FACE_LOADER", "no-such-loader");
+}
+
 //=============================================================================
 // Compiler flags, as comptime fragments.
 //
@@ -343,6 +362,30 @@ const harfbuzz_defines = [_][]const u8{
     // ztextWarmup() exists so a host can populate the caches before it starts
     // auditing instead; see ffi/ztext.h.
     "-DHB_NO_ATEXIT",
+    // HarfBuzz reads three environment variables: HB_SHAPER_LIST
+    // (hb-shaper.cc:48), HB_FONT_FUNCS (hb-font.cc:2599) and HB_FACE_LOADER
+    // (hb-face.cc:371). Two of them change what ztext renders. Measured on
+    // this tree before this define existed:
+    //
+    //   HB_SHAPER_LIST=fallback -- five golden tests fail. Standard ligatures
+    //     stop applying and moving a variation axis stops moving the shaped
+    //     result. The picture changes and nothing says so.
+    //   HB_FONT_FUNCS=ft -- the C smoke test reports 216 bytes leaked, plus
+    //     26 blocks under the injection sweep: hb-ft's font funcs open an
+    //     FT_Face of their own from an FT_Library ztext does not own or free.
+    //   HB_FACE_LOADER -- inert here, because ztext builds faces from memory
+    //     and never from a file name. Covered anyway; it costs nothing and
+    //     the next entry point that takes a path would make it live.
+    //
+    // HB_NO_GETENV makes getenv(Name) expand to nullptr (hb.hh:427-429), so
+    // all three read empty and the defaults stand. ffi/ztext_face.c already
+    // refused FreeType's FREETYPE_PROPERTIES for the same reason; this is the
+    // other half of the same argument, and it was the half that was live.
+    //
+    // The gate is not this comment. build.zig runs the suite and the C smoke
+    // test a second time with all three set to hostile values, and every
+    // assertion in both has to hold.
+    "-DHB_NO_GETENV",
     "-Dhb_malloc_impl=ztext_hb_malloc",
     "-Dhb_calloc_impl=ztext_hb_calloc",
     "-Dhb_realloc_impl=ztext_hb_realloc",
@@ -650,6 +693,17 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run the ztext test suite");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
+    // And again, in an environment engineered to change what HarfBuzz does.
+    // -DHB_NO_GETENV (see `harfbuzz_defines`) is what makes these three inert;
+    // without it, HB_SHAPER_LIST=fallback fails five golden tests here.
+    //
+    // A second run rather than the only run, so the clean arm stays clean and
+    // the difference between them is the measurement. It costs one execution
+    // of an already-built binary.
+    const hostile_env = b.addRunArtifact(tests);
+    setHostileEnvironment(hostile_env);
+    test_step.dependOn(&hostile_env.step);
+
     // The C boundary on its own, with no Zig in the picture: the header is a
     // real C contract and the allocator seam is genuinely in use. It asserts
     // allocations balance, which no Zig-side test can prove about the C side.
@@ -675,6 +729,16 @@ pub fn build(b: *std.Build) void {
     // Passed as a path argument rather than embedded, so the C test stays
     // plain C with no generated array to regenerate.
     run_c_smoke.addFileArg(b.path("tests/fonts/NotoSansHebrew-Regular.ttf"));
+
+    // The same binary under the same hostile environment. This is the arm that
+    // catches HB_FONT_FUNCS: with the variable live, hb-ft's font funcs open
+    // an FT_Face from an FT_Library ztext never frees, and the C boundary's
+    // own byte accounting reports 216 bytes leaked.
+    const run_c_smoke_hostile = b.addRunArtifact(c_smoke);
+    setHostileEnvironment(run_c_smoke_hostile);
+    run_c_smoke_hostile.addFileArg(
+        b.path("tests/fonts/NotoSansHebrew-Regular.ttf"),
+    );
 
     // The harness behind README's measurements, so those numbers can be
     // reproduced rather than taken on trust. Not part of `test`: timings are
@@ -718,6 +782,7 @@ pub fn build(b: *std.Build) void {
 
     const c_test_step = b.step("test-c", "Run the C-level smoke test");
     c_test_step.dependOn(&run_c_smoke.step);
+    c_test_step.dependOn(&run_c_smoke_hostile.step);
     c_test_step.dependOn(&run_null_sweep.step);
     test_step.dependOn(c_test_step);
 

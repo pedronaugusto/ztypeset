@@ -77,6 +77,31 @@ building the library with `FT_New_Library` + `FT_Add_Default_Modules` and
 **not** calling `FT_Set_Default_Properties`. This also happens to be the only
 way to install a per-library allocator.
 
+### HarfBuzz
+
+**Three environment variables change what HarfBuzz does, and two changed what
+ztext rendered.** `HB_SHAPER_LIST` (`src/hb-shaper.cc:48`) replaces the shaper
+list; `HB_FONT_FUNCS` (`src/hb-font.cc:2599`) replaces the default font funcs a
+new `hb_font_t` gets; `HB_FACE_LOADER` (`src/hb-face.cc:371`) replaces the
+loader used when a face is opened by file name.
+
+Measured on this tree before the fix:
+
+| variable | value | effect |
+|---|---|---|
+| `HB_SHAPER_LIST` | `fallback` | five golden tests fail: standard ligatures stop applying, and moving a variation axis stops moving the shaped result |
+| `HB_FONT_FUNCS` | `ft` | the C smoke test reports 216 bytes leaked, and 26 blocks under the injection sweep — hb-ft's funcs open an `FT_Face` from an `FT_Library` ztext does not own |
+| `HB_FACE_LOADER` | any | none: ztext builds faces from memory with `hb_face_create_or_fail` and never from a file name |
+
+Worked around by compiling HarfBuzz with `-DHB_NO_GETENV`, which makes
+`getenv(Name)` expand to `nullptr` (`src/hb.hh:427-429`) so all three read
+empty. This is the same argument `ffi/ztext_face.c` already made for
+FreeType's `FREETYPE_PROPERTIES`, applied to the library where it was live.
+`build.zig` runs the suite and the C smoke test a second time with all three
+set, so the claim is checked rather than asserted.
+
+### FreeType, continued
+
 **The two rasterisers disagree about `num_grays`.** The general glyph-slot path
 reports 256 (`src/base/ftobjs.c:537`); the SDF renderer overwrites it with 255
 (`src/sdf/ftsdfrend.c:316` and `:539`). Both

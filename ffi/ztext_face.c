@@ -33,6 +33,14 @@ ZtextResult ztextLibraryCreate(ZtextLibrary** out) {
   // engine whose glyph rasterisation depends on an environment variable has no
   // reproducible output, and ztext's own golden tests would inherit that.
   // Anything ztext should expose is exposed as an API instead.
+  //
+  // This was only half the argument for as long as it stood alone. HarfBuzz
+  // reads three variables of its own -- HB_SHAPER_LIST, HB_FONT_FUNCS,
+  // HB_FACE_LOADER -- and two of them changed what ztext rendered: with
+  // HB_SHAPER_LIST=fallback five golden tests failed, ligatures included.
+  // build.zig now passes -DHB_NO_GETENV, and runs the suite a second time with
+  // all three set to hostile values. The reproducibility claim covers both
+  // libraries, and something checks it.
 
   *out = library;
   return ZTEXT_RESULT_OK;

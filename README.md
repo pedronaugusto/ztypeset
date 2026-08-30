@@ -286,9 +286,18 @@ every machine. Two things had to be done for that to be true:
 - **`FREETYPE_PROPERTIES` is ignored.** `FT_Init_FreeType` reads that
   environment variable and lets it change the TrueType interpreter version and
   the autohinter. ztext does not call the function that does it.
+- **HarfBuzz's three are ignored too.** It reads `HB_SHAPER_LIST`,
+  `HB_FONT_FUNCS` and `HB_FACE_LOADER`, and two of them changed what ztext
+  rendered: with `HB_SHAPER_LIST=fallback` five golden tests failed — standard
+  ligatures stopped applying, and moving a variation axis stopped moving the
+  shaped result. `HB_FONT_FUNCS=ft` leaked 216 bytes, because hb-ft's font
+  funcs open an `FT_Face` from an `FT_Library` ztext neither owns nor frees.
+  The build passes `-DHB_NO_GETENV`, which makes `getenv` return null inside
+  HarfBuzz.
 
-Both are recorded with file and line in [UPSTREAM.md](UPSTREAM.md), and the
-first has a test.
+All three are recorded with file and line in [UPSTREAM.md](UPSTREAM.md), and
+all three have a test — the suite and the C smoke test each run a second time
+with the variables set to hostile values.
 
 ### Thread safety, stated rather than implied
 
@@ -534,7 +543,13 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-96 tests. The ones that touch a face, a shaper or a paragraph install
+**96 tests**, executed twice. The second pass runs the same binary with
+HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
+`HB_FACE_LOADER` — set to values that change what it does, and every assertion
+has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
+rather than being believed. So `zig build test` reports **192/192 passed**.
+
+The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
 fails the test; the rest check tags, versions and the ABI and allocate nothing.
 
@@ -744,7 +759,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **24** deliberate bugs, one at a time, to a copy of the tree, and
+applies **25** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -755,6 +770,7 @@ asserts a **named** test catches each:
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed |
+| Reproducibility | the environment allowed to reach HarfBuzz |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose
