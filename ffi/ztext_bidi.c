@@ -222,63 +222,104 @@ static uint8_t fromClusterBreak(char code) {
 /// Written as one switch rather than three, so an encoding cannot be handled
 /// by two of the three algorithms: upstream numbers its entry points by
 /// encoding, and the arms are what pairs them up.
-static void segment(const ZtextParagraph* paragraph, char* lines,
-                    char* graphemes, char* words) {
+static void segment(const ZtextParagraph* paragraph) {
   const size_t length = paragraph->length;
+  char* lines = (char*)paragraph->line_breaks;
+  char* graphemes = (char*)paragraph->grapheme_breaks;
+  char* words = (char*)paragraph->word_breaks;
   switch (paragraph->encoding) {
     case ZTEXT_ENCODING_UTF16: {
       const utf16_t* text = (const utf16_t*)paragraph->text;
-      set_linebreaks_utf16(text, length, NULL, lines);
-      set_graphemebreaks_utf16(text, length, NULL, graphemes);
-      set_wordbreaks_utf16(text, length, NULL, words);
+      if (lines != NULL) set_linebreaks_utf16(text, length, NULL, lines);
+      if (graphemes != NULL) {
+        set_graphemebreaks_utf16(text, length, NULL, graphemes);
+      }
+      if (words != NULL) set_wordbreaks_utf16(text, length, NULL, words);
       break;
     }
     case ZTEXT_ENCODING_UTF32: {
       const utf32_t* text = (const utf32_t*)paragraph->text;
-      set_linebreaks_utf32(text, length, NULL, lines);
-      set_graphemebreaks_utf32(text, length, NULL, graphemes);
-      set_wordbreaks_utf32(text, length, NULL, words);
+      if (lines != NULL) set_linebreaks_utf32(text, length, NULL, lines);
+      if (graphemes != NULL) {
+        set_graphemebreaks_utf32(text, length, NULL, graphemes);
+      }
+      if (words != NULL) set_wordbreaks_utf32(text, length, NULL, words);
       break;
     }
     case ZTEXT_ENCODING_UTF8:
     default: {
       const utf8_t* text = (const utf8_t*)paragraph->text;
-      set_linebreaks_utf8(text, length, NULL, lines);
-      set_graphemebreaks_utf8(text, length, NULL, graphemes);
-      set_wordbreaks_utf8(text, length, NULL, words);
+      if (lines != NULL) set_linebreaks_utf8(text, length, NULL, lines);
+      if (graphemes != NULL) {
+        set_graphemebreaks_utf8(text, length, NULL, graphemes);
+      }
+      if (words != NULL) set_wordbreaks_utf8(text, length, NULL, words);
       break;
     }
   }
 }
 
-/// Fills the paragraph's three break arrays. One allocation, sliced three
-/// ways, because they are always the same length and always live together.
+/// Fills the break arrays the paragraph was asked for, and only those.
+///
+/// One allocation for however many passes were requested, because they are
+/// always the same length and always live and die together.
 static ZtextResult collectBreaks(ZtextParagraph* paragraph) {
   const size_t length = paragraph->length;
-  if (length == 0u) return ZTEXT_RESULT_OK;
+  const uint32_t want = paragraph->segmentation;
+  if (length == 0u || want == (uint32_t)ZTEXT_SEGMENTATION_NONE) {
+    return ZTEXT_RESULT_OK;
+  }
 
-  paragraph->breaks = (uint8_t*)ztextAlloc(length * 3u, ZTEXT_DEFAULT_ALIGN);
+  size_t arrays = 0u;
+  if ((want & (uint32_t)ZTEXT_SEGMENTATION_LINES) != 0u) arrays++;
+  if ((want & (uint32_t)ZTEXT_SEGMENTATION_GRAPHEMES) != 0u) arrays++;
+  if ((want & (uint32_t)ZTEXT_SEGMENTATION_WORDS) != 0u) arrays++;
+
+  // `length` is already bounded by 0xFFFFFFFF, but that is not a bound on the
+  // product on a 32-bit target, so it is checked as a division.
+  if (length > SIZE_MAX / arrays) return ZTEXT_RESULT_OUT_OF_MEMORY;
+  paragraph->breaks =
+      (uint8_t*)ztextAlloc(length * arrays, ZTEXT_DEFAULT_ALIGN);
   if (paragraph->breaks == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
+
+  uint8_t* next = paragraph->breaks;
+  if ((want & (uint32_t)ZTEXT_SEGMENTATION_LINES) != 0u) {
+    paragraph->line_breaks = next;
+    next += length;
+  }
+  if ((want & (uint32_t)ZTEXT_SEGMENTATION_GRAPHEMES) != 0u) {
+    paragraph->grapheme_breaks = next;
+    next += length;
+  }
+  if ((want & (uint32_t)ZTEXT_SEGMENTATION_WORDS) != 0u) {
+    paragraph->word_breaks = next;
+  }
 
   // libunibreak writes one char per input code unit and reads nothing else,
   // so its output buffer can be ztext's own storage rather than a staging
   // copy.
-  char* out = (char*)paragraph->breaks;
+  segment(paragraph);
 
-  segment(paragraph, out, out + length, out + length * 2u);
-  for (size_t i = 0u; i < length; i++) out[i] = (char)fromLineBreak(out[i]);
+  if (paragraph->line_breaks != NULL) {
+    char* out = (char*)paragraph->line_breaks;
+    for (size_t i = 0u; i < length; i++) out[i] = (char)fromLineBreak(out[i]);
 
-  // The end of a paragraph is always a break, and libunibreak does not say so:
-  // text ending on a character that is not a line terminator gets
-  // LINEBREAK_INDETERMINATE, meaning "unknown, the input stopped". Unknown is
-  // the honest answer to a stream; for a paragraph it is not, because there is
-  // nothing after it. Left as NONE, a host walking the allowed positions would
-  // never reach the end of its own text -- which is exactly what the wrap test
-  // caught.
-  out[length - 1u] = (char)ZTEXT_BREAK_MANDATORY;
-
-  for (size_t i = length; i < length * 3u; i++) {
-    out[i] = (char)fromClusterBreak(out[i]);
+    // The end of a paragraph is always a break, and libunibreak does not say
+    // so: text ending on a character that is not a line terminator gets
+    // LINEBREAK_INDETERMINATE, meaning "unknown, the input stopped". Unknown
+    // is the honest answer to a stream; for a paragraph it is not, because
+    // there is nothing after it. Left as NONE, a host walking the allowed
+    // positions would never reach the end of its own text -- which is exactly
+    // what the wrap test caught.
+    out[length - 1u] = (char)ZTEXT_BREAK_MANDATORY;
+  }
+  for (size_t pass = 0u; pass < 2u; pass++) {
+    char* out = (char*)(pass == 0u ? paragraph->grapheme_breaks
+                                   : paragraph->word_breaks);
+    if (out == NULL) continue;
+    for (size_t i = 0u; i < length; i++) {
+      out[i] = (char)fromClusterBreak(out[i]);
+    }
   }
 
   return ZTEXT_RESULT_OK;
@@ -287,9 +328,15 @@ static ZtextResult collectBreaks(ZtextParagraph* paragraph) {
 ZtextResult ztextParagraphCreate(const void* text, size_t length,
                                  ZtextEncoding encoding,
                                  ZtextBaseDirection base,
+                                 uint32_t segmentation,
                                  ZtextParagraph** out) {
   if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
   *out = NULL;
+  // A bit this build has no name for is refused rather than ignored: it is
+  // how a consumer compiled against a newer header finds out.
+  if ((segmentation & ~(uint32_t)ZTEXT_SEGMENTATION_ALL) != 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
   if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
   // Zero for an encoding this build does not name, which is how a consumer
   // compiled against a newer header is refused rather than misread.
@@ -319,6 +366,7 @@ ZtextResult ztextParagraphCreate(const void* text, size_t length,
   // answered directly rather than pushed through SheenBidi, which has nothing
   // to say about zero code units.
   paragraph->encoding = encoding;
+  paragraph->segmentation = segmentation;
   if (length == 0u) {
     paragraph->base_level = (base == ZTEXT_BASE_DIRECTION_RTL) ? 1u : 0u;
     *out = paragraph;
@@ -438,27 +486,31 @@ const uint8_t* ztextParagraphLevels(const ZtextParagraph* paragraph) {
   return (const uint8_t*)SBParagraphGetLevelsPtr(paragraph->sb_paragraph);
 }
 
+uint32_t ztextParagraphSegmentation(const ZtextParagraph* paragraph) {
+  return paragraph == NULL ? (uint32_t)ZTEXT_SEGMENTATION_NONE
+                           : paragraph->segmentation;
+}
+
 const uint8_t* ztextParagraphLineBreaks(const ZtextParagraph* paragraph) {
-  if (paragraph == NULL) return NULL;
-  return paragraph->breaks;
+  return paragraph == NULL ? NULL : paragraph->line_breaks;
 }
 
 const uint8_t* ztextParagraphGraphemeBreaks(const ZtextParagraph* paragraph) {
-  if (paragraph == NULL || paragraph->breaks == NULL) return NULL;
-  return paragraph->breaks + paragraph->length;
+  return paragraph == NULL ? NULL : paragraph->grapheme_breaks;
 }
 
 const uint8_t* ztextParagraphWordBreaks(const ZtextParagraph* paragraph) {
-  if (paragraph == NULL || paragraph->breaks == NULL) return NULL;
-  return paragraph->breaks + paragraph->length * 2u;
+  return paragraph == NULL ? NULL : paragraph->word_breaks;
 }
 
 size_t ztextParagraphNextGrapheme(const ZtextParagraph* paragraph,
                                   size_t offset) {
+  // Without the grapheme pass there are no boundaries to move to, so the
+  // caret stays where it is rather than jumping to the end of the text.
   const uint8_t* breaks = ztextParagraphGraphemeBreaks(paragraph);
-  if (breaks == NULL || offset >= paragraph->length) {
-    return paragraph == NULL ? 0u : paragraph->length;
-  }
+  if (paragraph == NULL) return 0u;
+  if (breaks == NULL) return offset;
+  if (offset >= paragraph->length) return paragraph->length;
   // The entry at i describes the boundary AFTER byte i, so the next boundary
   // at or past `offset` is the first non-NONE entry from `offset` onward,
   // reported as one past it.
@@ -471,7 +523,9 @@ size_t ztextParagraphNextGrapheme(const ZtextParagraph* paragraph,
 size_t ztextParagraphPreviousGrapheme(const ZtextParagraph* paragraph,
                                       size_t offset) {
   const uint8_t* breaks = ztextParagraphGraphemeBreaks(paragraph);
-  if (breaks == NULL || offset == 0u) return 0u;
+  if (paragraph == NULL || offset == 0u) return 0u;
+  // As above: no pass, no boundary, no movement.
+  if (breaks == NULL) return offset;
   if (offset > paragraph->length) offset = paragraph->length;
 
   // Walk back past the boundary the caret is sitting on, then find the one

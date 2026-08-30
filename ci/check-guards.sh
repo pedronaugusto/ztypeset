@@ -253,6 +253,33 @@ case_ "the end of a paragraph left as no break at all" \
   "  out[length - 1u] = (char)ZTEXT_BREAK_MANDATORY;" \
   "  (void)0;"
 
+printf '\n%sSegmentation%s %s(what a paragraph was asked for)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# The passes are the paragraph's largest cost in both time and memory, and a
+# paragraph that runs all three anyway still answers every question correctly
+# -- so nothing but an explicit check on what was NOT built can see this.
+case_ "every segmentation pass run whatever was asked for" \
+  ffi/ztext_bidi.c \
+  "a paragraph runs only the segmentation passes" \
+  "  const uint32_t want = paragraph->segmentation;" \
+  "  const uint32_t want = (uint32_t)ZTEXT_SEGMENTATION_ALL;"
+
+# A bit a newer header defines and this build does not.
+case_ "an unnamed segmentation bit accepted and ignored" \
+  ffi/ztext_bidi.c \
+  "a segmentation bit this build has no name for is refused" \
+  "  if ((segmentation & ~(uint32_t)ZTEXT_SEGMENTATION_ALL) != 0u) {" \
+  "  if ((segmentation & 0u) != 0u) {"
+
+# The three arrays are packed in request order, so a pass that is present but
+# read at the wrong offset answers with another pass's boundaries.
+case_ "the word array laid over the line array" \
+  ffi/ztext_bidi.c \
+  "line breaks are offered between words, never inside one" \
+  "    paragraph->word_breaks = next;" \
+  "    paragraph->word_breaks = paragraph->breaks;"
+
 printf '\n%sFaces and fonts%s %s(ffi/ztext_face.c, ffi/ztext_raster.c)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
@@ -364,8 +391,8 @@ case_ "SheenBidi told the text is UTF-8 whatever it is" \
 case_ "libunibreak given UTF-16 through its UTF-8 entry point" \
   ffi/ztext_bidi.c \
   "one text, three encodings" \
-  "      set_linebreaks_utf16(text, length, NULL, lines);" \
-  "      set_linebreaks_utf8((const utf8_t*)text, length, NULL, lines);"
+  "      if (lines != NULL) set_linebreaks_utf16(text, length, NULL, lines);" \
+  "      if (lines != NULL) set_linebreaks_utf8((const utf8_t*)text, length, NULL, lines);"
 
 # The same seam again, in HarfBuzz. Shaping UTF-16 through hb_buffer_add_utf8
 # produces glyphs -- for a text nobody wrote.

@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
   // the paragraph validated this text once when it was created.
   ZtextParagraph* long_paragraph = NULL;
   if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
-                           ZTEXT_BASE_DIRECTION_LTR,
+                           ZTEXT_BASE_DIRECTION_LTR, ZTEXT_SEGMENTATION_ALL,
                            &long_paragraph) != ZTEXT_RESULT_OK) {
     return 1;
   }
@@ -170,6 +170,57 @@ int main(int argc, char** argv) {
          "shape a paragraph run", microsPer(elapsed, shape_runs), long_length);
 
   ztextParagraphDestroy(long_paragraph);
+
+  //--------------------------------------------------------------------------
+  // Analysing a paragraph, and what the segmentation passes cost.
+  //
+  // Two arms over the same text, one variable: which of UAX #14 and #29 run.
+  // The bidi analysis, the itemisation and the copy of the text are identical
+  // in both, so the difference is libunibreak's three passes and the byte per
+  // code unit each of them keeps.
+  //--------------------------------------------------------------------------
+  const long paragraph_rounds = 200;
+  double paragraph_us[2];
+  size_t paragraph_bytes[2];
+  for (int arm = 0; arm < 2; arm++) {
+    const uint32_t wanted =
+        (arm == 0) ? (uint32_t)ZTEXT_SEGMENTATION_ALL
+                   : (uint32_t)ZTEXT_SEGMENTATION_NONE;
+
+    ZtextParagraph* measured_paragraph = NULL;
+    const size_t before_paragraph = live_bytes;
+    if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
+                             ZTEXT_BASE_DIRECTION_LTR, wanted,
+                             &measured_paragraph) != ZTEXT_RESULT_OK) {
+      return 1;
+    }
+    paragraph_bytes[arm] = live_bytes - before_paragraph;
+    ztextParagraphDestroy(measured_paragraph);
+
+    start = clock();
+    for (long i = 0; i < paragraph_rounds; i++) {
+      ZtextParagraph* round = NULL;
+      if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
+                               ZTEXT_BASE_DIRECTION_LTR, wanted,
+                               &round) != ZTEXT_RESULT_OK) {
+        return 1;
+      }
+      ztextParagraphDestroy(round);
+    }
+    elapsed = clock() - start;
+    paragraph_us[arm] = microsPer(elapsed, paragraph_rounds);
+    printf("%-28s %9.2f us  %zu chars, %zu B live\n",
+           (arm == 0) ? "paragraph, all breaks" : "paragraph, no breaks",
+           paragraph_us[arm], long_length, paragraph_bytes[arm]);
+  }
+  if (paragraph_us[1] > 0.0) {
+    printf("%-28s %9.1f%%  of a fully segmented paragraph's time, and %zu B "
+           "of its memory\n",
+           "segmentation cost",
+           100.0 * (paragraph_us[0] - paragraph_us[1]) / paragraph_us[0],
+           paragraph_bytes[0] - paragraph_bytes[1]);
+  }
+
   free(long_text);
 
   //--------------------------------------------------------------------------

@@ -38,17 +38,42 @@ pub const Paragraph = struct {
     /// The algorithm is defined per paragraph, so text containing a paragraph
     /// separator is analysed up to the first one. `length()` reports how much
     /// was covered.
-    pub fn init(text: anytype, base: types.BaseDirection) err.Error!Paragraph {
+    pub fn init(text: anytype, options: Options) err.Error!Paragraph {
         const view = text_mod.view(text);
         var handle: *c.Paragraph = undefined;
         try err.check(c.ztextParagraphCreate(
             view.ptr,
             view.len,
             view.encoding,
-            base,
+            options.base,
+            options.segmentation,
             &handle,
         ));
         return .{ .handle = handle };
+    }
+
+    /// What to analyse, beyond the text itself.
+    pub const Options = struct {
+        /// The direction to fall back to when the text itself does not say --
+        /// `.auto` reads it from the first strong character, which is UAX #9
+        /// rule P2.
+        base: types.BaseDirection = .auto,
+        /// Which segmentation passes to run, as an OR of `Segmentation`; see
+        /// `types.segmentation`. Each pass costs one walk of libunibreak and
+        /// one byte per code unit for the paragraph's lifetime, and the
+        /// accessor for a pass not asked for returns an empty slice. The
+        /// default runs all three, which is what a caller that has not
+        /// thought about it wants.
+        segmentation: u32 = @intFromEnum(types.Segmentation.all),
+    };
+
+    /// The segmentation passes this paragraph ran.
+    ///
+    /// Reported for the same reason as `encoding`: a paragraph outlives the
+    /// call that made it, and an empty break array is otherwise
+    /// indistinguishable from a pass that was never run.
+    pub fn segmentation(self: Paragraph) u32 {
+        return c.ztextParagraphSegmentation(self.handle);
     }
 
     pub fn deinit(self: Paragraph) void {

@@ -110,7 +110,7 @@ Measured on x86_64-windows, both the gnu and the MSVC ABI:
 |---|---|---|---|
 | `ZtextGlyph` | 24 B | 28 B | `flags` at offset 8, after `cluster` |
 | `ZtextGlyphBitmap` | 32 B | 40 B | `format` at offset 8, immediately after `pixels` — it has to be read before they are interpreted |
-| `ZtextAbiLayout` | 192 B | 232 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
+| `ZtextAbiLayout` | 192 B | 240 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `segmentation_size`, `segmentation_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
 
 `ZtextMetric` reports a **count** rather than a last value, alone among the
 enums in the handshake: its enumerators are four-character OpenType tags, so
@@ -124,6 +124,18 @@ says.
 
 ### Added
 
+- **A paragraph runs the segmentation passes it is asked for.**
+  `ztextParagraphCreate` takes a `segmentation` mask of `ZtextSegmentation`
+  (`LINES`, `GRAPHEMES`, `WORDS`, `ALL`), and `Paragraph.init` takes it in an
+  options struct that defaults to all three. It used to run all three always
+  and allocate three bytes per code unit for their arrays, with no way to
+  decline: measured on a 4300-character paragraph, that is 56.6% of the time
+  to build one (265 µs against 115 µs) and 12 916 B of its 26 898 B — more
+  than the copied text and the embedding levels together. The accessor for a
+  pass that was not run answers NULL (an empty slice in Zig) and
+  `ztextParagraphSegmentation` reports what ran, so an absent array is never
+  mistaken for a text with no boundaries. A bit this build has no name for is
+  `ZTEXT_RESULT_INVALID_ARGUMENT`, as an unknown encoding is.
 - **`ztextShaperShapeRun` / `Shaper.shapeRun(face, paragraph, run, params)`** —
   shape one run of a paragraph, with the paragraph as its own text. It removes
   three things at once: a run applied to the wrong buffer cannot be expressed,
@@ -135,6 +147,11 @@ says.
 
 ### Changed
 
+- **`Paragraph.init` takes an options struct**: `init(text, .{})` where it
+  used to be `init(text, .auto)`, with `.base` and `.segmentation` in it.
+- **`ztextParagraphNextGrapheme` and `ztextParagraphPreviousGrapheme` return
+  `offset` unchanged** when the paragraph has no grapheme pass, rather than
+  jumping to the end of the text and to 0 respectively.
 - **`Shaper.shapeRun` no longer takes the text**, and the range form of the old
   one is now `Shaper.shapeRange(face, text, offset, length, params)` — same
   call as before, named for what it does. `shapeRun` is for runs a `Paragraph`

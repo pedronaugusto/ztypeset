@@ -56,7 +56,7 @@ defer face.deinit();
 const shaper = try ztext.Shaper.init();
 defer shaper.deinit();
 
-const paragraph = try ztext.Paragraph.init(text, .auto);
+const paragraph = try ztext.Paragraph.init(text, .{});
 defer paragraph.deinit();
 
 // shapingRuns, not visualRuns: one visual run can span several scripts, and
@@ -200,6 +200,16 @@ learn here than during an integration:
   UAX #14 or #29 between them, so ztext vendors libunibreak and provides break
   *opportunities*. Deciding where to break needs a width, and that stays the
   host's.
+- **Which passes run is the caller's choice, because they are the largest
+  thing a paragraph holds.** `Paragraph.init(text, .{ .segmentation = ... })`
+  takes an OR of `lines`, `graphemes` and `words`, and the default is all
+  three. On a 4300-character paragraph the three passes are **56.6% of the
+  time** to build it (265 µs against 115 µs) and **12 916 B of its 26 898 B** —
+  more than the copied text and the embedding levels together. A single-line
+  label that only wants bidi runs asks for none; a wrapping text box asks for
+  `lines`. The accessor for a pass that was not run returns an empty slice,
+  and `segmentation()` says which ran, so an empty array is never mistaken
+  for a text with no boundaries.
 
 ### Why there is a C layer at all
 
@@ -561,6 +571,8 @@ would expect of an allocation total and is worth checking rather than assuming.
 |---|---|---|
 | Shape a 43-character run | **~2.5 µs** | 2.25-2.70 µs. Reusing one `Shaper`. A separate test proves 500 warm shapes allocate **nothing**. |
 | The same run, 4300 characters around it, through `shape` | **~3.3 µs** | HarfBuzz decodes the run and at most five characters either side, so its cost does not move. The extra **~1.05 µs** is ztext validating the whole borrowed buffer — about 0.25 ns per code unit, paid on every call. |
+| Analyse a 4300-character paragraph, all three segmentation passes | **~265 µs** | 26 898 B live. Bidi, itemisation, the copy of the text, UAX #14 and both of #29. |
+| The same paragraph, no segmentation | **~115 µs** | 13 982 B live. One variable between the two arms: **the three passes are 56.6% of the time and 12 916 B of the memory**, which is why they are a choice and not a policy. |
 | The same run, through `shapeRun` | **~2.25 µs** | Identical to the 43-character case: a paragraph's text was validated when the paragraph was created. Shaping an N-unit paragraph as R runs costs R walks of N through `shape` and none through `shapeRun`. |
 | Rasterise one glyph, A8 | **~2.3 µs** | 2.16-2.50 µs. Uncached; `FT_Load_Glyph` every time, and one memcpy of the result. Atlas it anyway. |
 | Rasterise one glyph, SDF | **~2.6 ms** | **~1100× the A8 cost** (1091-1216 across the four runs). |
@@ -604,11 +616,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**119 tests**, executed twice. The second pass runs the same binary with
+**122 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **238/238 passed**.
+rather than being believed. So `zig build test` reports **244/244 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -699,7 +711,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 77 entry points with
+And `tests/null_sweep.c` calls **every one of the 78 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -927,7 +939,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **50** deliberate bugs, one at a time, to a copy of the tree, and
+applies **53** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -939,6 +951,7 @@ asserts a **named** test catches each:
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
 | Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
+| Segmentation | every pass run whatever was asked for, an unnamed segmentation bit accepted and ignored, the word array laid over the line array |
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for, a paragraph run shaped left to right whatever its level, a direction the run and the caller both set, a hand-built run trusted about its own bounds |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, an allocator slot taken per install rather than per allocator, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed — planted where `ztextSetAllocator` warms them, since nothing warms up by hand any more |

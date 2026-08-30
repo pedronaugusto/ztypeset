@@ -212,6 +212,8 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->bitmap_format_last = (uint32_t)ZTEXT_BITMAP_FORMAT_SDF;
   out->encoding_size = (uint32_t)sizeof(ZtextEncoding);
   out->encoding_last = (uint32_t)ZTEXT_ENCODING_UTF32;
+  out->segmentation_size = (uint32_t)sizeof(ZtextSegmentation);
+  out->segmentation_last = (uint32_t)ZTEXT_SEGMENTATION_ALL;
   out->glyph_flag_size = (uint32_t)sizeof(ZtextGlyphFlag);
   // The OR of every flag, not the highest one -- see ztext.h.
   out->glyph_flag_last = (uint32_t)ZTEXT_GLYPH_FLAG_DEFINED;

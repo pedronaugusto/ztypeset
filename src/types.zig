@@ -29,6 +29,25 @@ pub const GlyphFlag = c.GlyphFlag;
 /// call site: the mask is the kind of expression that is wrong exactly once
 /// and then copied, and a line-breaker that reads the wrong bit produces
 /// correct-looking text with the wrong breaks in it.
+/// One segmentation pass; see `bidi.Paragraph.Options.segmentation`.
+pub const Segmentation = c.Segmentation;
+
+/// The mask `Paragraph.Options.segmentation` takes, from the passes you want:
+/// `segmentation(&.{ .lines, .words })`. `Segmentation.all` and
+/// `Segmentation.none` are the two ends and need no call.
+pub fn segmentation(kinds: []const Segmentation) u32 {
+    var mask: u32 = 0;
+    for (kinds) |kind| mask |= @as(u32, @intCast(@intFromEnum(kind)));
+    return mask;
+}
+
+/// Whether a paragraph ran one segmentation pass, against the mask
+/// `Paragraph.segmentation` reports.
+pub fn segmentationHas(mask: u32, kind: Segmentation) bool {
+    const bit: u32 = @intCast(@intFromEnum(kind));
+    return mask & bit == bit;
+}
+
 pub fn glyphHas(glyph: Glyph, flag: GlyphFlag) bool {
     const bit: u32 = @intCast(@intFromEnum(flag));
     return glyph.flags & bit != 0;
