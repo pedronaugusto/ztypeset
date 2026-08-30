@@ -58,7 +58,7 @@ pub const Pin = struct {
 };
 
 pub const freetype: Pin = .{ .name = "freetype", .version = .{ .major = 2, .minor = 14, .patch = 3 }, .url = "https://gitlab.freedesktop.org/freetype/freetype.git", .tag = "VER-2-14-3", .commit = "0a0221a1347e2f1e07c395263540026e9a0aa7c7" };
-pub const harfbuzz: Pin = .{ .name = "harfbuzz", .version = .{ .major = 14, .minor = 3, .patch = 1 }, .url = "https://github.com/harfbuzz/harfbuzz.git", .tag = "14.3.1", .commit = "ab5ecbb83985034a76214ac0b2b833dcd590d774" };
+pub const harfbuzz: Pin = .{ .name = "harfbuzz", .version = .{ .major = 14, .minor = 4, .patch = 0 }, .url = "https://github.com/harfbuzz/harfbuzz.git", .tag = "14.4.0", .commit = "36cb489cb02ce4b92099669ba9f9bea348eff93f" };
 pub const sheenbidi: Pin = .{ .name = "sheenbidi", .version = .{ .major = 3, .minor = 0, .patch = 0 }, .url = "https://github.com/Tehreer/SheenBidi.git", .tag = "v3.0.0", .commit = "cfe430e7375a7845b679adae9d51dac6deaa8858" };
 pub const libunibreak: Pin = .{ .name = "libunibreak", .version = .{ .major = 7, .minor = 0, .patch = 0 }, .url = "https://github.com/adah1972/libunibreak.git", .tag = "libunibreak_7_0", .commit = "3ce4bfa3129ff3738046a44a6db533d2ce25af2b" };
 
