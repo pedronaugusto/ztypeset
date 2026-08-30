@@ -212,6 +212,17 @@ struct ZtextLibrary {
   ZtextAllocatorId allocator;
 
   FT_Library ft;
+
+  /// Fonts still alive, and whether the caller has asked for this library to
+  /// go -- the same pair ZtextFont keeps for its faces, one level up.
+  ///
+  /// It is not symmetry for its own sake. FT_Done_Library destroys every
+  /// FT_Face still registered with it, so a library freed first would leave
+  /// each ZtextFont holding a freed FT_Face, a freed FT_Library and a freed
+  /// ZtextLibrary. Nothing in this package could have caught that: the memory
+  /// it reads back is a library's worth of plausible bytes.
+  size_t live_fonts;
+  bool destroy_requested;
 };
 
 struct ZtextFont {
@@ -233,8 +244,9 @@ struct ZtextFont {
   /// and its last face is released second frees the font. A caller that
   /// destroys in the "wrong" order gets correct behaviour rather than a
   /// dangling FT_Face, and neither a leak nor a double free is reachable.
-  /// This is the same bargain hb_face_t makes, and it is why ZtextFont has no
-  /// documented ordering rule while ZtextLibrary still does.
+  /// This is the same bargain hb_face_t makes, and the same one ZtextLibrary
+  /// makes with its fonts above -- so no handle in this ABI has an ordering
+  /// rule, and none of them needs prose to say so.
   size_t live_faces;
   bool destroy_requested;
 

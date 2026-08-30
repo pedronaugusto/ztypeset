@@ -21,16 +21,24 @@
 //   accessors  return pointers that borrow from the handle and die with it,
 //              or sooner where noted.
 //
-// ORDERING: a ZtextFont and every ZtextFace made from it must be destroyed
-// BEFORE the ZtextLibrary they came from. FT_Done_Library destroys every face
-// still registered with it, so destroying the library first leaves the others
-// operating on freed memory. This is FreeType's rule and ztext does not hide
-// it; a library outliving its fonts is the only supported order.
+// ORDERING: there is none. A ZtextLibrary, the fonts made from it and the
+// faces made from those may be destroyed in any order. Whichever of a pair is
+// released second frees what they share, so no caller can produce a dangling
+// handle by destroying in the "wrong" order, and neither a leak nor a double
+// free is reachable. What a released handle will not do is take new work:
+// every entry point that takes a ZtextLibrary, and ztextFaceCreate on a
+// ZtextFont, answers ZTEXT_RESULT_INVALID_ARGUMENT once its handle has been
+// passed to *Destroy -- an error rather than undefined behaviour. The
+// accessors on the fonts and faces that outlive it keep working, because those
+// handles are still alive.
 //
-// Fonts and faces have NO order between them. Whichever is released second
-// frees the font, so a caller that destroys a font before its faces gets
-// correct behaviour rather than a dangling FT_Face. Creating a face from a
-// font already destroyed is an error, not undefined.
+// This is deliberately NOT what FreeType does. FT_Done_Library destroys every
+// face still registered with it, so a library freed while its fonts are alive
+// would leave them reading a freed FT_Face: a use-after-free whose symptom is
+// arbitrary, and which no error code could ever report. The alternative was a
+// rule that only a comment can state and only a caller can keep. Each handle
+// counts what is still alive instead, which costs one size_t and a bool per
+// handle and is checked by the suite rather than read.
 //
 // Threading: see "Thread safety" below. Read it -- FT_Face is not thread-safe
 // and ztext does not pretend otherwise.

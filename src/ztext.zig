@@ -21,8 +21,8 @@
 //! const library = try ztext.Library.init();
 //! defer library.deinit();
 //!
-//! // The bytes are BORROWED and must outlive the font. The font and its faces
-//! // must be destroyed before the library, but not before each other.
+//! // The bytes are BORROWED and must outlive the font. Handles have no
+//! // destruction order: whichever of a pair goes second frees what they share.
 //! const font = try library.createFont(font_bytes, 0);
 //! defer font.deinit();
 //!

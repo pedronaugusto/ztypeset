@@ -46,8 +46,8 @@ defer ztext.resetAllocator();
 const library = try ztext.Library.init();
 defer library.deinit();
 
-// The bytes are BORROWED and must outlive the font. The font and its faces
-// must be destroyed before the library, but not before each other.
+// The bytes are BORROWED and must outlive the font. Handles have no
+// destruction order: whichever of a pair goes second frees what they share.
 const font = try library.createFont(font_bytes, 0);
 defer font.deinit();
 
@@ -389,9 +389,14 @@ also lets ztext promise a tightly
 packed, top-down bitmap, so a consumer cannot render upside down by ignoring
 FreeType's signed pitch.
 
-Fonts and faces have **no destruction order**: whichever is released second
-frees the font. Only the library keeps an ordering rule, because that one is
-FreeType's.
+No handle has a **destruction order**: whichever of a pair is released second
+frees what they share. That covers the library too, which is the one place it
+is not free -- `FT_Done_Library` destroys every face still registered with it,
+so a library released first would leave its fonts reading freed memory. ztext
+counts live fonts and defers the library's own teardown instead, for one
+`size_t` and one `bool` per handle. The alternative was a rule that only a
+comment could state and only a caller could keep, whose violation was a
+use-after-free rather than an error code.
 
 ### Validation at the boundary
 
@@ -581,11 +586,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**110 tests**, executed twice. The second pass runs the same binary with
+**111 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **220/220 passed**.
+rather than being believed. So `zig build test` reports **222/222 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -899,7 +904,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **40** deliberate bugs, one at a time, to a copy of the tree, and
+applies **41** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -913,6 +918,7 @@ asserts a **named** test catches each:
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed |
+| Lifetimes | a font released without telling the library that owns it |
 | Reproducibility | the environment allowed to reach HarfBuzz |
 | Hinting | the autohinter's glyph coverage taken from the character map alone, and the language its coverage pass interns left cold |
 | Documentation | a documented example edited away from the program it quotes |
