@@ -361,6 +361,20 @@ case_ "SheenBidi handed memory ztext did not write" \
   "  if (block != NULL) memset(block, 0, (size_t)size);" \
   "  (void)0;"
 
+printf '\n%sReproducibility%s %s(the environment must not reach the picture)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# HarfBuzz reads HB_SHAPER_LIST, HB_FONT_FUNCS and HB_FACE_LOADER. build.zig
+# compiles it with -DHB_NO_GETENV so all three read empty, and runs the suite
+# a second time with them set to hostile values. Remove the define and the
+# second pass shapes something else.
+case_ "the environment allowed to reach HarfBuzz" \
+  build.zig \
+  "golden: Latin applies standard ligatures" \
+  '    "-DHB_NO_GETENV",
+' \
+  ''
+
 printf '\n%sInstalled headers%s %s(ci/header-link.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

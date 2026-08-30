@@ -103,6 +103,12 @@ claim() {
 entry_points=$(grep -c '^ZTEXT_API' ffi/ztext.h)
 externs=$(grep -c '^pub extern fn' src/c.zig)
 guard_cases=$(grep -c '^case_ ' ci/check-guards.sh)
+# Declared tests, as opposed to test EXECUTIONS: `zig build test` runs the
+# suite twice, once clean and once under HarfBuzz's three environment
+# variables, so its own count is double this one. Both are stated in README.md
+# and both are checked. Blind spot: a `test` block indented inside a struct is
+# not counted, because none is written that way here.
+suite_test_decls=$(grep -rh '^test ' --include='*.zig' src tests | wc -l | tr -d ' ')
 swept=$(grep -oE '\bztext[A-Za-z0-9_]+\(' ffi/ztext.h |
         grep -oE '^ztext[A-Za-z0-9_]+' | sort -u |
         while read -r name; do
@@ -123,6 +129,7 @@ if [ $CHECK -eq 0 ]; then
   row 'externs in src/c.zig' "$externs"
   row 'entry points reached by the null sweep' "$swept"
   row 'mutation cases in ci/check-guards.sh' "$guard_cases"
+  row 'test declarations in src and tests' "$suite_test_decls"
   row 'build.zig.zon version' "$zon_version"
   row 'ffi/ztext.h version macros' "$hdr_version"
   note 'the pair is compared by --check, not merely printed here'
@@ -267,7 +274,8 @@ if [ $CHECK -eq 1 ]; then
 
   if [ $WITH_BUILD -eq 1 ]; then
     printf '\n%sREADME.md against what runs%s\n' "$BOLD" "$OFF"
-    claim 'tests in the suite'    '^[0-9]+ tests\.' "$suite_tests"
+    claim 'tests in the suite'    '\*\*[0-9]+ tests\*\*, executed' "$suite_test_decls"
+    claim 'test executions'       'reports \*\*[0-9]+/[0-9]+ passed\*\*' "$suite_tests"
     claim 'injection points'      '\*\*[0-9]+ injected allocation-failure points\*\*' "$c_injection"
     claim 'warm shapes'           '\*\*[0-9]+ warm shapes allocate nothing\*\*' "$c_warm"
   else
