@@ -277,13 +277,25 @@ ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 /// so a host can install a tracking allocator afterwards and still see a
 /// balanced heap.
 ///
-/// Optional. Nothing needs it to work correctly; it exists because two of the
-/// upstreams keep a cache for the life of the process -- HarfBuzz interns
-/// language tags in a list it frees from an atexit handler, and SheenBidi's
-/// allocator object is created once and kept -- and a host auditing its own
-/// allocations would otherwise attribute those to whatever happened to be
-/// running when they were first touched. Both are bounded and small; see
-/// UPSTREAM.md.
+/// Optional for correctness, and the ONLY route to a balanced heap for a host
+/// that audits one. Two of the upstreams keep caches for the life of the
+/// process: HarfBuzz builds several singletons on first use -- the shaper
+/// list, the Unicode database, the font-functions, and an intern table with
+/// one entry per distinct language tag ever passed -- and SheenBidi creates
+/// its allocator object once and keeps it.
+///
+/// None of the HarfBuzz ones are freed at exit in this build. Upstream frees
+/// them from an atexit handler only where HAVE_ATEXIT is defined; ztext does
+/// not define it and passes -DHB_NO_ATEXIT to make that a decision rather than
+/// an omission, so hb_atexit expands to nothing. An atexit handler calling a
+/// host's allocator after the host has torn it down is worse than a bounded,
+/// documented cache.
+///
+/// Without this call, those allocations are attributed to whichever allocator
+/// happened to be installed when something first touched them -- which is
+/// usually the host's tracking one, and shows up as an unbalanced heap that no
+/// amount of correct ztext use will fix. All of them are bounded and small;
+/// see UPSTREAM.md.
 ///
 /// Two such caches are out of its reach, because both are built from a real
 /// face that warm-up has no way to obtain: HarfBuzz's FreeType font-functions
