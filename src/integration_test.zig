@@ -1340,6 +1340,81 @@ test "golden: Arabic joins, and the joined forms are not the nominal glyphs" {
     try std.testing.expect(differs >= 4);
 }
 
+test "golden: shaping reports where a line may be broken, and where it may be elongated" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const arabic = try fixture.face(fonts.arabic);
+    defer arabic.deinit();
+    const latin = try fixture.face(fonts.latin);
+    defer latin.deinit();
+
+    // MEEM REH HAH BEH ALEF, the same word as the joining golden above, in
+    // visual order: cluster 8 first.
+    _ = try fixture.shaper.shape(arabic, "\u{645}\u{631}\u{62d}\u{628}\u{627}", .{
+        .direction = .rtl,
+        .script = ztext.tag("Arab"),
+    });
+
+    // Measured, not predicted -- what this vendored HarfBuzz produces for
+    // these exact font bytes. Five of six glyphs are unsafe to break because
+    // each letter's form depends on its neighbours; the two that are only
+    // unsafe to CONCAT are the ends of the word, where a change further out
+    // could still reach in.
+    const arabic_flags = [_]u32{ 0x7, 0x7, 0x7, 0x2, 0x7, 0x2 };
+    try std.testing.expectEqual(arabic_flags.len, fixture.shaper.glyphs().len);
+    for (fixture.shaper.glyphs(), arabic_flags, 0..) |glyph, want, i| {
+        std.testing.expectEqual(want, glyph.flags) catch |e| {
+            std.debug.print("arabic glyph {d}: flags 0x{x}\n", .{ i, glyph.flags });
+            return e;
+        };
+    }
+
+    // The claims that survive a re-vendor changing the numbers above.
+    //
+    // First: every bit set is a bit ztext names. A HarfBuzz that grew a
+    // fourth flag would set it here, and a consumer switching on the mask
+    // would see a value it has no meaning for.
+    for (fixture.shaper.glyphs()) |glyph| {
+        try std.testing.expectEqual(@as(u32, 0), glyph.flags & ~@as(u32, 0x7));
+    }
+
+    // Second, and this is what the buffer flags in ztext_shape.c buy: the two
+    // OPTIONAL flags are actually produced. HarfBuzz emits unsafe-to-break
+    // whether or not it is asked; the other two it withholds unless told,
+    // and a consumer cannot tell a withheld flag from an absent one.
+    var saw_unsafe_to_break = false;
+    var saw_unsafe_to_concat = false;
+    var saw_tatweel = false;
+    for (fixture.shaper.glyphs()) |glyph| {
+        if (ztext.glyphHas(glyph, .unsafe_to_break)) saw_unsafe_to_break = true;
+        if (ztext.glyphHas(glyph, .unsafe_to_concat)) saw_unsafe_to_concat = true;
+        if (ztext.glyphHas(glyph, .safe_to_insert_tatweel)) saw_tatweel = true;
+    }
+    try std.testing.expect(saw_unsafe_to_break);
+    try std.testing.expect(saw_unsafe_to_concat);
+    try std.testing.expect(saw_tatweel);
+
+    // Third, the negative half, which is the half a line-breaker acts on.
+    // Latin with ligatures and kerning is safe to break at every cluster --
+    // so a paragraph of it needs no re-shaping after line breaking at all --
+    // and nowhere in it may a tatweel be inserted, elongation being a
+    // property of the script rather than of the font.
+    _ = try fixture.shaper.shape(latin, "office fluff", .{
+        .direction = .ltr,
+        .script = ztext.tag("Latn"),
+    });
+    for (fixture.shaper.glyphs()) |glyph| {
+        try std.testing.expect(!ztext.glyphHas(glyph, .unsafe_to_break));
+        try std.testing.expect(!ztext.glyphHas(glyph, .safe_to_insert_tatweel));
+    }
+
+    // And the flags belong to the CURRENT run: a second shape must not leave
+    // the first one's answers behind for the glyphs it happens to reuse.
+    _ = try fixture.shaper.shape(latin, "a", .{ .direction = .ltr, .script = ztext.tag("Latn") });
+    try std.testing.expectEqual(@as(usize, 1), fixture.shaper.glyphs().len);
+    try std.testing.expect(!ztext.glyphHas(fixture.shaper.glyphs()[0], .unsafe_to_break));
+}
+
 test "golden: Hebrew is right-to-left without joining" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
@@ -2000,6 +2075,40 @@ test "SDF is a real distance field, not a coverage bitmap in disguise" {
     try std.testing.expectError(ztext.Error.InvalidArgument, fixture.library.setSdfSpread(33));
 }
 
+test "a rendered bitmap says which format its bytes are in" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    // A8 coverage and an SDF are both one byte per pixel, so a consumer that
+    // remembers the wrong mode does not get an error -- it gets a picture,
+    // washed out and plausible. The bitmap therefore carries its own format.
+    const glyph = face.font.glyphIndex('o');
+    try std.testing.expectEqual(
+        ztext.BitmapFormat.a8,
+        (try face.renderGlyph(glyph, .a8, .none, 0, 0)).format,
+    );
+    try std.testing.expectEqual(
+        ztext.BitmapFormat.sdf,
+        (try face.renderGlyph(glyph, .sdf, .none, 0, 0)).format,
+    );
+    // Back again: the field is written by every render, not left at whatever
+    // the last one set.
+    try std.testing.expectEqual(
+        ztext.BitmapFormat.a8,
+        (try face.renderGlyph(glyph, .a8, .none, 0, 0)).format,
+    );
+
+    // A glyph with no ink still says what it would have been. Otherwise the
+    // format is only meaningful after a NULL check, and a caller batching
+    // renders into an atlas would have to special-case the spaces -- which is
+    // exactly the special case that gets written once and then forgotten.
+    const space = try face.renderGlyph(face.font.glyphIndex(' '), .sdf, .none, 0, 0);
+    try std.testing.expectEqual(@as(?[*]const u8, null), space.pixels);
+    try std.testing.expectEqual(ztext.BitmapFormat.sdf, space.format);
+}
+
 test "glyph extents match the rasterised bitmap" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
@@ -2657,12 +2766,31 @@ test "versions format the way a log line needs" {
     defer fixture.deinit();
 
     // Version.format is public API and nothing else in the suite reaches it.
+    //
+    // No version LITERAL appears here, and that is the point. This test used
+    // to assert "0.1.0" and "2.14.3", which made it a third home for ztext's
+    // version and a second home for FreeType's -- and the first bump of
+    // either turned a formatting test red for a reason that had nothing to do
+    // with formatting. ffi/ztext.h's macros are the one home for the first
+    // (gated against build.zig.zon by ci/measurements.sh) and src/pins.zig for
+    // the second (gated against the linked libraries by the test below).
+    //
+    // So: one synthetic value, which this test owns and which pins the digits
+    // a real version rarely has, and one real value compared against its own
+    // fields.
     var buffer: [64]u8 = undefined;
-    const rendered = try std.fmt.bufPrint(&buffer, "{f}", .{ztext.version()});
-    try std.testing.expectEqualStrings("0.1.0", rendered);
+    const synthetic = ztext.Version{ .major = 3, .minor = 14, .patch = 159 };
+    try std.testing.expectEqualStrings(
+        "3.14.159",
+        try std.fmt.bufPrint(&buffer, "{f}", .{synthetic}),
+    );
 
-    const freetype = try std.fmt.bufPrint(&buffer, "{f}", .{ztext.freetypeVersion()});
-    try std.testing.expectEqualStrings("2.14.3", freetype);
+    var expected: [64]u8 = undefined;
+    const v = ztext.version();
+    try std.testing.expectEqualStrings(
+        try std.fmt.bufPrint(&expected, "{d}.{d}.{d}", .{ v.major, v.minor, v.patch }),
+        try std.fmt.bufPrint(&buffer, "{f}", .{v}),
+    );
 }
 
 test "a font FreeType accepts but HarfBuzz cannot read is refused" {

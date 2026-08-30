@@ -38,6 +38,29 @@ _Static_assert(sizeof(((hb_feature_t*)0)->value) == 4, "hb_feature_t::value");
 _Static_assert(sizeof(((hb_feature_t*)0)->start) >= 4, "hb_feature_t::start");
 _Static_assert(sizeof(((hb_feature_t*)0)->end) >= 4, "hb_feature_t::end");
 
+// ZtextGlyphFlag republishes HarfBuzz's glyph flags under ztext's names, and
+// ztextShaperShapeUtf8 copies the mask straight across with no translation
+// table. That is only sound while the two agree value for value, so each pair
+// is asserted rather than trusted -- a renumbering upstream would otherwise
+// turn "safe to break here" into "unsafe to concat here" silently, and the
+// symptom would be a paragraph re-shaped at the wrong places or not at all.
+//
+// HB_GLYPH_FLAG_DEFINED is asserted too, because it is the mask
+// ztextShaperShapeUtf8 relies on to drop any bit HarfBuzz gains before ztext
+// has a name for it.
+_Static_assert((int)ZTEXT_GLYPH_FLAG_UNSAFE_TO_BREAK ==
+                   (int)HB_GLYPH_FLAG_UNSAFE_TO_BREAK,
+               "HB_GLYPH_FLAG_UNSAFE_TO_BREAK moved");
+_Static_assert((int)ZTEXT_GLYPH_FLAG_UNSAFE_TO_CONCAT ==
+                   (int)HB_GLYPH_FLAG_UNSAFE_TO_CONCAT,
+               "HB_GLYPH_FLAG_UNSAFE_TO_CONCAT moved");
+_Static_assert((int)ZTEXT_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL ==
+                   (int)HB_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL,
+               "HB_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL moved");
+_Static_assert((int)ZTEXT_GLYPH_FLAG_DEFINED == (int)HB_GLYPH_FLAG_DEFINED,
+               "HarfBuzz defines a glyph flag ztext does not republish; add it "
+               "to ZtextGlyphFlag rather than widening the mask");
+
 // hb_glyph_extents_t is read directly in ztextShaperExtents, including the
 // documented convention that height is negative when y grows up.
 _Static_assert(sizeof(((hb_glyph_extents_t*)0)->height) ==
@@ -96,6 +119,7 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->glyph_offset_y_advance = (uint32_t)offsetof(ZtextGlyph, y_advance);
   out->glyph_offset_x_offset = (uint32_t)offsetof(ZtextGlyph, x_offset);
   out->glyph_offset_y_offset = (uint32_t)offsetof(ZtextGlyph, y_offset);
+  out->glyph_offset_flags = (uint32_t)offsetof(ZtextGlyph, flags);
 
   out->feature_size = (uint32_t)sizeof(ZtextFeature);
   out->feature_align = (uint32_t)_Alignof(ZtextFeature);
@@ -122,6 +146,8 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->glyph_bitmap_align = (uint32_t)_Alignof(ZtextGlyphBitmap);
   out->glyph_bitmap_offset_pixels =
       (uint32_t)offsetof(ZtextGlyphBitmap, pixels);
+  out->glyph_bitmap_offset_format =
+      (uint32_t)offsetof(ZtextGlyphBitmap, format);
   out->glyph_bitmap_offset_pitch = (uint32_t)offsetof(ZtextGlyphBitmap, pitch);
   out->glyph_bitmap_offset_x_advance =
       (uint32_t)offsetof(ZtextGlyphBitmap, x_advance);
@@ -145,6 +171,11 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->render_mode_last = (uint32_t)ZTEXT_RENDER_MODE_SDF;
   out->hinting_size = (uint32_t)sizeof(ZtextHinting);
   out->hinting_last = (uint32_t)ZTEXT_HINTING_NONE;
+  out->bitmap_format_size = (uint32_t)sizeof(ZtextBitmapFormat);
+  out->bitmap_format_last = (uint32_t)ZTEXT_BITMAP_FORMAT_SDF;
+  out->glyph_flag_size = (uint32_t)sizeof(ZtextGlyphFlag);
+  // The OR of every flag, not the highest one -- see ztext.h.
+  out->glyph_flag_last = (uint32_t)ZTEXT_GLYPH_FLAG_DEFINED;
 }
 
 //===----------------------------------------------------------------------===//
@@ -181,6 +212,7 @@ void ztextAbiProbe(ZtextAbiProbe* out) {
 
   out->glyph.glyph_id = 0x201u;
   out->glyph.cluster = 0x202u;
+  out->glyph.flags = 0x207u;
   out->glyph.x_advance = 203.25f;
   out->glyph.y_advance = 204.25f;
   out->glyph.x_offset = 205.25f;
@@ -217,6 +249,11 @@ void ztextAbiProbe(ZtextAbiProbe* out) {
   out->shaping_run.level = 0x64u;
 
   out->glyph_bitmap.pixels = (const uint8_t*)(uintptr_t)0x777;
+  // The one marker that is not from the counting sequence: `format` is an
+  // enum with two enumerators, so the only value that both proves it was
+  // written and stays a legal value of its own type is the one memset did not
+  // leave behind.
+  out->glyph_bitmap.format = ZTEXT_BITMAP_FORMAT_SDF;
   out->glyph_bitmap.width = 0x701u;
   out->glyph_bitmap.height = 0x702u;
   out->glyph_bitmap.pitch = -0x703;

@@ -13,7 +13,25 @@ const c = @import("c.zig");
 /// `cluster` is a BYTE offset into the UTF-8 that was shaped, not a codepoint
 /// index. Several glyphs may share a cluster (one character decomposing) and
 /// several characters may share one (a ligature).
+///
+/// `flags` is a bit mask; read it through `glyphHas`.
 pub const Glyph = c.Glyph;
+
+/// One bit of `Glyph.flags`: what shaping learned about the text around a
+/// glyph. See `ffi/ztext.h` for each flag's full meaning -- and for why ztext
+/// always produces all three rather than only the one HarfBuzz gives away.
+pub const GlyphFlag = c.GlyphFlag;
+
+/// Whether `glyph` carries `flag`.
+///
+/// A named predicate rather than an open-coded `& @intFromEnum(...)` at every
+/// call site: the mask is the kind of expression that is wrong exactly once
+/// and then copied, and a line-breaker that reads the wrong bit produces
+/// correct-looking text with the wrong breaks in it.
+pub fn glyphHas(glyph: Glyph, flag: GlyphFlag) bool {
+    const bit: u32 = @intCast(@intFromEnum(flag));
+    return glyph.flags & bit != 0;
+}
 
 /// One OpenType feature setting. `start`/`end` are byte offsets into the run;
 /// use `0` and `feature_global` for the whole run.
@@ -31,7 +49,16 @@ pub const FaceMetrics = c.FaceMetrics;
 
 /// A rasterised glyph. `pixels` borrows the face's glyph slot and is valid
 /// only until the next render or shape on that face.
+///
+/// `format` says how to read those pixels and is set even when there are
+/// none, so it never has to be inferred from the `RenderMode` that was asked
+/// for.
 pub const GlyphBitmap = c.GlyphBitmap;
+
+/// How to read a `GlyphBitmap`'s bytes. Deliberately not `RenderMode`: what
+/// was requested and what came back are two facts, and one day they may
+/// differ.
+pub const BitmapFormat = c.BitmapFormat;
 
 /// Callbacks for `Face.decomposeOutline`: one per outline command, points in
 /// 26.6 fixed point, plus a `user` pointer passed back unmodified.

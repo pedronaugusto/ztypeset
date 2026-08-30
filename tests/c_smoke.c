@@ -790,10 +790,25 @@ int main(int argc, char** argv) {
     CHECK(glyphs[0].cluster == 6 && glyphs[3].cluster == 0,
           "RTL clusters should descend: got %u..%u", glyphs[0].cluster,
           glyphs[3].cluster);
+    int saw_unsafe_to_concat = 0;
     for (size_t i = 0; i < glyph_count; i++) {
       CHECK(glyphs[i].glyph_id != 0, "glyph %zu is .notdef", i);
       CHECK(glyphs[i].x_advance > 0.0f, "glyph %zu has no advance", i);
+      // Every bit set is a bit this header names, so a switch on the mask
+      // cannot meet a value it has no meaning for.
+      CHECK((glyphs[i].flags & ~(uint32_t)ZTEXT_GLYPH_FLAG_DEFINED) == 0u,
+            "glyph %zu carries an undefined flag: 0x%x", i, glyphs[i].flags);
+      if ((glyphs[i].flags & (uint32_t)ZTEXT_GLYPH_FLAG_UNSAFE_TO_CONCAT) !=
+          0u) {
+        saw_unsafe_to_concat = 1;
+      }
     }
+    // The optional flags reach a C consumer too, not only the Zig wrapper:
+    // HarfBuzz withholds unsafe-to-concat unless ztext asks for it on every
+    // shape, and a withheld flag is indistinguishable from an absent one.
+    CHECK(saw_unsafe_to_concat,
+          "no glyph reported unsafe-to-concat; the optional glyph flags are "
+          "not being produced");
   }
 
   ZtextExtents extents;
@@ -811,6 +826,18 @@ int main(int argc, char** argv) {
     CHECK(bitmap.width > 0 && bitmap.height > 0,
           "a letter should rasterise to a non-empty bitmap");
     CHECK(bitmap.pixels != NULL, "a non-empty bitmap needs pixels");
+    // The bytes say what they are. A8 coverage and an SDF are both one byte
+    // per pixel, so a consumer that remembers the wrong mode gets a picture
+    // rather than an error.
+    CHECK(bitmap.format == ZTEXT_BITMAP_FORMAT_A8,
+          "an A8 render should report A8, got %d", (int)bitmap.format);
+
+    ZtextGlyphBitmap field;
+    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTEXT_RENDER_MODE_SDF, ZTEXT_HINTING_NONE, 0,
+                                  0, &field));
+    CHECK(field.format == ZTEXT_BITMAP_FORMAT_SDF,
+          "an SDF render should report SDF, got %d", (int)field.format);
 
     // Subpixel offset: a half-pixel shift must not crash and must still
     // rasterise to ink, exercising ztextFaceRenderGlyph's new parameters from

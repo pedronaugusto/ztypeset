@@ -275,6 +275,15 @@ case_ "a covered prefix that breaks at a format character" \
   return false;
   if (cp >= 0xFE00u && cp <= 0xFE0Fu) return true;"
 
+# A8 coverage and an SDF are both one byte per pixel, so a bitmap labelled
+# with the wrong one produces a washed-out picture rather than an error.
+case_ "a bitmap that does not say which format it is" \
+  ffi/ztext_raster.c \
+  "says which format its bytes are in" \
+  "  out->format = (mode == ZTEXT_RENDER_MODE_SDF) ? ZTEXT_BITMAP_FORMAT_SDF
+                                                : ZTEXT_BITMAP_FORMAT_A8;" \
+  "  out->format = ZTEXT_BITMAP_FORMAT_A8;"
+
 case_ "a pixel size rounded to whole pixels" \
   ffi/ztext_face.c \
   "fractional pixel size is honoured" \
@@ -290,6 +299,19 @@ case_ "a run shaped without the text around it" \
                      (int)run_length);" \
   "  hb_buffer_add_utf8(buffer, text + run_offset, (int)run_length, 0u,
                      (int)run_length);"
+
+# HarfBuzz produces unsafe-to-break whether or not it is asked, and withholds
+# the other two unless told. Stop asking, and the flags a line-breaker acts on
+# quietly become "not computed" -- which is indistinguishable from "not set"
+# at the call site, and reads as "safe" to anyone who does not know.
+case_ "the optional glyph flags never asked for" \
+  ffi/ztext_shape.c \
+  "reports where a line may be broken" \
+  "  hb_buffer_set_flags(buffer,
+                      (hb_buffer_flags_t)(
+                          HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT |
+                          HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL));" \
+  "  (void)0;"
 
 case_ "extents taken from a face the run was not shaped against" \
   ffi/ztext_shape.c \
