@@ -106,6 +106,10 @@ extern "C" {
 
 /// Version of the ztext binding, packed as (major<<16)|(minor<<8)|patch.
 /// Compare against the ZTEXT_VERSION_* macros to detect a header/library skew.
+///
+/// What a bump of each position promises -- and what an ABI change is
+/// required to do -- is in CHANGELOG.md, which is also where the three homes
+/// of this number are named. ci/measurements.sh --check gates them.
 ZTEXT_API uint32_t ztextVersion(void);
 
 /// Versions of the vendored upstreams, same packing. These report what was

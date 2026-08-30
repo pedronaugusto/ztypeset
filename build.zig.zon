@@ -12,6 +12,7 @@
         "libs",
         "src",
         "tests",
+        "CHANGELOG.md",
         "LICENSE",
         "LICENSES.md",
         "README.md",

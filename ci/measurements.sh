@@ -122,6 +122,11 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# The newest release heading in CHANGELOG.md. `grep -m1` rather than a sort,
+# because newest-first is the file's own order and a sort would quietly accept
+# an entry filed in the wrong place.
+changelog_version=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md |
+                    grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 
 if [ $CHECK -eq 0 ]; then
   printf '%sSources%s\n' "$BOLD" "$OFF"
@@ -132,7 +137,8 @@ if [ $CHECK -eq 0 ]; then
   row 'test declarations in src and tests' "$suite_test_decls"
   row 'build.zig.zon version' "$zon_version"
   row 'ffi/ztext.h version macros' "$hdr_version"
-  note 'the pair is compared by --check, not merely printed here'
+  row 'CHANGELOG.md newest entry' "$changelog_version"
+  note 'the three are compared by --check, not merely printed here'
 fi
 
 #-----------------------------------------------------------------------------
@@ -259,16 +265,23 @@ if [ $CHECK -eq 1 ]; then
   claim 'entry points swept'      'every one of the [0-9]+ entry points' "$swept"
   claim 'mutation cases'          'applies \*\*[0-9]+\*\* deliberate bugs' "$guard_cases"
 
-  # Not a README claim: the two places the version is written. They are
-  # separate files with separate reasons to be edited, and a package whose
-  # header and manifest disagree ships a lie to whichever consumer reads the
-  # other one.
-  if [ "$zon_version" = "$hdr_version" ]; then
-    printf '  %-42s %s%s%s\n' 'version, build.zig.zon = ffi/ztext.h' \
+  # Not a README claim: the THREE places ztext's version is written. Three
+  # files with three reasons to be edited, and a package whose header,
+  # manifest and changelog disagree gives a different answer to each consumer
+  # depending on which one it read. CHANGELOG.md states the policy those
+  # numbers follow; this is what stops the policy from being prose.
+  #
+  # An empty value fails here too: if any of the three greps stops matching --
+  # a heading reworded, a macro renamed -- the comparison must go red rather
+  # than compare two blanks and pass.
+  if [ -n "$zon_version" ] && [ "$zon_version" = "$hdr_version" ] &&
+     [ "$hdr_version" = "$changelog_version" ]; then
+    printf '  %-42s %s%s%s\n' 'version, zon = header = CHANGELOG' \
       "$GREEN" "$zon_version" "$OFF"
   else
-    printf '  %-42s %sbuild.zig.zon %s, ffi/ztext.h %s%s\n' \
-      'version' "$RED" "$zon_version" "$hdr_version" "$OFF"
+    printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
+      'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
+      "${changelog_version:-<none>}" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

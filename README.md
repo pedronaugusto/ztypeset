@@ -410,6 +410,18 @@ sweeps truncated prefixes and byte mutations and finds no crash, but it is a
 sample, not a proof — the test says so in its own comments. If you load fonts
 from untrusted sources, put a signature around them.
 
+### Versions, and what a bump promises
+
+[CHANGELOG.md](CHANGELOG.md) is the one home for ztext's release history and
+for the rules its numbers follow: with the major at 0 the MINOR position is
+the breaking one, an ABI change lands as one commit, and the
+`ZtextAbiLayout` handshake grows with the struct that changed.
+
+The version itself is written in three files -- `ffi/ztext.h`'s macros,
+`build.zig.zon`, and that changelog's newest heading -- and
+`ci/measurements.sh --check` fails if they disagree, including if one of the
+three patterns stops matching. A policy nothing checks is a paragraph.
+
 ### The ABI guard, in both directions
 
 Downwards, at the upstreams: `_Static_assert`s in `ffi/ztext_abi.c` fail the
@@ -810,7 +822,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **28** deliberate bugs, one at a time, to a copy of the tree, and
+applies **30** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -824,6 +836,7 @@ asserts a **named** test catches each:
 | Reproducibility | the environment allowed to reach HarfBuzz |
 | Documentation | a documented example edited away from the program it quotes |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
+| Versioning | a bump that reached two of the version's three homes, and a changelog heading reworded out from under the gate that reads it |
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose
 anchor no longer applies is reported too, so the script rots loudly rather than

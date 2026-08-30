@@ -414,6 +414,30 @@ case_ "the environment allowed to reach HarfBuzz" \
 ' \
   ''
 
+printf '\n%sVersioning%s %s(ci/measurements.sh, not the suite)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# ztext's version is written in three files, and CHANGELOG.md states what a
+# bump of each position promises. The suite cannot see any of that: a build
+# whose manifest says 0.2.0 and whose header says 0.3.0 compiles, links, and
+# passes every test.
+GUARD_CMD=(ci/measurements.sh --check)
+
+case_ "a version bump that reached two of its three homes" \
+  build.zig.zon \
+  "the three version homes disagree" \
+  '.version = "0.2.0",' \
+  '.version = "0.3.0",'
+
+# The other half, and the reason the comparison rejects an empty value rather
+# than comparing two blanks: a heading reworded stops the grep matching, and a
+# check that silently stops checking is worse than no check.
+case_ "the changelog heading the gate reads by shape" \
+  CHANGELOG.md \
+  "the three version homes disagree" \
+  '## 0.2.0' \
+  '## v0.2.0'
+
 printf '\n%sInstalled headers%s %s(ci/header-link.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
