@@ -207,6 +207,32 @@ own default allocator, i.e. `malloc` — so it never reaches a host allocator at
 all. `ztextWarmup()` makes when that happens predictable rather than dependent
 on which paragraph came first.
 
+**A paragraph that fails to resolve releases a pointer it never wrote.**
+`ObjectCreate` (`Source/Core/Object.c:33`) hands out a raw block and fills in
+only the object base; `AllocateParagraph` (`Source/API/SBParagraph.c:93`) then
+sets `fixedLevels` and nothing else, leaving `SBParagraph::_algorithm`
+uninitialised. When `ResolveParagraph` fails — which it does when one of the
+allocations behind it fails — `CreateParagraph` calls `ObjectRelease`, whose
+finalizer reads `_algorithm` and calls `SBAlgorithmRelease` on whatever
+happened to be in those eight bytes.
+
+Measured here, not read off: with `malloc`'s leftovers the C smoke test
+segfaulted **11 times in 600 runs**, always at the one allocation-failure point
+where the paragraph object is allocated and the resolve after it is refused.
+Filling every block SheenBidi is handed with `0xCD` made it **60 of 60**;
+zeroing made it **0 of 400**. Upstream has fixed two defects of exactly this
+shape before (issues #19 and #21, both closed), so this one is worth reporting
+— it is not reported yet, and the report is owed.
+
+ztext does not patch `libs/`, and there is no route to that failure path that
+does not pass through ztext's allocator seam, so the containment lives there:
+`sbAllocateBlock` zeroes every block and `sbReallocateBlock` zeroes the tail a
+grow adds, so SheenBidi never reads a byte ztext has not written. The gate is
+the poisoned arm of the injection sweep in `tests/c_smoke.c`, which runs an
+allocator that returns `0xCD` rather than leftovers: remove the memset and it
+dies on every run at the same injection point rather than on one run in fifty.
+`ci/check-guards.sh` plants exactly that mutation.
+
 ## Test fonts
 
 `tests/fonts/` holds three Noto faces under the SIL Open Font License 1.1, each

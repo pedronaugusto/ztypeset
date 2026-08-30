@@ -618,6 +618,12 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     c_smoke.root_module.link_libc = true;
+    // The same sanitizer setting as the libraries. Without it a trap in
+    // the TEST -- a shift past the width, a signed overflow, a misaligned
+    // load -- arrives as a bare SIGSEGV with the library name on it,
+    // which is a whole class of wrong diagnosis for a fault that is not
+    // in the library at all.
+    c_smoke.root_module.sanitize_c = sanitize;
     c_smoke.root_module.addIncludePath(b.path("ffi"));
     c_smoke.root_module.addCSourceFile(.{
         .file = b.path("tests/c_smoke.c"),
@@ -638,6 +644,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     bench.root_module.link_libc = true;
+    bench.root_module.sanitize_c = sanitize;
     bench.root_module.addIncludePath(b.path("ffi"));
     bench.root_module.addCSourceFile(.{
         .file = b.path("tests/bench.c"),
@@ -658,6 +665,7 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     null_sweep.root_module.link_libc = true;
+    null_sweep.root_module.sanitize_c = sanitize;
     null_sweep.root_module.addIncludePath(b.path("ffi"));
     null_sweep.root_module.addCSourceFile(.{
         .file = b.path("tests/null_sweep.c"),
@@ -672,6 +680,22 @@ pub fn build(b: *std.Build) void {
     c_test_step.dependOn(&run_c_smoke.step);
     c_test_step.dependOn(&run_null_sweep.step);
     test_step.dependOn(c_test_step);
+
+    // The C test executables in a stable place, for a harness that has to
+    // run one of them many times rather than once. ci/crash-loop.sh is the
+    // reason this exists: an intermittent fault is not something
+    // `zig build test` can measure, because one run of a fault that
+    // happens one time in fifty is indistinguishable from no fault.
+    //
+    // A step of its own rather than b.installArtifact, so a consumer that
+    // depends on ztext never finds three test binaries in its own prefix.
+    const install_c_tests = b.step(
+        "install-c-tests",
+        "Install the C test executables into zig-out/bin for ci/crash-loop.sh",
+    );
+    install_c_tests.dependOn(&b.addInstallArtifact(c_smoke, .{}).step);
+    install_c_tests.dependOn(&b.addInstallArtifact(null_sweep, .{}).step);
+    install_c_tests.dependOn(&b.addInstallArtifact(bench, .{}).step);
 
     // Registered unconditionally, including when ztext is consumed as a
     // dependency. `std.Build.Dependency.artifact` finds an artifact by

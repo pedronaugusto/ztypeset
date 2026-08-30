@@ -51,7 +51,7 @@ void ztextLibraryDestroy(ZtextLibrary* library) {
   // immediately after this struct was allocated. A library is therefore
   // entirely self-consistent even if the process-wide allocator is replaced
   // during its lifetime.
-  ztextFreeWith(&library->allocator, library);
+  ztextFreeFrom(library->allocator, library);
 }
 
 ZtextResult ztextLibrarySetSdfSpread(ZtextLibrary* library, uint32_t spread) {
@@ -146,13 +146,13 @@ static void releaseFont(ZtextFont* font) {
   ZtextLibrary* library = font->library;
   if (font->hb_face != NULL) hb_face_destroy(font->hb_face);
   // The axis table came from FreeType's allocator, so it goes back through
-  // FreeType rather than through ztextFreeWith -- FT_Get_MM_Var allocates it
+  // FreeType rather than through ztextFreeFrom -- FT_Get_MM_Var allocates it
   // with the library's memory record and FT_Done_MM_Var is the only thing
   // that knows its internal shape.
   if (font->mm != NULL) FT_Done_MM_Var(library->ft, font->mm);
-  ztextFreeWith(&library->allocator, font->coords);
+  ztextFreeFrom(library->allocator, font->coords);
   FT_Done_Face(font->ft);
-  ztextFreeWith(&library->allocator, font);
+  ztextFreeFrom(library->allocator, font);
 }
 
 /// Fetches the font's `fvar` axes and the coordinates it starts at, if it has
@@ -179,8 +179,8 @@ static ZtextResult initVariations(ZtextFont* font) {
   const size_t num_axis = (size_t)font->mm->num_axis;
   // One block for both representations, the 16.16 array first so the floats
   // that follow it are aligned by construction on every target.
-  void* block = ztextAllocWith(
-      &font->library->allocator,
+  void* block = ztextAllocFrom(
+      font->library->allocator,
       num_axis * (sizeof(FT_Fixed) + sizeof(float)), ZTEXT_DEFAULT_ALIGN);
   if (block == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
   font->coords = (FT_Fixed*)block;
@@ -223,8 +223,8 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
 
   // From the library's allocator, not the process-wide one, so everything a
   // font owns lives and dies with the same allocator its FT_Face memory does.
-  ZtextFont* font = (ZtextFont*)ztextAllocWith(
-      &library->allocator, sizeof(ZtextFont), ZTEXT_DEFAULT_ALIGN);
+  ZtextFont* font = (ZtextFont*)ztextAllocFrom(
+      library->allocator, sizeof(ZtextFont), ZTEXT_DEFAULT_ALIGN);
   if (font == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
   memset(font, 0, sizeof(*font));
   font->library = library;
@@ -233,7 +233,7 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
       FT_New_Memory_Face(library->ft, (const FT_Byte*)data, (FT_Long)size,
                          (FT_Long)face_index, &font->ft);
   if (error != FT_Err_Ok) {
-    ztextFreeWith(&library->allocator, font);
+    ztextFreeFrom(library->allocator, font);
     return ztextFromFtError(error);
   }
 
@@ -257,7 +257,7 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
   if (font->hb_face == NULL || hb_face_get_glyph_count(font->hb_face) == 0u) {
     if (font->hb_face != NULL) hb_face_destroy(font->hb_face);
     FT_Done_Face(font->ft);
-    ztextFreeWith(&library->allocator, font);
+    ztextFreeFrom(library->allocator, font);
     ztextSetErrorDetail(
         "HarfBuzz rejected the font tables that FreeType accepted");
     return ZTEXT_RESULT_BAD_FONT;
@@ -266,10 +266,10 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
   const ZtextResult variations = initVariations(font);
   if (variations != ZTEXT_RESULT_OK) {
     if (font->mm != NULL) FT_Done_MM_Var(library->ft, font->mm);
-    ztextFreeWith(&library->allocator, font->coords);
+    ztextFreeFrom(library->allocator, font->coords);
     hb_face_destroy(font->hb_face);
     FT_Done_Face(font->ft);
-    ztextFreeWith(&library->allocator, font);
+    ztextFreeFrom(library->allocator, font);
     return variations;
   }
 
@@ -416,22 +416,22 @@ ZtextResult ztextFaceCreate(ZtextFont* font, float width, float height,
   }
 
   ZtextLibrary* library = font->library;
-  ZtextFace* face = (ZtextFace*)ztextAllocWith(
-      &library->allocator, sizeof(ZtextFace), ZTEXT_DEFAULT_ALIGN);
+  ZtextFace* face = (ZtextFace*)ztextAllocFrom(
+      library->allocator, sizeof(ZtextFace), ZTEXT_DEFAULT_ALIGN);
   if (face == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
   memset(face, 0, sizeof(*face));
   face->font = font;
 
   const FT_Error error = FT_New_Size(font->ft, &face->ft_size);
   if (error != FT_Err_Ok) {
-    ztextFreeWith(&library->allocator, face);
+    ztextFreeFrom(library->allocator, face);
     return ztextFromFtError(error);
   }
 
   face->hb_font = hb_font_create(font->hb_face);
   if (face->hb_font == NULL || face->hb_font == hb_font_get_empty()) {
     destroyFaceParts(face);
-    ztextFreeWith(&library->allocator, face);
+    ztextFreeFrom(library->allocator, face);
     return ZTEXT_RESULT_OUT_OF_MEMORY;
   }
   // HarfBuzz's own OpenType implementation: advances derived linearly from
@@ -476,7 +476,7 @@ void ztextFaceDestroy(ZtextFace* face) {
   }
 
   destroyFaceParts(face);
-  ztextFreeWith(&library->allocator, face);
+  ztextFreeFrom(library->allocator, face);
 
   font->live_faces -= 1u;
   releaseFont(font);
@@ -765,8 +765,8 @@ ZtextResult ztextFontSetVariations(ZtextFont* font,
   // Built to one side and committed only once FreeType has accepted it. The
   // font's own array could have been written in place and rolled back, but a
   // rollback path that runs only when FreeType fails is a path nothing tests.
-  FT_Fixed* wanted = (FT_Fixed*)ztextAllocWith(
-      &library->allocator, (size_t)num_axis * sizeof(FT_Fixed),
+  FT_Fixed* wanted = (FT_Fixed*)ztextAllocFrom(
+      library->allocator, (size_t)num_axis * sizeof(FT_Fixed),
       ZTEXT_DEFAULT_ALIGN);
   if (wanted == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
 
@@ -784,12 +784,12 @@ ZtextResult ztextFontSetVariations(ZtextFont* font,
   const FT_Error error =
       FT_Set_Var_Design_Coordinates(font->ft, num_axis, wanted);
   if (error != FT_Err_Ok) {
-    ztextFreeWith(&library->allocator, wanted);
+    ztextFreeFrom(library->allocator, wanted);
     return ztextFromFtError(error);
   }
 
   memcpy(font->coords, wanted, (size_t)num_axis * sizeof(FT_Fixed));
-  ztextFreeWith(&library->allocator, wanted);
+  ztextFreeFrom(library->allocator, wanted);
   for (FT_UInt i = 0; i < num_axis; i++) {
     font->design[i] = fixedToDesign(font->coords[i]);
   }

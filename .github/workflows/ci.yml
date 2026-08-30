@@ -59,6 +59,12 @@ jobs:
       - name: Test — C ABI standalone
         run: zig build test-c
 
+      # One run cannot observe an intermittent fault: this package shipped a
+      # segfault at 1.8% per run that every single-run gate was green on. The
+      # loop is the harness and 200/200 is its exit condition.
+      - name: Test — C ABI, 200 runs
+        run: ci/crash-loop.sh 200
+
       # Consuming ztext as a dependency exercises a different code path from
       # building it -- artifact registration and installed-header spelling are
       # invisible to the in-repo suite. See tests/consumer/build.zig.
@@ -73,6 +79,16 @@ jobs:
       - name: Test — Windows MSVC ABI
         if: runner.os == 'Windows'
         run: zig build test -Dtarget=x86_64-windows-msvc
+
+      - name: Test — Windows MSVC ABI, as a downstream dependency
+        if: runner.os == 'Windows'
+        working-directory: tests/consumer
+        run: zig build run -Dtarget=x86_64-windows-msvc
+
+      - name: Test — Windows MSVC ABI, 200 runs
+        if: runner.os == 'Windows'
+        shell: bash
+        run: ci/crash-loop.sh 200 -Dtarget=x86_64-windows-msvc
 
   # Compile-only coverage of the targets the suite cannot execute on. These
   # prove the sources and build graph are portable; the `test` job above is

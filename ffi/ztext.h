@@ -224,18 +224,53 @@ typedef struct ZtextAllocator {
   void* user;
 } ZtextAllocator;
 
+/// Exit code ztext uses when it stops the process because a block reached the
+/// wrong allocator; see ztextSetAllocator. Fixed so a test harness can assert
+/// on it rather than on a platform's abort convention.
+#define ZTEXT_EXIT_ALLOCATOR_MISMATCH 70
+
 /// Installs a process-wide allocator for all subsequent ztext allocation.
 ///
-/// Call it before creating anything, and do not swap it while live handles
-/// exist -- a handle is freed through whichever allocator is installed at
-/// destruction time, except for FreeType memory, which each ZtextLibrary
-/// captured at creation. Passing NULL restores malloc/free.
-///
 /// `alloc` is copied by value; the caller need not keep the struct alive, but
-/// `user` must outlive every handle allocated through it.
+/// `user` must outlive every handle allocated through it. Passing NULL
+/// restores malloc/free.
+///
+/// EVERY BLOCK IS FREED THROUGH THE ALLOCATOR THAT MADE IT, BY CONSTRUCTION
+/// RATHER THAN BY DISCIPLINE. Every allocator ever installed keeps an entry in
+/// a small registry; each block's header records the INDEX of the entry that
+/// issued it, and every deallocate and reallocate is routed back to that entry
+/// rather than to whatever happens to be installed at the time.
+///
+/// So swapping the allocator with live handles is safe, not undefined: an
+/// hb_face_t built under one allocator is destroyed through that one even if
+/// the process-wide allocator changed in between, and the FreeType memory of
+/// the same font -- which has always been per-library -- agrees with it. That
+/// was not true before: one handle could span two heaps, with nothing that
+/// could tell you.
+///
+/// Installing the same allocator twice reuses its entry. A distinct one costs
+/// a single ZtextAllocator, allocated with malloc and never freed, because it
+/// must outlive the last block it issued. That is the only allocation ztext
+/// makes outside the installed allocator.
+///
+/// If ztext itself ever names the wrong owner for a block -- an internal
+/// mistake, not something a host can cause -- it does NOT free the block
+/// (leaking one block is recoverable; handing a pointer to a heap that never
+/// issued it is not), writes a line naming both allocators to stderr, and
+/// exits with ZTEXT_EXIT_ALLOCATOR_MISMATCH. There is no way to continue: the
+/// deallocate callback has no error channel, because FreeType's, HarfBuzz's
+/// and SheenBidi's have none.
+///
+/// The header check is a detector, not a checksum: sixteen bytes leave no room
+/// for a magic number, so a prefix overrun into values that happen to be in
+/// range still passes. What it catches on every deallocation is an index past
+/// the end of the registry and an alignment that is not a power of two at or
+/// below max_align_t's.
 ///
 /// Returns ZTEXT_RESULT_INVALID_ARGUMENT if `allocate` or `deallocate` is NULL,
-/// in which case the previously installed allocator is left untouched.
+/// in which case the previously installed allocator is left untouched. Returns
+/// ZTEXT_RESULT_OUT_OF_MEMORY if the registry entry cannot be allocated, in
+/// which case the previously installed allocator is likewise left untouched.
 ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 
 /// Populates the process-global caches the upstreams never free before exit,

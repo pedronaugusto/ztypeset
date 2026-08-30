@@ -48,20 +48,40 @@
 /// never request more.
 #define ZTEXT_DEFAULT_ALIGN (_Alignof(max_align_t))
 
-/// Through the process-wide allocator.
+/// Index into ztext's allocator registry, which holds one entry per distinct
+/// allocator ever installed. Every block records the index of the allocator
+/// that issued it, so "freed through the allocator that made it" is a routing
+/// decision ztext makes rather than a rule a caller has to keep. See the
+/// registry section at the top of ztext_core.c.
+typedef uint32_t ZtextAllocatorId;
+
+/// Entry 0: malloc/free, present before anything runs.
+#define ZTEXT_ALLOCATOR_DEFAULT ((ZtextAllocatorId)0u)
+
+/// "Whichever allocator the block itself records" -- the only value a free or
+/// a grow of process-wide memory ever passes, because nothing else knows.
+#define ZTEXT_ALLOCATOR_ANY ((ZtextAllocatorId)0xFFFFFFFFu)
+
+/// Returned by the registry when it could not take another allocator.
+#define ZTEXT_ALLOCATOR_NONE ((ZtextAllocatorId)0xFFFFFFFEu)
+
+/// The allocator ztextSetAllocator most recently installed.
+ZtextAllocatorId ztextInstalledAllocator(void);
+
+/// Process-wide memory: new blocks come from the installed allocator, and a
+/// grow or a free is routed to whichever allocator the block records.
 void* ztextAlloc(size_t size, size_t alignment);
 void* ztextRealloc(void* block, size_t new_size, size_t alignment);
 void ztextFree(void* block);
 
-/// Through a specific allocator, for memory that belongs to one object rather
-/// than to the process. A block must be freed through the same allocator it
-/// was allocated from -- the header records its size and alignment, not which
-/// allocator produced it.
-void* ztextAllocWith(const ZtextAllocator* allocator, size_t size,
-                     size_t alignment);
-void* ztextReallocWith(const ZtextAllocator* allocator, void* block,
-                       size_t new_size, size_t alignment);
-void ztextFreeWith(const ZtextAllocator* allocator, void* block);
+/// Memory that belongs to one object rather than to the process, named by the
+/// allocator that owns it. The caller's `id` is CHECKED against the one the
+/// block records, and a disagreement stops the process -- it can only mean
+/// ztext allocated a block in one place and released it in another.
+void* ztextAllocFrom(ZtextAllocatorId id, size_t size, size_t alignment);
+void* ztextReallocFrom(ZtextAllocatorId id, void* block, size_t new_size,
+                       size_t alignment);
+void ztextFreeFrom(ZtextAllocatorId id, void* block);
 
 /// Zero-initialising allocate, with the multiplication checked for overflow.
 void* ztextCalloc(size_t count, size_t size);
@@ -69,8 +89,8 @@ void* ztextCalloc(size_t count, size_t size);
 /// Convenience for the common case: one zeroed object of a type.
 #define ZTEXT_NEW(T) ((T*)ztextCalloc(1, sizeof(T)))
 
-/// Wires `library`'s FreeType memory record to ztext, capturing the allocator
-/// installed right now into `library->allocator`.
+/// Wires `library`'s FreeType memory record to ztext, recording the allocator
+/// installed right now in `library->allocator`.
 ///
 /// The record must outlive the FT_Library built from it, so it lives
 /// inside the library rather than on a caller's stack.
@@ -180,14 +200,16 @@ struct ZtextLibrary {
   /// library, which is how the allocation shims find `allocator` below.
   struct FT_MemoryRec_ memory;
 
-  /// The allocator installed when this library was created, captured by value.
+  /// Registry index of the allocator installed when this library was created.
   ///
   /// This is what makes FreeType's memory genuinely per-library rather than
   /// process-wide: FT_New_Library takes an FT_Memory, and every allocation
   /// FreeType makes for this library -- faces, glyph slots, hinting state --
-  /// is routed back through this copy, even if the process-wide allocator is
-  /// replaced afterwards. HarfBuzz cannot do this; its seam is compile-time.
-  ZtextAllocator allocator;
+  /// is routed back through this entry, even if the process-wide allocator is
+  /// replaced afterwards. HarfBuzz cannot do this; its seam is compile-time,
+  /// which is why the registry routes HarfBuzz's frees by what the block
+  /// records instead.
+  ZtextAllocatorId allocator;
 
   FT_Library ft;
 };
