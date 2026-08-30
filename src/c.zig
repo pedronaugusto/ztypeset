@@ -505,6 +505,13 @@ pub extern fn ztextShaperShape(
     run_length: usize,
     params: *const ShapeParams,
 ) Result;
+pub extern fn ztextShaperShapeRun(
+    shaper: *Shaper,
+    face: *Face,
+    paragraph: *const Paragraph,
+    run: *const ShapingRun,
+    params: *const ShapeParams,
+) Result;
 pub extern fn ztextShaperGlyphCount(shaper: *const Shaper) usize;
 pub extern fn ztextShaperGlyphs(shaper: *const Shaper) ?[*]const Glyph;
 pub extern fn ztextShaperDirection(shaper: *const Shaper) Direction;

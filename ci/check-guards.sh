@@ -423,6 +423,32 @@ case_ "a rejected shape leaves the previous run queryable" \
   "  // shaper->shaped = false;
   // shaper->glyphs.count = 0u;"
 
+case_ "a paragraph run shaped left to right whatever its level" \
+  ffi/ztext_shape.c \
+  "a paragraph run is shaped from the paragraph" \
+  "                   (run->level % 2u == 0u) ? ZTEXT_DIRECTION_LTR
+                                           : ZTEXT_DIRECTION_RTL," \
+  "                   ZTEXT_DIRECTION_LTR,"
+
+case_ "a run's direction and the caller's, both accepted" \
+  ffi/ztext_shape.c \
+  "a paragraph run refuses a direction or script" \
+  "  if (params->direction != ZTEXT_DIRECTION_AUTO || params->script != 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }" \
+  "  if (params->direction != ZTEXT_DIRECTION_AUTO && params->script != 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }"
+
+case_ "a hand-built run trusted about its own bounds" \
+  ffi/ztext_shape.c \
+  "a run built by hand cannot reach outside its paragraph" \
+  "  if (!rangeIsUsable(paragraph->text, paragraph->length, paragraph->encoding,
+                     run->offset, run->length)) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }" \
+  "  (void)0;"
+
 printf '\n%sAllocator%s %s(the seam, both sides of it)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
@@ -505,9 +531,9 @@ printf '\n%sDocumentation%s %s(the examples are one text)%s\n' \
 case_ "a documented example edited away from the program" \
   README.md \
   "README.md quotes the usage example verbatim" \
-  '    // script come from the run, because that is what a run is for.
-    const glyphs = try shaper.shapeRun(face, text, run, .{});' \
-  '    // script come from the run, because that is what a run is for.
+  '    // text a paragraph already validated is not validated again per run.
+    const glyphs = try shaper.shapeRun(face, paragraph, run, .{});' \
+  '    // text a paragraph already validated is not validated again per run.
     const glyphs = try shaper.shape(face, text[run.offset..][0..run.length], .{});'
 
 printf '\n%sReproducibility%s %s(the environment must not reach the picture)%s\n' \

@@ -872,6 +872,57 @@ int main(int argc, char** argv) {
   CHECK(extents.x_advance > 0.0f, "a shaped run should advance the pen");
   CHECK(extents.x_max > extents.x_min, "extents should enclose some ink");
 
+  // The other shaping entry point: a run OF A PARAGRAPH, which is where the
+  // text, the offsets, the direction and the script all come from one place.
+  phase("shape a paragraph run");
+  ZtextParagraph* shaped_paragraph = NULL;
+  CHECK_OK(ztextParagraphCreate(shalom, strlen(shalom), ZTEXT_ENCODING_UTF8,
+                                ZTEXT_BASE_DIRECTION_AUTO,
+                                &shaped_paragraph));
+  const ZtextShapingRun* shaped_runs =
+      ztextParagraphShapingRuns(shaped_paragraph);
+  const size_t shaped_run_count =
+      ztextParagraphShapingRunCount(shaped_paragraph);
+  CHECK(shaped_run_count == 1u, "expected one run, got %zu",
+        shaped_run_count);
+  if (shaped_runs != NULL && shaped_run_count == 1u) {
+    ZtextShapeParams run_params;
+    memset(&run_params, 0, sizeof(run_params));
+    CHECK_OK(ztextShaperShapeRun(shaper, face, shaped_paragraph,
+                                 &shaped_runs[0], &run_params));
+    CHECK(ztextShaperGlyphCount(shaper) == 4u,
+          "the same four glyphs, from the paragraph");
+    CHECK(ztextShaperDirection(shaper) == ZTEXT_DIRECTION_RTL,
+          "the run's odd level should decide the direction");
+
+    // The run carries direction and script; a ZtextShapeParams that carries
+    // them too is refused rather than quietly losing to one of them.
+    run_params.direction = ZTEXT_DIRECTION_RTL;
+    CHECK(ztextShaperShapeRun(shaper, face, shaped_paragraph, &shaped_runs[0],
+                              &run_params) == ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a direction in the params should be refused");
+    run_params.direction = ZTEXT_DIRECTION_AUTO;
+    run_params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
+    CHECK(ztextShaperShapeRun(shaper, face, shaped_paragraph, &shaped_runs[0],
+                              &run_params) == ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a script in the params should be refused");
+
+    // And a run nobody produced cannot reach outside the paragraph.
+    ZtextShapingRun forged = shaped_runs[0];
+    forged.length = 999u;
+    memset(&run_params, 0, sizeof(run_params));
+    CHECK(ztextShaperShapeRun(shaper, face, shaped_paragraph, &forged,
+                              &run_params) == ZTEXT_RESULT_INVALID_ARGUMENT,
+          "a run past the end of the paragraph should be refused");
+  }
+  ztextParagraphDestroy(shaped_paragraph);
+
+  // The refusals above cleared the shaper, as every failed shape does. Put
+  // the run back so what follows rasterises the glyphs it was written for.
+  CHECK_OK(ztextShaperShape(shaper, face, shalom, strlen(shalom),
+                            ZTEXT_ENCODING_UTF8, 0, strlen(shalom), &params));
+  glyphs = ztextShaperGlyphs(shaper);
+
   phase("raster");
   // Rasterise.
   if (glyphs != NULL && glyph_count > 0) {

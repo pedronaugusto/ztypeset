@@ -7,8 +7,8 @@
 //! requires the document to contain it verbatim.
 //!
 //! It exists because the copies disagreed and nothing could tell. README's
-//! loop had been corrected to `shapeRun` -- the whole text in, the run
-//! selecting part of it, so HarfBuzz sees the characters either side -- while
+//! loop had been corrected to `shapeRun` -- the run shaped in the context of
+//! the whole text, so HarfBuzz sees the characters either side -- while
 //! the module doc still sliced the text and shaped the slice, which is the
 //! defect README's own defect list says was fixed. Two homes for one example,
 //! neither compiled.
