@@ -36,10 +36,11 @@
 //! // shapingRuns, not visualRuns: one visual run can span several scripts, and
 //! // HarfBuzz shapes one script at a time.
 //! for (paragraph.shapingRuns()) |run| {
-//!     // shapeRun, not shape: the WHOLE text goes in and the run selects part
-//!     // of it, so HarfBuzz can see the characters either side. Direction and
-//!     // script come from the run, because that is what a run is for.
-//!     const glyphs = try shaper.shapeRun(face, text, run, .{});
+//!     // shapeRun, not shape: the PARAGRAPH owns the text, so a run can only be
+//!     // applied to the text it came from, HarfBuzz sees the characters either
+//!     // side of the run, direction and script come from the run itself, and
+//!     // text a paragraph already validated is not validated again per run.
+//!     const glyphs = try shaper.shapeRun(face, paragraph, run, .{});
 //!     for (glyphs) |glyph| {
 //!         const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
 //!         // ... into your atlas, before the next call on this face.

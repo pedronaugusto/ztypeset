@@ -62,10 +62,11 @@ defer paragraph.deinit();
 // shapingRuns, not visualRuns: one visual run can span several scripts, and
 // HarfBuzz shapes one script at a time.
 for (paragraph.shapingRuns()) |run| {
-    // shapeRun, not shape: the WHOLE text goes in and the run selects part
-    // of it, so HarfBuzz can see the characters either side. Direction and
-    // script come from the run, because that is what a run is for.
-    const glyphs = try shaper.shapeRun(face, text, run, .{});
+    // shapeRun, not shape: the PARAGRAPH owns the text, so a run can only be
+    // applied to the text it came from, HarfBuzz sees the characters either
+    // side of the run, direction and script come from the run itself, and
+    // text a paragraph already validated is not validated again per run.
+    const glyphs = try shaper.shapeRun(face, paragraph, run, .{});
     for (glyphs) |glyph| {
         const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
         // ... into your atlas, before the next call on this face.
@@ -86,7 +87,7 @@ If the text wraps, ask where it may break, decide with your own width, and
 iterate a `Line` per visual line:
 
 ```zig
-const breaks = paragraph.lineBreaks(); // one entry per byte
+const breaks = paragraph.lineBreaks(); // one entry per code unit
 var start: usize = 0;
 while (start < text.len) {
     // Furthest permitted break that still fits. ztext says where a break is
@@ -97,7 +98,7 @@ while (start < text.len) {
     defer line.deinit();
     for (line.shapingRuns()) |run| {
         // Shaped and rendered exactly as above, per line this time.
-        const glyphs = try shaper.shapeRun(face, text, run, .{});
+        const glyphs = try shaper.shapeRun(face, paragraph, run, .{});
         _ = glyphs;
     }
     start = end;
@@ -149,8 +150,22 @@ unreusable.
 
 What that means concretely: `Paragraph` gives you **shaping runs** — visual
 runs intersected with script runs, each uniform in direction and script, in
-visual order — and you call `shape` once per run. `shape` is a *run* shaper and
-says so.
+visual order — and you call `shapeRun` once per run, handing it the paragraph
+the run came from. Nothing here shapes a paragraph for you.
+
+`shapeRun` takes the paragraph rather than the text on purpose. A run is a pair
+of offsets, and offsets are only meaningful against the buffer they were
+computed from: passing a *slice* of that buffer together with offsets computed
+against the whole is the single most common way to get this wrong, and it
+produces text that is almost right. With the paragraph as the argument there is
+no second buffer to disagree with. It also settles two other things — the run
+carries the direction and the script, so `ShapeParams` must not also carry
+them, and the paragraph's text was validated when it was created, so it is not
+walked again for every run.
+
+`shape` and `shapeRange` remain for text a host has *not* made a paragraph of:
+one string, or one range of one string with the rest as context, with the
+direction and script the host names.
 
 Where a host has already decided the breaks, `Line` reorders one range of a
 paragraph on its own terms. That is a correctness boundary, not a convenience:
@@ -180,8 +195,8 @@ learn here than during an integration:
   rather than silently produce backwards brackets.
 - **Segmentation is in scope, and that is a deliberate line.** It would be
   easy to call line breaking "the host's job", but that is arbitrary: ztext
-  already owns UAX #9, and `Line` takes a byte range a host would otherwise
-  have no way to find. FreeType, HarfBuzz and SheenBidi implement none of
+  already owns UAX #9, and `Line` takes a code-unit range a host would
+  otherwise have no way to find. FreeType, HarfBuzz and SheenBidi implement none of
   UAX #14 or #29 between them, so ztext vendors libunibreak and provides break
   *opportunities*. Deciding where to break needs a width, and that stays the
   host's.
@@ -410,7 +425,10 @@ software. ztext's job is narrower and it should be said plainly:
   three encodings it arrived in. HarfBuzz substitutes U+FFFD for malformed
   input and SheenBidi has its own recovery. Reasonable for a text editor,
   wrong for an engine reading a localisation table, where malformed input
-  means the table is corrupt. ztext returns `InvalidText`.
+  means the table is corrupt. ztext returns `InvalidText`. Text enters once:
+  a `Paragraph` validates and copies it, and `shapeRun` therefore does not
+  walk it again per run — which is a cost, not only a tidiness, and it is
+  measured below.
 - **Turning failures into typed errors**, and separating *"this format is not
   compiled in"* from *"these bytes are broken"* — the first tells you to
   re-cook, the second to go looking for corruption.
@@ -542,6 +560,8 @@ would expect of an allocation total and is worth checking rather than assuming.
 | | Cost | Read this as |
 |---|---|---|
 | Shape a 43-character run | **~2.5 µs** | 2.25-2.70 µs. Reusing one `Shaper`. A separate test proves 500 warm shapes allocate **nothing**. |
+| The same run, 4300 characters around it, through `shape` | **~3.3 µs** | HarfBuzz decodes the run and at most five characters either side, so its cost does not move. The extra **~1.05 µs** is ztext validating the whole borrowed buffer — about 0.25 ns per code unit, paid on every call. |
+| The same run, through `shapeRun` | **~2.25 µs** | Identical to the 43-character case: a paragraph's text was validated when the paragraph was created. Shaping an N-unit paragraph as R runs costs R walks of N through `shape` and none through `shapeRun`. |
 | Rasterise one glyph, A8 | **~2.3 µs** | 2.16-2.50 µs. Uncached; `FT_Load_Glyph` every time, and one memcpy of the result. Atlas it anyway. |
 | Rasterise one glyph, SDF | **~2.6 ms** | **~1100× the A8 cost** (1091-1216 across the four runs). |
 | One font, first face | 34 349 B | The parse, plus everything the first size needs. |
@@ -584,11 +604,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**116 tests**, executed twice. The second pass runs the same binary with
+**119 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **232/232 passed**.
+rather than being believed. So `zig build test` reports **238/238 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -679,7 +699,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 76 entry points with
+And `tests/null_sweep.c` calls **every one of the 77 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -775,8 +795,8 @@ exists because of the first. The second is gone at the root rather than by
 remembering: `setAllocator` warms those caches itself, so there is no longer a
 call to omit.
 
-Then this page was corrected to `shapeRun` — the whole text in, the run
-selecting part of it — and the same example in `src/ztext.zig`'s module doc
+Then this page was corrected to `shapeRun` — the run shaped in the context
+of the whole text — and the same example in `src/ztext.zig`'s module doc
 went on shaping `text[run.offset..][0..run.length]`, which is precisely the
 defect this paragraph claimed was fixed. Two homes for one example, and
 nothing compiled either. Now there is one:
@@ -907,7 +927,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **47** deliberate bugs, one at a time, to a copy of the tree, and
+applies **50** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -919,7 +939,7 @@ asserts a **named** test catches each:
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
 | Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
-| Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for |
+| Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for, a paragraph run shaped left to right whatever its level, a direction the run and the caller both set, a hand-built run trusted about its own bounds |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, an allocator slot taken per install rather than per allocator, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed — planted where `ztextSetAllocator` warms them, since nothing warms up by hand any more |
 | Handle lifetimes | a font released without telling the library that owns it, a face's glyph buffer charged to whatever allocator is installed when it is first drawn |

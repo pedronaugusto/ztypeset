@@ -214,6 +214,9 @@ int main(int argc, char** argv) {
   memset(&params, 0, sizeof(params));
   REFUSES(ztextShaperShape(NULL, NULL, "x", 1, ZTEXT_ENCODING_UTF8, 0, 1,
                            &params));
+  ZtextShapingRun null_run;
+  memset(&null_run, 0, sizeof(null_run));
+  REFUSES(ztextShaperShapeRun(NULL, NULL, NULL, &null_run, &params));
   CHECK(ztextShaperGlyphCount(NULL) == 0u, "glyph count of NULL shaper");
   CHECK(ztextShaperGlyphs(NULL) == NULL, "glyphs of NULL shaper");
   CHECK(ztextShaperDirection(NULL) == ZTEXT_DIRECTION_AUTO,
@@ -323,6 +326,10 @@ int main(int argc, char** argv) {
                            &params));
   REFUSES(ztextShaperShape(shaper, face, NULL, 1, ZTEXT_ENCODING_UTF8, 0, 1,
                            &params));
+  REFUSES(ztextShaperShapeRun(shaper, face, NULL, &null_run, &params));
+  REFUSES(ztextShaperShapeRun(shaper, NULL, NULL, &null_run, &params));
+  REFUSES(ztextShaperShapeRun(shaper, face, NULL, NULL, &params));
+  REFUSES(ztextShaperShapeRun(shaper, face, NULL, &null_run, NULL));
   REFUSES_OUT(ztextShaperExtents(shaper, face, NULL));
 
   if (ztextParagraphCreate("abc", 3, ZTEXT_ENCODING_UTF8,

@@ -578,13 +578,10 @@ test "the documented wrap loop covers a paragraph exactly once" {
         var i: usize = start;
         while (i < text.len) : (i += 1) {
             if (breaks[i] == .none) continue;
-            const candidate: ztext.ShapingRun = .{
-                .offset = @intCast(start),
-                .length = @intCast(i + 1 - start),
+            _ = try fixture.shaper.shapeRange(face, text, start, i + 1 - start, .{
+                .direction = .ltr,
                 .script = ztext.tag("Latn"),
-                .level = 0,
-            };
-            _ = try fixture.shaper.shapeRun(face, text, candidate, .{});
+            });
             const width = (try fixture.shaper.extents(face)).x_advance;
             if (width <= limit or chosen == 0) chosen = i + 1;
             if (width > limit) break;
@@ -594,7 +591,7 @@ test "the documented wrap loop covers a paragraph exactly once" {
         const line = try paragraph.line(start, chosen - start);
         defer line.deinit();
         for (line.shapingRuns()) |run| {
-            _ = try fixture.shaper.shapeRun(face, text, run, .{});
+            _ = try fixture.shaper.shapeRun(face, paragraph, run, .{});
             covered += run.length;
         }
 
@@ -721,13 +718,7 @@ test "shaping a run with context matches shaping the whole text" {
 
         // Visual order is right-to-left, so the LATER bytes are drawn first.
         for ([_][2]usize{ .{ split, word.len - split }, .{ 0, split } }) |part| {
-            const run: ztext.ShapingRun = .{
-                .offset = @intCast(part[0]),
-                .length = @intCast(part[1]),
-                .script = ztext.tag("Arab"),
-                .level = 1,
-            };
-            _ = try fixture.shaper.shapeRun(face, word, run, params);
+            _ = try fixture.shaper.shapeRange(face, word, part[0], part[1], params);
             for (fixture.shaper.glyphs()) |g| {
                 seen[count] = g.glyph_id;
                 count += 1;
@@ -756,10 +747,8 @@ test "shaping a run WITHOUT context is measurably different" {
         .script = ztext.tag("Arab"),
     };
 
-    const run: ztext.ShapingRun =
-        .{ .offset = 0, .length = 6, .script = ztext.tag("Arab"), .level = 1 };
     var with_context: [8]u32 = undefined;
-    _ = try fixture.shaper.shapeRun(face, word, run, params);
+    _ = try fixture.shaper.shapeRange(face, word, 0, 6, params);
     const n = fixture.shaper.glyphs().len;
     for (fixture.shaper.glyphs(), 0..) |g, i| with_context[i] = g.glyph_id;
 
@@ -790,28 +779,16 @@ test "a run range is refused when it is out of bounds or splits a character" {
         .{ 0, 3 }, // ends inside a character
     };
     for (bad) |range| {
-        const run: ztext.ShapingRun = .{
-            .offset = @intCast(range[0]),
-            .length = @intCast(range[1]),
-            .script = ztext.tag("Hebr"),
-            .level = 1,
-        };
         try std.testing.expectError(
             ztext.Error.InvalidArgument,
-            fixture.shaper.shapeRun(face, text, run, .{}),
+            fixture.shaper.shapeRange(face, text, range[0], range[1], .{}),
         );
     }
 
     // The whole text, and each character boundary, are all fine.
     var offset: usize = 0;
     while (offset <= text.len) : (offset += 2) {
-        const run: ztext.ShapingRun = .{
-            .offset = @intCast(offset),
-            .length = @intCast(text.len - offset),
-            .script = ztext.tag("Hebr"),
-            .level = 1,
-        };
-        _ = try fixture.shaper.shapeRun(face, text, run, .{});
+        _ = try fixture.shaper.shapeRange(face, text, offset, text.len - offset, .{});
     }
 }
 
@@ -827,7 +804,8 @@ test "clusters from a run are offsets into the whole text" {
     const text = "Hello world";
     const run: ztext.ShapingRun =
         .{ .offset = 6, .length = 5, .script = ztext.tag("Latn"), .level = 0 };
-    const glyphs = try fixture.shaper.shapeRun(face, text, run, .{});
+    const glyphs =
+        try fixture.shaper.shapeRange(face, text, run.offset, run.length, .{});
 
     try std.testing.expectEqual(@as(usize, 5), glyphs.len);
     for (glyphs) |g| {
@@ -3703,12 +3681,12 @@ test "one text, three encodings: the same answer in different units" {
     // construction; everything else -- which glyph, where it goes -- must be
     // identical, because it is the same text.
     for (p8.shapingRuns(), p16.shapingRuns(), p32.shapingRuns()) |r8, r16, r32| {
-        const g8 = try fixture.shaper.shapeRun(face, utf8, r8, .{});
+        const g8 = try fixture.shaper.shapeRun(face, p8, r8, .{});
         var copied: [64]ztext.Glyph = undefined;
         @memcpy(copied[0..g8.len], g8);
         const kept = copied[0..g8.len];
 
-        const g16 = try fixture.shaper.shapeRun(face, utf16, r16, .{});
+        const g16 = try fixture.shaper.shapeRun(face, p16, r16, .{});
         try std.testing.expectEqual(kept.len, g16.len);
         for (kept, g16) |a, b| {
             try std.testing.expectEqual(a.glyph_id, b.glyph_id);
@@ -3719,7 +3697,7 @@ test "one text, three encodings: the same answer in different units" {
             try std.testing.expectEqual(a.y_offset, b.y_offset);
         }
 
-        const g32 = try fixture.shaper.shapeRun(face, utf32, r32, .{});
+        const g32 = try fixture.shaper.shapeRun(face, p32, r32, .{});
         try std.testing.expectEqual(kept.len, g32.len);
         for (kept, g32) |a, b| {
             try std.testing.expectEqual(a.glyph_id, b.glyph_id);
@@ -3759,4 +3737,100 @@ test "a range that would split a character is refused in every encoding" {
     defer p32.deinit();
     const any = try p32.line(1, 1);
     any.deinit();
+}
+
+test "a paragraph run is shaped from the paragraph's own text" {
+    // The gate on M5, and on the class of bug the entry point removes: a run
+    // list applied to a buffer that is not the one it describes. Here there
+    // is no second buffer to get wrong -- the paragraph is the text.
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.hebrew);
+    defer face.deinit();
+
+    const text = "abc \u{5E9}\u{5DC}\u{5D5}\u{5DD} def";
+    const paragraph = try ztext.Paragraph.init(text, .auto);
+    defer paragraph.deinit();
+
+    for (paragraph.shapingRuns()) |run| {
+        const through_paragraph =
+            try fixture.shaper.shapeRun(face, paragraph, run, .{});
+        var kept: [64]ztext.Glyph = undefined;
+        @memcpy(kept[0..through_paragraph.len], through_paragraph);
+
+        // The same run through the borrowed-text entry point, with the
+        // direction and script the run carries spelled out by hand. Identical
+        // glyphs: shapeRun is the same shape, not a different one.
+        const through_text = try fixture.shaper.shapeRange(
+            face,
+            text,
+            run.offset,
+            run.length,
+            .{
+                .direction = if (run.level % 2 == 0) .ltr else .rtl,
+                .script = run.script,
+            },
+        );
+        try std.testing.expectEqualSlices(
+            ztext.Glyph,
+            kept[0..through_paragraph.len],
+            through_text,
+        );
+    }
+}
+
+test "a paragraph run refuses a direction or script the caller also set" {
+    // Two sources for one fact is the defect class this package spends most
+    // of its guards on. The run carries direction and script; a Params that
+    // also carries them is refused rather than quietly losing.
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const paragraph = try ztext.Paragraph.init("Hello", .auto);
+    defer paragraph.deinit();
+    const run = paragraph.shapingRuns()[0];
+
+    try std.testing.expectError(
+        ztext.Error.InvalidArgument,
+        fixture.shaper.shapeRun(face, paragraph, run, .{ .direction = .ltr }),
+    );
+    try std.testing.expectError(
+        ztext.Error.InvalidArgument,
+        fixture.shaper.shapeRun(face, paragraph, run, .{ .script = ztext.tag("Latn") }),
+    );
+
+    // Everything else in Params still applies.
+    _ = try fixture.shaper.shapeRun(face, paragraph, run, .{
+        .cluster_level = .monotone_characters,
+    });
+}
+
+test "a run built by hand cannot reach outside its paragraph" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.hebrew);
+    defer face.deinit();
+
+    // Runs a paragraph produced are inside it and on character boundaries;
+    // a struct a caller filled in is neither by construction.
+    const text = "ab\u{5D0}cd";
+    const paragraph = try ztext.Paragraph.init(text, .auto);
+    defer paragraph.deinit();
+
+    const bad = [_][2]u32{
+        .{ 99, 1 }, // starts past the end
+        .{ 0, 99 }, // runs past the end
+        .{ 3, 1 }, // starts inside a character
+        .{ 0, 3 }, // ends inside a character
+    };
+    for (bad) |range| {
+        const run: ztext.ShapingRun =
+            .{ .offset = range[0], .length = range[1], .script = 0, .level = 0 };
+        try std.testing.expectError(
+            ztext.Error.InvalidArgument,
+            fixture.shaper.shapeRun(face, paragraph, run, .{}),
+        );
+    }
 }

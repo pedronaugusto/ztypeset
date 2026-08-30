@@ -1017,6 +1017,11 @@ ZTEXT_API void ztextShaperDestroy(ZtextShaper* shaper);
 ///
 /// To shape a standalone string, pass 0 and `length`.
 ///
+/// The whole `text` is validated on every call, not just the run: it is
+/// borrowed, and ztext has no way to know it is the same buffer it saw last
+/// time. For runs that came out of a ZtextParagraph use ztextShaperShapeRun,
+/// which walks nothing.
+///
 /// `length`, `run_offset`, `run_length` and every cluster value are in
 /// `encoding`'s code units. Cluster values index `text` -- the whole buffer,
 /// not the run -- so they index the same slice a ZtextShapingRun's offsets do.
@@ -1285,6 +1290,38 @@ ZTEXT_API const ZtextScriptRun* ztextParagraphScriptRuns(
 ZTEXT_API size_t ztextParagraphShapingRunCount(const ZtextParagraph* paragraph);
 ZTEXT_API const ZtextShapingRun* ztextParagraphShapingRuns(
     const ZtextParagraph* paragraph);
+
+/// Shapes one run of a paragraph, with the paragraph as its own context.
+///
+/// Declared here rather than beside ztextShaperShape because it needs both
+/// halves: it is the call that joins a paragraph's itemisation to the shaper.
+///
+/// Prefer it over ztextShaperShape for anything a ZtextParagraph or a
+/// ZtextLine produced, for three reasons, in the order they will bite:
+///
+///  1. The text cannot be the wrong text. `run`'s offsets are the paragraph's
+///     own, and the paragraph is where the text comes from -- so the classic
+///     failure of passing a SLICE together with offsets computed against the
+///     whole cannot be expressed here.
+///  2. `params->direction` and `params->script` must be AUTO and 0: the run
+///     carries both, and a second source for one fact means a silent loser.
+///     A run's level decides LTR against RTL. For vertical text, which no
+///     run list describes, call ztextShaperShape.
+///  3. The text is NOT revalidated. ztextParagraphCreate validated it and
+///     copied it, so it cannot have changed since -- while ztextShaperShape
+///     borrows a buffer it has never seen and must walk all of it, on every
+///     call. Iterating an N-unit paragraph's R runs through ztextShaperShape
+///     therefore costs R walks of N; this costs none. Measured in README.md.
+///
+/// A ZtextLine's shaping runs index the same paragraph text, so they are
+/// passed here with the paragraph they came from.
+///
+/// Everything else -- features, cluster level, language, the FreeType-metrics
+/// switch -- still comes from `params`.
+ZTEXT_API ZtextResult ztextShaperShapeRun(ZtextShaper* shaper, ZtextFace* face,
+                                          const ZtextParagraph* paragraph,
+                                          const ZtextShapingRun* run,
+                                          const ZtextShapeParams* params);
 
 //===----------------------------------------------------------------------===//
 // Lines

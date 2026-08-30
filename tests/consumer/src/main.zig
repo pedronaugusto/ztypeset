@@ -33,11 +33,12 @@ pub fn main() !void {
     // The documented pipeline, end to end, as a consumer would write it.
     var glyph_total: usize = 0;
     for (paragraph.shapingRuns()) |run| {
-        const text = "a שלום b";
-        const glyphs = try shaper.shape(face, text[run.offset..][0..run.length], .{
-            .direction = ztext.runDirection(run.level),
-            .script = run.script,
-        });
+        // The paragraph owns the text, so there is no slice to get wrong and
+        // every run is shaped with the characters either side of it in view.
+        const glyphs = try shaper.shapeRun(face, paragraph, run, .{});
+        if (shaper.direction() != ztext.runDirection(run.level)) {
+            return error.RunDirectionIgnored;
+        }
         for (glyphs) |glyph| {
             const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
             if (ztext.bitmapRows(bitmap)) |rows| glyph_total += rows.len;

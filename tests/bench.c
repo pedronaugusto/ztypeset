@@ -63,7 +63,6 @@ int main(int argc, char** argv) {
   }
   fclose(file);
 
-  ztextWarmup();
   ZtextAllocator allocator = {benchAllocate, NULL, benchDeallocate, NULL};
   ztextSetAllocator(&allocator);
 
@@ -108,6 +107,70 @@ int main(int argc, char** argv) {
   printf("%-28s %9.2f us  %zu chars, %zu glyphs, reusing one shaper\n",
          "shape a run", microsPer(elapsed, shape_runs), sentence_length,
          ztextShaperGlyphCount(shaper));
+
+  //--------------------------------------------------------------------------
+  // The SAME run, in a longer text.
+  //
+  // HarfBuzz decodes the run itself plus at most five characters of context
+  // either side (CONTEXT_LENGTH in libs/harfbuzz/src/hb-buffer.hh), so its
+  // cost does not move with the length of the text around the run. Anything
+  // that does move is ztext's own -- which is what this pair of numbers is
+  // for. A paragraph is shaped one run at a time, so a per-call cost that
+  // grows with the whole paragraph is paid once per run: quadratic in the
+  // paragraph, invisible in a benchmark that shapes a single sentence.
+  //--------------------------------------------------------------------------
+  const size_t copies = 100u;
+  char* long_text = (char*)malloc(sentence_length * copies + 1u);
+  if (long_text == NULL) return 1;
+  for (size_t i = 0; i < copies; i++) {
+    memcpy(long_text + i * sentence_length, sentence, sentence_length);
+  }
+  const size_t long_length = sentence_length * copies;
+
+  for (int i = 0; i < 32; i++) {
+    ztextShaperShape(shaper, face, long_text, long_length,
+                     ZTEXT_ENCODING_UTF8, 0, sentence_length, &params);
+  }
+  start = clock();
+  for (long i = 0; i < shape_runs; i++) {
+    ztextShaperShape(shaper, face, long_text, long_length,
+                     ZTEXT_ENCODING_UTF8, 0, sentence_length, &params);
+  }
+  elapsed = clock() - start;
+  printf("%-28s %9.2f us  the same %zu-char run, %zu chars around it\n",
+         "shape a run, long text", microsPer(elapsed, shape_runs),
+         sentence_length, long_length);
+
+  // And the same run again, as a run OF A PARAGRAPH. Identical work inside
+  // HarfBuzz; the difference is the walk ztext does not have to do, because
+  // the paragraph validated this text once when it was created.
+  ZtextParagraph* long_paragraph = NULL;
+  if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
+                           ZTEXT_BASE_DIRECTION_LTR,
+                           &long_paragraph) != ZTEXT_RESULT_OK) {
+    return 1;
+  }
+  ZtextShapingRun bench_run;
+  bench_run.offset = 0u;
+  bench_run.length = (uint32_t)sentence_length;
+  bench_run.script = ZTEXT_TAG('L', 'a', 't', 'n');
+  bench_run.level = 0u;
+  ZtextShapeParams run_params;
+  memset(&run_params, 0, sizeof(run_params));
+
+  for (int i = 0; i < 32; i++) {
+    ztextShaperShapeRun(shaper, face, long_paragraph, &bench_run, &run_params);
+  }
+  start = clock();
+  for (long i = 0; i < shape_runs; i++) {
+    ztextShaperShapeRun(shaper, face, long_paragraph, &bench_run, &run_params);
+  }
+  elapsed = clock() - start;
+  printf("%-28s %9.2f us  the same run, from a %zu-char paragraph\n",
+         "shape a paragraph run", microsPer(elapsed, shape_runs), long_length);
+
+  ztextParagraphDestroy(long_paragraph);
+  free(long_text);
 
   //--------------------------------------------------------------------------
   // Rasterisation: coverage against distance field.

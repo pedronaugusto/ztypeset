@@ -2,7 +2,7 @@
 //! that runs.
 //!
 //! It exists because the two copies of it disagreed. The README's loop was
-//! corrected to `shapeRun` -- the whole text in, the run selecting part of it,
+//! corrected to `shapeRun` -- the run shaped in the context of the whole text,
 //! so HarfBuzz can see the characters either side -- and the module doc kept
 //! shaping `text[run.offset..][0..run.length]`, which is the bug the README
 //! says was fixed. Nothing compiled either one, so nothing could tell.
@@ -59,10 +59,11 @@ pub fn main() !void {
     // shapingRuns, not visualRuns: one visual run can span several scripts, and
     // HarfBuzz shapes one script at a time.
     for (paragraph.shapingRuns()) |run| {
-        // shapeRun, not shape: the WHOLE text goes in and the run selects part
-        // of it, so HarfBuzz can see the characters either side. Direction and
-        // script come from the run, because that is what a run is for.
-        const glyphs = try shaper.shapeRun(face, text, run, .{});
+        // shapeRun, not shape: the PARAGRAPH owns the text, so a run can only be
+        // applied to the text it came from, HarfBuzz sees the characters either
+        // side of the run, direction and script come from the run itself, and
+        // text a paragraph already validated is not validated again per run.
+        const glyphs = try shaper.shapeRun(face, paragraph, run, .{});
         for (glyphs) |glyph| {
             const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
             // ... into your atlas, before the next call on this face.
@@ -72,7 +73,7 @@ pub fn main() !void {
     //>>>usage
 
     //<<<wrapping
-    const breaks = paragraph.lineBreaks(); // one entry per byte
+    const breaks = paragraph.lineBreaks(); // one entry per code unit
     var start: usize = 0;
     while (start < text.len) {
         // Furthest permitted break that still fits. ztext says where a break is
@@ -83,7 +84,7 @@ pub fn main() !void {
         defer line.deinit();
         for (line.shapingRuns()) |run| {
             // Shaped and rendered exactly as above, per line this time.
-            const glyphs = try shaper.shapeRun(face, text, run, .{});
+            const glyphs = try shaper.shapeRun(face, paragraph, run, .{});
             _ = glyphs;
         }
         start = end;

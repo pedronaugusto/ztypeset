@@ -144,51 +144,31 @@ static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
   return true;
 }
 
-ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
-                             const void* text, size_t length,
-                             ZtextEncoding encoding, size_t run_offset,
-                             size_t run_length,
-                             const ZtextShapeParams* params) {
-  if (shaper == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
-
-  // Invalidate before validating. With the reset further down, an argument
-  // rejected here would leave the PREVIOUS run's glyphs live and queryable --
-  // so a caller that logs the error and carries on draws last frame's text,
-  // while a failure that happened later (out of memory, say) correctly
-  // cleared them. Two different behaviours for the same "it failed".
+// A shape call that failed leaves nothing of the last one queryable.
+//
+// Invalidate BEFORE validating. With the reset further down, an argument
+// rejected up front would leave the PREVIOUS run's glyphs live -- so a caller
+// that logs the error and carries on draws last frame's text, while a failure
+// that happened later (out of memory, say) correctly cleared them. Two
+// different behaviours for the same "it failed".
+static void resetResults(ZtextShaper* shaper) {
   shaper->shaped = false;
   shaper->glyphs.count = 0u;
   shaper->used_freetype_metrics = false;
   shaper->face_generation = 0u;
+}
 
-  if (face == NULL || params == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  // Zero for an encoding this build does not name, which is how a consumer
-  // compiled against a newer header is refused rather than misread.
-  if (ztextEncodingUnitSize(encoding) == 0u) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
-  }
-  // HarfBuzz counts text in unsigned int, in code units of whichever
-  // hb_buffer_add_* it is given.
-  if (length > (size_t)INT_MAX) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (params->feature_count != 0u && params->features == NULL) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
-  }
-  // Written as subtractions so no caller's arithmetic can overflow into a
-  // range that looks valid.
-  if (run_offset > length) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (run_length > length - run_offset) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (!ztextTextIsWellFormed(text, length, encoding)) {
-    return ZTEXT_RESULT_INVALID_TEXT;
-  }
-  // A run that starts or ends inside a character would hand HarfBuzz half of
-  // one. Refused rather than shaped, as everywhere else that takes a range.
-  if (ztextTextSplitsCharacter(text, length, encoding, run_offset) ||
-      ztextTextSplitsCharacter(text, length, encoding,
-                               run_offset + run_length)) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
-  }
-
+// Everything both entry points do once their arguments are their own.
+//
+// Direction and script are parameters rather than being read off `params`,
+// because ztextShaperShapeRun takes them from the run: one fact, one source,
+// decided by the caller that has it.
+static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
+                             const void* text, size_t length,
+                             ZtextEncoding encoding, size_t run_offset,
+                             size_t run_length, ZtextDirection direction,
+                             uint32_t script,
+                             const ZtextShapeParams* params) {
   hb_font_t* font = face->hb_font;
   if (params->use_freetype_metrics != 0) {
     font = freetypeFont(face);
@@ -241,12 +221,12 @@ ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
                           HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT |
                           HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL));
 
-  if (params->direction != ZTEXT_DIRECTION_AUTO) {
-    hb_buffer_set_direction(buffer, toHbDirection(params->direction));
+  if (direction != ZTEXT_DIRECTION_AUTO) {
+    hb_buffer_set_direction(buffer, toHbDirection(direction));
   }
-  if (params->script != 0u) {
-    hb_buffer_set_script(buffer, hb_script_from_iso15924_tag(
-                                     (hb_tag_t)params->script));
+  if (script != 0u) {
+    hb_buffer_set_script(buffer,
+                         hb_script_from_iso15924_tag((hb_tag_t)script));
   }
   // Language, and the reason this is not simply "set it if the caller gave
   // one".
@@ -327,6 +307,96 @@ ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
   shaper->face_generation = face->generation;
   shaper->shaped = true;
   return ZTEXT_RESULT_OK;
+}
+
+// What both entry points check about `params` itself. Direction and script
+// are NOT here: each entry point decides where those come from.
+static bool paramsAreUsable(const ZtextShapeParams* params) {
+  return params->feature_count == 0u || params->features != NULL;
+}
+
+// Whether a range is inside `length` and starts and ends between characters.
+// Written as subtractions so no caller's arithmetic can overflow into a range
+// that looks valid.
+static bool rangeIsUsable(const void* text, size_t length,
+                          ZtextEncoding encoding, size_t offset,
+                          size_t run_length) {
+  if (offset > length) return false;
+  if (run_length > length - offset) return false;
+  // A run that starts or ends inside a character would hand HarfBuzz half of
+  // one. Refused rather than shaped, as everywhere else that takes a range.
+  return !ztextTextSplitsCharacter(text, length, encoding, offset) &&
+         !ztextTextSplitsCharacter(text, length, encoding, offset + run_length);
+}
+
+ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
+                             const void* text, size_t length,
+                             ZtextEncoding encoding, size_t run_offset,
+                             size_t run_length,
+                             const ZtextShapeParams* params) {
+  if (shaper == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  resetResults(shaper);
+
+  if (face == NULL || params == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  // Zero for an encoding this build does not name, which is how a consumer
+  // compiled against a newer header is refused rather than misread.
+  if (ztextEncodingUnitSize(encoding) == 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  // HarfBuzz counts text in unsigned int, in code units of whichever
+  // hb_buffer_add_* it is given.
+  if (length > (size_t)INT_MAX) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (!paramsAreUsable(params)) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  // The whole text, not the run: this text is borrowed and ztext has never
+  // seen it before, so a malformed unit anywhere in it is worth saying so
+  // about. It is also the reason ztextShaperShapeRun exists -- iterating a
+  // paragraph's runs through THIS entry point pays the walk once per run.
+  if (!ztextTextIsWellFormed(text, length, encoding)) {
+    return ZTEXT_RESULT_INVALID_TEXT;
+  }
+  if (!rangeIsUsable(text, length, encoding, run_offset, run_length)) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+
+  return shapeInto(shaper, face, text, length, encoding, run_offset,
+                   run_length, params->direction, params->script, params);
+}
+
+ZtextResult ztextShaperShapeRun(ZtextShaper* shaper, ZtextFace* face,
+                                const ZtextParagraph* paragraph,
+                                const ZtextShapingRun* run,
+                                const ZtextShapeParams* params) {
+  if (shaper == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  resetResults(shaper);
+
+  if (face == NULL || paragraph == NULL || run == NULL || params == NULL) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  // The run carries the direction and the script. Reading them from `params`
+  // as well would be two sources for one fact, and the loser would be silent.
+  if (params->direction != ZTEXT_DIRECTION_AUTO || params->script != 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  if (!paramsAreUsable(params)) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (paragraph->length > (size_t)INT_MAX) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  // A run this paragraph produced is inside it and on character boundaries by
+  // construction; one a caller built by hand is not.
+  if (!rangeIsUsable(paragraph->text, paragraph->length, paragraph->encoding,
+                     run->offset, run->length)) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+
+  // Not validated, and that is the point of this entry point: the paragraph
+  // copied and validated this text when it was created, and owns it, so
+  // nothing can have changed it since.
+  return shapeInto(shaper, face, paragraph->text, paragraph->length,
+                   paragraph->encoding, run->offset, run->length,
+                   (run->level % 2u == 0u) ? ZTEXT_DIRECTION_LTR
+                                           : ZTEXT_DIRECTION_RTL,
+                   run->script, params);
 }
 
 size_t ztextShaperGlyphCount(const ZtextShaper* shaper) {

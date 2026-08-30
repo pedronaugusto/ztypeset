@@ -122,8 +122,24 @@ itself is generated from, so it cannot be a number someone forgot to raise.
 checked against what the library does rather than against what the header
 says.
 
+### Added
+
+- **`ztextShaperShapeRun` / `Shaper.shapeRun(face, paragraph, run, params)`** —
+  shape one run of a paragraph, with the paragraph as its own text. It removes
+  three things at once: a run applied to the wrong buffer cannot be expressed,
+  the direction and script come from the run (and a `params` that also sets
+  them is refused rather than quietly losing), and the text is not validated
+  again — `ztextShaperShape` walks the whole borrowed buffer on every call,
+  so iterating an N-unit paragraph's R runs through it cost R walks of N.
+  Measured at ~1.05 µs a call for a 4300-unit paragraph; see README.md.
+
 ### Changed
 
+- **`Shaper.shapeRun` no longer takes the text**, and the range form of the old
+  one is now `Shaper.shapeRange(face, text, offset, length, params)` — same
+  call as before, named for what it does. `shapeRun` is for runs a `Paragraph`
+  or a `Line` produced; `shapeRange` is for a range of a buffer ztext has not
+  seen.
 - **Text may be UTF-8, UTF-16 or UTF-32.** Every entry point that takes text
   takes a `ZtextEncoding` with it, and every offset and length beside it — a
   run's, a line's, a glyph's cluster, an index into a break array — is counted
