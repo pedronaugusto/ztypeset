@@ -2925,8 +2925,9 @@ test "a library keeps its own allocator when the global one is replaced" {
     const other = try ztext.Library.init();
 
     // Destroying the first library must return its memory to the allocator it
-    // was born with, not to whichever one happens to be installed. The font
-    // and face go first: they must not outlive their library.
+    // was born with, not to whichever one happens to be installed. The order
+    // below is the tidy one; the test after this file's last golden is the one
+    // that shows the order does not matter.
     face.deinit();
     font.deinit();
     library.deinit();
@@ -3495,4 +3496,48 @@ fn lightSweep(face: ztext.Face) !LightSweep {
     }
     sweep.digest = hasher.final();
     return sweep;
+}
+
+test "handles have no destruction order: a library may go before its fonts" {
+    // The order below is the one FreeType forbids. FT_Done_Library destroys
+    // every FT_Face still registered with it, so a library freed at the
+    // `library.deinit()` line would leave `font` and `face` reading memory
+    // FreeType had already returned -- and every assertion after it would be
+    // reading whatever the allocator put there next.
+    //
+    // ztext counts live fonts instead and defers the library's teardown to
+    // whichever handle is released last, so the assertions after that line
+    // are the whole test.
+    ztext.warmup();
+    try warmProcessCaches();
+    try ztext.setAllocator(&std.testing.allocator);
+    defer ztext.resetAllocator();
+
+    const library = try ztext.Library.init();
+    const font = try library.createFont(fonts.latin, 0);
+    const face = try font.face(0, 16);
+
+    library.deinit();
+
+    // A working font and a working face: the FT_Library underneath them is
+    // still there, and so is everything they own.
+    try std.testing.expectEqualStrings("Noto Sans", font.familyName());
+    const glyph = font.glyphIndex('g');
+    try std.testing.expect(glyph != 0);
+    const bitmap = try face.renderGlyph(glyph, .a8, .normal, 0, 0);
+    try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
+
+    // What order-free destruction does NOT extend to: building something new
+    // on a handle the caller has let go of is refused rather than undefined,
+    // the same refusal a destroyed font gives.
+    try std.testing.expectError(
+        ztext.Error.InvalidArgument,
+        library.createFont(fonts.latin, 0),
+    );
+
+    // And the last release frees the library. std.testing.allocator reports
+    // the leak if it does not, which is what makes this a gate rather than a
+    // demonstration.
+    face.deinit();
+    font.deinit();
 }

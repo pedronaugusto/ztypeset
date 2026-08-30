@@ -134,7 +134,7 @@ case_() {
 
   if [ -n "$FILTER" ] && ! [[ "$name" =~ $FILTER ]]; then return; fi
 
-  printf '  %-52s' "$name"
+  printf '  %-58s ' "$name"
 
   if ! MUT_FILE="$file" MUT_OLD="$old" MUT_NEW="$new" python3 - "$WORK/tree" <<'PY'
 import os, sys
@@ -295,6 +295,18 @@ case_ "a pixel size rounded to whole pixels" \
   "  return (int32_t)(pixels * 64.0f + 0.5f);" \
   "  return (int32_t)(pixels + 0.5f) * 64;"
 
+# The library's half of the order-free bargain. Take the hand-back away and
+# nothing crashes and no order is wrong -- the library is simply never freed,
+# in every order, which the suite's allocator and the C balance test both
+# report. `leaked` rather than a test name because both of them say it and
+# either is enough.
+case_ "a font released without telling the library that owns it" \
+  ffi/ztext_face.c \
+  "leaked" \
+  "  library->live_fonts -= 1u;
+  releaseLibrary(library);" \
+  ""
+
 printf '\n%sHinting%s %s(ffi/ztext_ftoption.h, and the warm-up it needs)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
@@ -390,9 +402,9 @@ case_ "a block freed through whatever is installed now" \
 case_ "a library-owned block released by the wrong allocator" \
   ffi/ztext_face.c \
   "released through the wrong allocator" \
-  "  FT_Done_Face(font->ft);
+  "  if (font->ft != NULL) FT_Done_Face(font->ft);
   ztextFreeFrom(library->allocator, font);" \
-  "  FT_Done_Face(font->ft);
+  "  if (font->ft != NULL) FT_Done_Face(font->ft);
   ztextFreeFrom(ZTEXT_ALLOCATOR_DEFAULT, font);"
 
 # HarfBuzz's process-lifetime singletons are never freed in this build --

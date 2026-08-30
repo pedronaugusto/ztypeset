@@ -8,6 +8,25 @@
 // Library
 //===----------------------------------------------------------------------===//
 
+/// Frees the library once nothing needs it: the caller has let it go AND its
+/// last font has been destroyed. Called from both sides, so neither order
+/// leaks and neither double-frees.
+static void releaseLibrary(ZtextLibrary* library) {
+  if (!library->destroy_requested || library->live_fonts != 0u) return;
+
+  // FT_Done_Library frees through library->memory, so the record and the
+  // allocator behind it must outlive this call -- which they do, both being
+  // embedded in the struct freed on the next line.
+  FT_Done_Library(library->ft);
+
+  // Through the library's own allocator, which is the one the handle was
+  // allocated from: ztextInitFtMemory copied the then-current global into it
+  // immediately after this struct was allocated. A library is therefore
+  // entirely self-consistent even if the process-wide allocator is replaced
+  // during its lifetime.
+  ztextFreeFrom(library->allocator, library);
+}
+
 ZtextResult ztextLibraryCreate(ZtextLibrary** out) {
   if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
   *out = NULL;
@@ -47,23 +66,28 @@ ZtextResult ztextLibraryCreate(ZtextLibrary** out) {
 }
 
 void ztextLibraryDestroy(ZtextLibrary* library) {
-  if (library == NULL) return;
+  if (library == NULL || library->destroy_requested) return;
+  library->destroy_requested = true;
+  releaseLibrary(library);
+}
 
-  // FT_Done_Library frees through library->memory, so the record and the
-  // allocator behind it must outlive this call -- which they do, both being
-  // embedded in the struct freed on the next line.
-  FT_Done_Library(library->ft);
-
-  // Through the library's own allocator, which is the one the handle was
-  // allocated from: ztextInitFtMemory copied the then-current global into it
-  // immediately after this struct was allocated. A library is therefore
-  // entirely self-consistent even if the process-wide allocator is replaced
-  // during its lifetime.
-  ztextFreeFrom(library->allocator, library);
+/// True if the caller has already released this library, in which case the
+/// error detail is set and the entry point refuses.
+///
+/// A released library is still a valid pointer -- that is the point of
+/// order-free destruction, since its fonts may outlive it -- so every entry
+/// point that would BUILD on one has to say no. The same refusal
+/// ztextFaceCreate makes for a released font, and the one thing order-free
+/// destruction cannot make harmless.
+static bool libraryIsReleased(const ZtextLibrary* library) {
+  if (!library->destroy_requested) return false;
+  ztextSetErrorDetail("the library has already been destroyed");
+  return true;
 }
 
 ZtextResult ztextLibrarySetSdfSpread(ZtextLibrary* library, uint32_t spread) {
   if (library == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (libraryIsReleased(library)) return ZTEXT_RESULT_INVALID_ARGUMENT;
   // FreeType clamps out-of-range values silently; refusing here means a caller
   // that asks for 100 finds out rather than quietly getting 32.
   if (spread < 2u || spread > 32u) return ZTEXT_RESULT_INVALID_ARGUMENT;
@@ -118,6 +142,7 @@ ZtextResult ztextLibraryCountFaces(ZtextLibrary* library, const void* data,
   if (library == NULL || data == NULL || size == 0u) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
+  if (libraryIsReleased(library)) return ZTEXT_RESULT_INVALID_ARGUMENT;
   if (size > (size_t)UINT_MAX || size > (size_t)LONG_MAX) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
@@ -145,12 +170,17 @@ ZtextResult ztextLibraryCountFaces(ZtextLibrary* library, const void* data,
 // Font
 //===----------------------------------------------------------------------===//
 
-/// Frees the font once nothing needs it: the caller has let it go AND its last
-/// face has been destroyed. Called from both sides, so neither order leaks and
-/// neither double-frees.
-static void releaseFont(ZtextFont* font) {
-  if (!font->destroy_requested || font->live_faces != 0u) return;
-
+/// Frees everything a font owns, in the reverse of the order it was acquired.
+///
+/// Written to tolerate a half-built font -- every field is NULL until the step
+/// that fills it has succeeded -- so that the error paths in
+/// ztextFontCreateFromMemory unwind through this rather than through a
+/// hand-written teardown each. Three teardowns of the same object is how one
+/// of them ends up a step short.
+///
+/// Does NOT touch the library's font count: a font that never became visible
+/// to the caller was never counted.
+static void destroyFontParts(ZtextFont* font) {
   ZtextLibrary* library = font->library;
   if (font->hb_face != NULL) hb_face_destroy(font->hb_face);
   // The axis table came from FreeType's allocator, so it goes back through
@@ -159,8 +189,23 @@ static void releaseFont(ZtextFont* font) {
   // that knows its internal shape.
   if (font->mm != NULL) FT_Done_MM_Var(library->ft, font->mm);
   ztextFreeFrom(library->allocator, font->coords);
-  FT_Done_Face(font->ft);
+  if (font->ft != NULL) FT_Done_Face(font->ft);
   ztextFreeFrom(library->allocator, font);
+}
+
+/// Frees the font once nothing needs it: the caller has let it go AND its last
+/// face has been destroyed. Called from both sides, so neither order leaks and
+/// neither double-frees.
+static void releaseFont(ZtextFont* font) {
+  if (!font->destroy_requested || font->live_faces != 0u) return;
+
+  // Read before the free, used after it: everything below frees through
+  // library->allocator and unregisters from library->ft, so the library has to
+  // outlive the teardown -- and this is the point at which it may not.
+  ZtextLibrary* library = font->library;
+  destroyFontParts(font);
+  library->live_fonts -= 1u;
+  releaseLibrary(library);
 }
 
 /// Fetches the font's `fvar` axes and the coordinates it starts at, if it has
@@ -218,6 +263,7 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
   if (library == NULL || data == NULL || size == 0u) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
+  if (libraryIsReleased(library)) return ZTEXT_RESULT_INVALID_ARGUMENT;
   // HarfBuzz's blob length is an unsigned int. A font larger than that is not
   // a real case, but silently truncating one would be a memory-safety bug, so
   // it is refused explicitly.
@@ -241,7 +287,7 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
       FT_New_Memory_Face(library->ft, (const FT_Byte*)data, (FT_Long)size,
                          (FT_Long)face_index, &font->ft);
   if (error != FT_Err_Ok) {
-    ztextFreeFrom(library->allocator, font);
+    destroyFontParts(font);
     return ztextFromFtError(error);
   }
 
@@ -263,9 +309,7 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
   // The glyph count is a second, independent check: a face that survived
   // sanitisation but has no glyphs cannot shape anything either.
   if (font->hb_face == NULL || hb_face_get_glyph_count(font->hb_face) == 0u) {
-    if (font->hb_face != NULL) hb_face_destroy(font->hb_face);
-    FT_Done_Face(font->ft);
-    ztextFreeFrom(library->allocator, font);
+    destroyFontParts(font);
     ztextSetErrorDetail(
         "HarfBuzz rejected the font tables that FreeType accepted");
     return ZTEXT_RESULT_BAD_FONT;
@@ -273,14 +317,14 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
 
   const ZtextResult variations = initVariations(font);
   if (variations != ZTEXT_RESULT_OK) {
-    if (font->mm != NULL) FT_Done_MM_Var(library->ft, font->mm);
-    ztextFreeFrom(library->allocator, font->coords);
-    hb_face_destroy(font->hb_face);
-    FT_Done_Face(font->ft);
-    ztextFreeFrom(library->allocator, font);
+    destroyFontParts(font);
     return variations;
   }
 
+  // Counted only now, when the font is about to become the caller's: every
+  // path above frees the font itself, and a count taken earlier would have to
+  // be given back on each of them.
+  library->live_fonts += 1u;
   *out = font;
   return ZTEXT_RESULT_OK;
 }

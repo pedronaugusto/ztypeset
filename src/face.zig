@@ -29,13 +29,17 @@ pub const Library = struct {
         return .{ .handle = handle };
     }
 
-    /// Destroys the library.
+    /// Releases the library.
     ///
-    /// **Every `Face` made from it must be destroyed first.** FreeType's
-    /// `FT_Done_Library` destroys any face still registered with it, so
-    /// `Face.deinit` afterwards operates on freed memory -- a segfault, not a
-    /// leak. `defer` gets this right by accident; a struct holding both does
-    /// not, unless its `deinit` releases the face first.
+    /// There is no order to get right: a `Font` or `Face` still alive keeps
+    /// the library's FreeType handle alive with it, and whichever is released
+    /// last frees it. Creating a font from a library already released is
+    /// `error.InvalidArgument`, not undefined behaviour.
+    ///
+    /// This is not FreeType's own rule -- `FT_Done_Library` destroys any face
+    /// still registered with it -- and it is why `ZtextLibrary` counts its
+    /// live fonts. A struct holding a library and a face can release them in
+    /// field order without a comment explaining which comes first.
     pub fn deinit(self: Library) void {
         c.ztextLibraryDestroy(self.handle);
     }
