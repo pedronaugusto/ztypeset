@@ -65,6 +65,8 @@ fi
 
 # shellcheck source=ci/pins.sh
 . ci/pins.sh
+# shellcheck source=ci/sha256.sh
+. ci/sha256.sh
 
 row() { printf '  %-42s %s\n' "$1" "$2"; }
 note() { printf '  %s%s%s\n' "$DIM" "$1" "$OFF"; }
@@ -321,6 +323,54 @@ if [ $CHECK -eq 1 ]; then
       fi
     done
   done
+
+  # LICENSES.md against the texts it summarises.
+  #
+  # Every legal statement in that file was written against specific bytes
+  # under libs/. Nothing else notices when a re-vendor changes one: the tree
+  # still matches its pinned upstream, so ci/verify-vendor.sh is green, and
+  # the document goes on describing a licence that is no longer there.
+  #
+  # This lives here rather than in verify-vendor.sh because it needs no
+  # network -- it compares a document against the working tree, which is what
+  # this script is for -- and because ci/run.sh runs this and not that.
+  #
+  # The rows drive the check; there is no second list. A row whose file is
+  # gone, or whose digest has moved, is a failure, and so is a table with
+  # nothing in it: a document that stops claiming anything must not become a
+  # document that passes.
+  printf '\n%sLICENSES.md against the texts it summarises%s\n' "$BOLD" "$OFF"
+  if [ -z "$(sha256_tool)" ]; then
+    printf '  %-42s %sno sha256sum or shasum available%s\n' \
+      'licence texts' "$RED" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  else
+    licence_rows=0
+    while read -r path want; do
+      licence_rows=$((licence_rows + 1))
+      if [ ! -f "$path" ]; then
+        printf '  %-42s %sno such file%s\n' "$path" "$RED" "$OFF"
+        MISMATCHES=$((MISMATCHES + 1))
+        continue
+      fi
+      got=$(sha256_of "$path")
+      if [ "$got" = "$want" ]; then
+        printf '  %-42s %sunchanged%s\n' "$path" "$GREEN" "$OFF"
+      else
+        printf '  %-42s %sLICENSES.md says %s, the file is %s%s\n' \
+          "$path" "$RED" "${want:0:12}..." "${got:0:12}..." "$OFF"
+        MISMATCHES=$((MISMATCHES + 1))
+      fi
+    done <<EOF
+$(grep -oE '`libs/[^`]+` [|] `[0-9a-f]{64}`' LICENSES.md | tr -d '`' |
+  sed 's/ | / /')
+EOF
+    if [ "$licence_rows" -lt 7 ]; then
+      printf '  %-42s %sonly %d rows; the table has been emptied%s\n' \
+        'licence texts' "$RED" "$licence_rows" "$OFF"
+      MISMATCHES=$((MISMATCHES + 1))
+    fi
+  fi
 
   printf '\n'
   if [ $MISMATCHES -eq 0 ]; then

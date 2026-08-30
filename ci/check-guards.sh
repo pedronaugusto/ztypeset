@@ -438,6 +438,26 @@ case_ "the changelog heading the gate reads by shape" \
   '## 0.2.0' \
   '## v0.2.0'
 
+# LICENSES.md's legal statements were written against specific bytes under
+# libs/. A re-vendor that changes a licence leaves ci/verify-vendor.sh green --
+# the tree still matches its new pinned upstream -- and the document goes on
+# describing terms that are no longer there. Same GUARD_CMD: the suite has no
+# view of any of this either.
+case_ "a licence text changed under the page that summarises it" \
+  LICENSES.md \
+  "LICENSES.md says" \
+  '`ba8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64`' \
+  '`0a8f810f2455c2f08e2d56bb49b72f37fcf68f1f4fade38977cfd7372050ad64`'
+
+# And the other way out: delete the row instead of fixing it. A document that
+# stops claiming anything must not become a document that passes.
+case_ "a licence row deleted rather than rechecked" \
+  LICENSES.md \
+  "the table has been emptied" \
+  '| `libs/harfbuzz/src/ms-use/COPYING` | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` |
+' \
+  ''
+
 printf '\n%sInstalled headers%s %s(ci/header-link.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

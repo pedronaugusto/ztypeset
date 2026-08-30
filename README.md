@@ -822,7 +822,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **30** deliberate bugs, one at a time, to a copy of the tree, and
+applies **32** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -837,6 +837,7 @@ asserts a **named** test catches each:
 | Documentation | a documented example edited away from the program it quotes |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
 | Versioning | a bump that reached two of the version's three homes, and a changelog heading reworded out from under the gate that reads it |
+| Licences | a licence text changed under the page that summarises it, and the row deleted rather than rechecked |
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose
 anchor no longer applies is reported too, so the script rots loudly rather than
@@ -964,13 +965,17 @@ host owns the caret.
 ztext's own code is MIT — see [LICENSE](LICENSE).
 
 The vendored upstreams are **FreeType** under the FreeType License (elected
-explicitly over the GPLv2 alternative), **HarfBuzz** under "Old MIT", and
-**SheenBidi** under Apache-2.0. All permit static linking into a closed
-commercial product; none requires source disclosure, royalties or on-screen
-attribution.
+explicitly over the GPLv2 alternative), **HarfBuzz** under "Old MIT",
+**SheenBidi** under Apache-2.0 and **libunibreak** under zlib. All four permit
+static linking into a closed commercial product; none requires source
+disclosure, royalties or on-screen attribution.
 
 If you ship a binary containing ztext, [LICENSES.md](LICENSES.md) is the file
-to read — it says exactly what has to appear in your third-party notices.
+to read — it says exactly what has to appear in your third-party notices,
+which of FreeType's four internal sub-licences actually reaches a binary, and
+what the FTL's incompatibility with GPLv2 does and does not mean for you. It
+pins the licence texts it summarises by digest, and `ci/measurements.sh
+--check` recomputes them.
 
 The test fonts under `tests/fonts/` are Noto, under the SIL Open Font License
 1.1. They are not part of the library and are not compiled into it.
