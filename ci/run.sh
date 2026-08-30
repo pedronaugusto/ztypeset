@@ -94,6 +94,11 @@ run 'null sweep covers every entry point' ci/api-surface.sh --sweep
 # column" and nothing acted on it for as long as that was true.
 run 'every entry point has every home' ci/api-surface.sh --gaps
 
+# Every number README.md states that a script can recompute, recomputed and
+# compared. A count in prose goes stale the moment a test is added, and prose
+# has never once been what noticed.
+run 'README numbers still hold' ci/measurements.sh --check --with-build
+
 #-----------------------------------------------------------------------------
 section 'Tests -- native'
 #-----------------------------------------------------------------------------
