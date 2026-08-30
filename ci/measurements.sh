@@ -63,6 +63,9 @@ else
   BOLD=; DIM=; RED=; GREEN=; OFF=
 fi
 
+# shellcheck source=ci/pins.sh
+. ci/pins.sh
+
 row() { printf '  %-42s %s\n' "$1" "$2"; }
 note() { printf '  %s%s%s\n' "$DIM" "$1" "$OFF"; }
 
@@ -271,6 +274,33 @@ if [ $CHECK -eq 1 ]; then
     printf '\n  %sthe suite and C-boundary numbers need --with-build%s\n' "$DIM" "$OFF"
   fi
 
+  # UPSTREAM.md's table against src/pins.zig. The table is prose and the pin is
+  # the fact; before this they were two independent copies, and the version row
+  # said "7.0" where the library reports 7.0.0.
+  printf '\n%sUPSTREAM.md against src/pins.zig%s\n' "$BOLD" "$OFF"
+  upstream_cell() {
+    # <row label> <1-based project column>; the table's first field is empty.
+    grep -E "^[|] $1 [|]" UPSTREAM.md | head -1 |
+      awk -F'|' -v n="$(($2 + 2))" '{ gsub(/^ +| +$/, "", $n); gsub(/`/, "", $n); print $n }'
+  }
+  column=0
+  for name in $(pin_names); do
+    column=$((column + 1))
+    for pair in "Version:$(pin_version "$name")" "Tag:$(pin "$name" tag)" \
+                "Commit:$(pin "$name" commit)"; do
+      label=${pair%%:*}
+      want=${pair#*:}
+      got=$(upstream_cell "$label" "$column")
+      if [ "$want" = "$got" ]; then
+        printf '  %-42s %s%s%s\n' "$name $label" "$GREEN" "$want" "$OFF"
+      else
+        printf '  %-42s %sUPSTREAM.md %s, src/pins.zig %s%s\n' \
+          "$name $label" "$RED" "${got:-<no such cell>}" "$want" "$OFF"
+        MISMATCHES=$((MISMATCHES + 1))
+      fi
+    done
+  done
+
   printf '\n'
   if [ $MISMATCHES -eq 0 ]; then
     printf '%severy number checked matches the sources%s\n' "$GREEN" "$OFF"
@@ -279,6 +309,6 @@ if [ $CHECK -eq 1 ]; then
     printf ' counts are platform-specific and printed rather than gated)%s\n' "$OFF"
     exit 0
   fi
-  printf '%s%d number(s) in README.md no longer hold%s\n' "$RED" "$MISMATCHES" "$OFF" >&2
+  printf '%s%d recorded number(s) no longer hold%s\n' "$RED" "$MISMATCHES" "$OFF" >&2
   exit 1
 fi

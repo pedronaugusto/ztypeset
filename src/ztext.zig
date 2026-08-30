@@ -57,6 +57,9 @@ const face_mod = @import("face.zig");
 const shaper_mod = @import("shaper.zig");
 const bidi_mod = @import("bidi.zig");
 
+/// The vendored upstreams, pinned. One home; see src/pins.zig.
+pub const pins = @import("pins.zig");
+
 //=============================================================================
 // Public surface
 //=============================================================================
@@ -175,6 +178,7 @@ test {
     // Compares c.zig against the real header. Imported here, inside `test`, so
     // the shipped module never analyses it and never runs translate-c.
     _ = @import("abi_check.zig");
+    _ = @import("pins.zig");
 }
 
 test "the C library agrees with the extern declarations in c.zig" {
@@ -403,27 +407,40 @@ test "every field of every shared struct lands where Zig expects it" {
     try std.testing.expectEqual(@as(f32, 706.25), probe.glyph_bitmap.x_advance);
 }
 
-test "version reporting is wired up" {
+test "the linked upstreams are the pinned ones, to the patch" {
     const v = version();
     try std.testing.expectEqual(@as(u8, 0), v.major);
     try std.testing.expectEqual(@as(u8, 1), v.minor);
 
-    // Pinned in UPSTREAM.md; these assert the library actually compiled the
-    // versions the documentation claims, rather than whatever was on the
-    // include path.
-    const ft = freetypeVersion();
-    try std.testing.expectEqual(@as(u8, 2), ft.major);
-    try std.testing.expectEqual(@as(u8, 14), ft.minor);
-
-    const hb = harfbuzzVersion();
-    try std.testing.expectEqual(@as(u8, 14), hb.major);
-
-    const sb = sheenbidiVersion();
-    try std.testing.expectEqual(@as(u8, 3), sb.major);
-
-    const ub = unibreakVersion();
-    try std.testing.expectEqual(@as(u8, 7), ub.major);
-    try std.testing.expectEqual(@as(u8, 0), ub.minor);
+    // src/pins.zig is the one home for what libs/ holds, and this asserts the
+    // LINKED libraries agree with it -- not that a document says so.
+    //
+    // All three components, deliberately. This used to check `hb.major == 14`
+    // and nothing else, which passes for every HarfBuzz release in a year: a
+    // re-vendor could land with the pin untouched and the assertion green.
+    const expected = [_]pins.Version{
+        pins.freetype.version,
+        pins.harfbuzz.version,
+        pins.sheenbidi.version,
+        pins.libunibreak.version,
+    };
+    const actual = [_]Version{
+        freetypeVersion(),
+        harfbuzzVersion(),
+        sheenbidiVersion(),
+        unibreakVersion(),
+    };
+    for (expected, actual, pins.all) |want, got, pin| {
+        const same = want.major == got.major and want.minor == got.minor and
+            want.patch == got.patch;
+        if (!same) {
+            std.debug.print(
+                "{s}: pinned {d}.{d}.{d}, linked {d}.{d}.{d}\n",
+                .{ pin.name, want.major, want.minor, want.patch, got.major, got.minor, got.patch },
+            );
+            return error.LinkedUpstreamIsNotThePinnedOne;
+        }
+    }
 }
 
 test "result names are never empty" {
