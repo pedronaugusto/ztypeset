@@ -333,6 +333,17 @@ case_ "a library-owned block released by the wrong allocator" \
   "  FT_Done_Face(font->ft);
   ztextFreeFrom(ZTEXT_ALLOCATOR_DEFAULT, font);"
 
+# HarfBuzz's process-lifetime singletons are never freed in this build --
+# hb_atexit expands to nothing without HAVE_ATEXIT -- so a host that audits its
+# heap only balances if ztextWarmup() populated them before its allocator went
+# in. Delete the call and the C boundary's own accounting says so.
+case_ "the process-lifetime caches left unwarmed" \
+  tests/c_smoke.c \
+  "blocks leaked" \
+  "  phase(\"warmup\");
+  ztextWarmup();" \
+  "  phase(\"warmup\");"
+
 # SheenBidi 3.0.0 reads a field it has not written on its own
 # allocation-failure path, and ztext's seam zeroes every block it hands over
 # so that read finds NULL. Remove the memset and the poisoned injection arm

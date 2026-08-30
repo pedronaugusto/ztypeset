@@ -303,6 +303,21 @@ const freetype_defines = [_][]const u8{
 /// a namespace a host might also be using.
 const harfbuzz_defines = [_][]const u8{
     "-DHAVE_FREETYPE=1",
+    // HarfBuzz's process-lifetime caches are freed from an atexit handler ONLY
+    // when HAVE_ATEXIT is defined, and nothing here defines it: hb.hh:471-476
+    // then sets HB_USE_ATEXIT to 0 and hb.hh:479 expands hb_atexit(f) to
+    // `if (0) f()`. So in this build they are never freed at all.
+    //
+    // That was true before this line existed, by accident -- the absence of a
+    // define. It is stated here so it is a DECISION, and so that anyone who
+    // adds HAVE_ATEXIT has to delete this line and read why it was here.
+    //
+    // Freeing them at exit is not wanted. An atexit handler that calls the
+    // installed allocator runs after a host has torn its own allocator down,
+    // and the ordering between the two is not something a library can promise.
+    // ztextWarmup() exists so a host can populate the caches before it starts
+    // auditing instead; see ffi/ztext.h.
+    "-DHB_NO_ATEXIT",
     "-Dhb_malloc_impl=ztext_hb_malloc",
     "-Dhb_calloc_impl=ztext_hb_calloc",
     "-Dhb_realloc_impl=ztext_hb_realloc",

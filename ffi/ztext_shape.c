@@ -379,11 +379,26 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
 //===----------------------------------------------------------------------===//
 
 void ztextWarmup(void) {
-  // HarfBuzz builds several singletons on first use and frees them from an
-  // atexit handler (hb_lazy_loader_t, hb-machinery.hh). They are caches with
-  // process lifetime, not leaks -- but they are allocated through whichever
+  // HarfBuzz builds several singletons on first use and NEVER frees them in
+  // this build. Upstream would free them from an atexit handler, but only
+  // where HAVE_ATEXIT is defined; build.zig does not define it and passes
+  // -DHB_NO_ATEXIT to say so deliberately, which makes hb.hh expand
+  // hb_atexit(f) to `if (0) f()`. They are caches with process lifetime --
+  // bounded and small, not leaks -- but they are allocated through whichever
   // allocator happens to be installed the first time something needs them,
   // and they are still live when a host checks its heap at shutdown.
+  //
+  // So this function is not a convenience. It is the only way a host that
+  // audits its heap gets a balanced one, and tests/c_smoke.c is where that is
+  // proved: it calls this first and then counts every byte in and out through
+  // a plain-C allocator. Delete the call and it reports 4 blocks and 500 bytes
+  // leaked, which ci/check-guards.sh plants to keep the claim honest.
+  //
+  // The Zig suite does NOT prove it, and used to be cited as if it did. Its
+  // fixture shapes a throwaway run to reach the two singletons warm-up cannot
+  // touch, and that run populates these four as a side effect -- so removing
+  // the warm-up call there leaves the suite green. One process, one first
+  // touch: whichever code path gets there first is the one that pays.
   //
   // Touching them here lets a host populate them BEFORE installing a tracking
   // allocator, so what that allocator then sees is ztext's actual working set.

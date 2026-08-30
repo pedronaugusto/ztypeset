@@ -176,16 +176,30 @@ Worked around with `hb_face_create_or_fail` (`src/hb-face.cc:289`), which
 returns NULL for both cases, plus an independent `hb_face_get_glyph_count`
 check. A test doctors the sfnt version word of a real font to reproduce it.
 
-**Several caches live until `exit`.** HarfBuzz builds lazy singletons on first
-use and frees them from an `atexit` handler: the shaper list
+**Several caches live until `exit`, and in this build they are never freed at
+all.** HarfBuzz builds lazy singletons on first use: the shaper list
 (`src/hb-shape.cc`), the Unicode character database (`src/hb-ucd.cc`), the
 OpenType font-functions (`src/hb-ot-font.cc`), the FreeType font-functions
 (`src/hb-ft.cc`), and an intern table holding one entry per distinct language
 tag ever passed (`src/hb-common.cc:258`, `lang_find_or_insert`).
 
+Upstream frees them from an `atexit` handler — but only where `HAVE_ATEXIT` is
+defined. `build.zig` does not define it, so `HB_USE_ATEXIT` is 0
+(`src/hb.hh:471-476`) and `hb_atexit(f)` expands to `if (0) f()`
+(`src/hb.hh:479`): the handler is never registered and the caches are still
+allocated when the process ends. This document said the handler fires, and it
+does not.
+
+That is deliberate rather than accidental, and `build.zig` now passes
+`-DHB_NO_ATEXIT` to say so: an atexit handler that calls the installed
+allocator runs after a host has torn its own allocator down, and the ordering
+between the two is not something a library can promise. A bounded, documented
+cache is the better trade.
+
 These are caches with process lifetime, not leaks — but they are allocated
 through whichever allocator is installed when they are first touched, and they
-are still live when a host audits its heap at shutdown. `ztextWarmup()` touches
+are still live when a host audits its heap at shutdown. `ztextWarmup()` is
+therefore load-bearing for any host that audits, not a convenience. `ztextWarmup()` touches
 the ones it can reach so a host can populate them before installing a tracking
 allocator. It cannot reach two of them: the FreeType font-functions singleton
 and per-language entries both need a real face, so a host that uses
