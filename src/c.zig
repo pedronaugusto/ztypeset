@@ -97,6 +97,24 @@ pub const RenderMode = enum(c_int) {
     sdf = 1,
 };
 
+/// How the bytes of a `GlyphBitmap` are to be read. Separate from
+/// `RenderMode`: one is what was asked for, the other is what came back.
+pub const BitmapFormat = enum(c_int) {
+    a8 = 0,
+    sdf = 1,
+};
+
+/// One bit of `Glyph.flags`. Singular for the same reason as `ZtextGlyphFlag`
+/// in the header: the field holds any OR of these, not one of them.
+pub const GlyphFlag = enum(c_int) {
+    unsafe_to_break = 0x1,
+    unsafe_to_concat = 0x2,
+    safe_to_insert_tatweel = 0x4,
+    /// The OR of every flag above, for masking away bits a newer library may
+    /// set that this build has no name for.
+    defined = 0x7,
+};
+
 pub const Hinting = enum(c_int) {
     normal = 0,
     light = 1,
@@ -123,6 +141,7 @@ pub const ShapeParams = extern struct {
 pub const Glyph = extern struct {
     glyph_id: u32,
     cluster: u32,
+    flags: u32,
     x_advance: f32,
     y_advance: f32,
     x_offset: f32,
@@ -188,6 +207,7 @@ pub const Variation = extern struct {
 
 pub const GlyphBitmap = extern struct {
     pixels: ?[*]const u8,
+    format: BitmapFormat,
     width: u32,
     height: u32,
     pitch: i32,
@@ -240,6 +260,7 @@ pub const AbiLayout = extern struct {
     glyph_offset_y_advance: u32,
     glyph_offset_x_offset: u32,
     glyph_offset_y_offset: u32,
+    glyph_offset_flags: u32,
 
     feature_size: u32,
     feature_align: u32,
@@ -262,6 +283,7 @@ pub const AbiLayout = extern struct {
     glyph_bitmap_size: u32,
     glyph_bitmap_align: u32,
     glyph_bitmap_offset_pixels: u32,
+    glyph_bitmap_offset_format: u32,
     glyph_bitmap_offset_pitch: u32,
     glyph_bitmap_offset_x_advance: u32,
 
@@ -279,6 +301,10 @@ pub const AbiLayout = extern struct {
     render_mode_last: u32,
     hinting_size: u32,
     hinting_last: u32,
+    bitmap_format_size: u32,
+    bitmap_format_last: u32,
+    glyph_flag_size: u32,
+    glyph_flag_last: u32,
 };
 
 pub const AbiProbe = extern struct {

@@ -87,11 +87,14 @@ pub const setAllocator = memory_mod.setAllocator;
 pub const resetAllocator = memory_mod.resetAllocator;
 
 pub const Glyph = types_mod.Glyph;
+pub const GlyphFlag = types_mod.GlyphFlag;
+pub const glyphHas = types_mod.glyphHas;
 pub const Feature = types_mod.Feature;
 pub const feature_global = types_mod.feature_global;
 pub const Extents = types_mod.Extents;
 pub const FaceMetrics = types_mod.FaceMetrics;
 pub const GlyphBitmap = types_mod.GlyphBitmap;
+pub const BitmapFormat = types_mod.BitmapFormat;
 pub const OutlineFuncs = types_mod.OutlineFuncs;
 pub const VariationAxis = types_mod.VariationAxis;
 pub const Variation = types_mod.Variation;
@@ -245,6 +248,10 @@ test "the C library agrees with the extern declarations in c.zig" {
         @as(u32, @offsetOf(c.Glyph, "y_offset")),
         layout.glyph_offset_y_offset,
     );
+    try std.testing.expectEqual(
+        @as(u32, @offsetOf(c.Glyph, "flags")),
+        layout.glyph_offset_flags,
+    );
 
     try std.testing.expectEqual(@as(u32, @sizeOf(c.Feature)), layout.feature_size);
     try std.testing.expectEqual(@as(u32, @alignOf(c.Feature)), layout.feature_align);
@@ -278,6 +285,10 @@ test "the C library agrees with the extern declarations in c.zig" {
     try std.testing.expectEqual(
         @as(u32, @offsetOf(c.GlyphBitmap, "pixels")),
         layout.glyph_bitmap_offset_pixels,
+    );
+    try std.testing.expectEqual(
+        @as(u32, @offsetOf(c.GlyphBitmap, "format")),
+        layout.glyph_bitmap_offset_format,
     );
     try std.testing.expectEqual(
         @as(u32, @offsetOf(c.GlyphBitmap, "pitch")),
@@ -334,6 +345,24 @@ test "the C library agrees with the extern declarations in c.zig" {
         @as(u32, @intCast(@intFromEnum(c.Hinting.none))),
         layout.hinting_last,
     );
+    try std.testing.expectEqual(
+        @as(u32, @sizeOf(c.BitmapFormat)),
+        layout.bitmap_format_size,
+    );
+    try std.testing.expectEqual(
+        @as(u32, @intCast(@intFromEnum(c.BitmapFormat.sdf))),
+        layout.bitmap_format_last,
+    );
+    try std.testing.expectEqual(
+        @as(u32, @sizeOf(c.GlyphFlag)),
+        layout.glyph_flag_size,
+    );
+    // The OR of every flag, so a consumer masking with it keeps exactly the
+    // bits this build can produce -- not the highest single flag.
+    try std.testing.expectEqual(
+        @as(u32, @intCast(@intFromEnum(c.GlyphFlag.defined))),
+        layout.glyph_flag_last,
+    );
 
     // The Zig error mapping must cover every C result. `c.Result` is
     // non-exhaustive so it can survive a newer shared library, but its NAMED
@@ -373,6 +402,7 @@ test "every field of every shared struct lands where Zig expects it" {
 
     try std.testing.expectEqual(@as(u32, 0x201), probe.glyph.glyph_id);
     try std.testing.expectEqual(@as(u32, 0x202), probe.glyph.cluster);
+    try std.testing.expectEqual(@as(u32, 0x207), probe.glyph.flags);
     try std.testing.expectEqual(@as(f32, 203.25), probe.glyph.x_advance);
     try std.testing.expectEqual(@as(f32, 204.25), probe.glyph.y_advance);
     try std.testing.expectEqual(@as(f32, 205.25), probe.glyph.x_offset);
@@ -409,6 +439,7 @@ test "every field of every shared struct lands where Zig expects it" {
     try std.testing.expectEqual(@as(u32, 0x603), probe.script_run.script);
 
     try std.testing.expectEqual(@as(usize, 0x777), @intFromPtr(probe.glyph_bitmap.pixels.?));
+    try std.testing.expectEqual(c.BitmapFormat.sdf, probe.glyph_bitmap.format);
     try std.testing.expectEqual(@as(u32, 0x701), probe.glyph_bitmap.width);
     try std.testing.expectEqual(@as(u32, 0x702), probe.glyph_bitmap.height);
     try std.testing.expectEqual(@as(i32, -0x703), probe.glyph_bitmap.pitch);
@@ -420,7 +451,7 @@ test "every field of every shared struct lands where Zig expects it" {
 test "the linked upstreams are the pinned ones, to the patch" {
     const v = version();
     try std.testing.expectEqual(@as(u8, 0), v.major);
-    try std.testing.expectEqual(@as(u8, 1), v.minor);
+    try std.testing.expectEqual(@as(u8, 2), v.minor);
 
     // src/pins.zig is the one home for what libs/ holds, and this asserts the
     // LINKED libraries agree with it -- not that a document says so.

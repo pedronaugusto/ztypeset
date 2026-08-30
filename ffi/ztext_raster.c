@@ -208,6 +208,11 @@ ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
     if (copied != ZTEXT_RESULT_OK) return copied;
   }
 
+  // Written whether or not there were pixels: a caller must be able to read
+  // the format of an inkless glyph without a special case, and memset left
+  // this at A8 regardless of what was rendered.
+  out->format = (mode == ZTEXT_RENDER_MODE_SDF) ? ZTEXT_BITMAP_FORMAT_SDF
+                                                : ZTEXT_BITMAP_FORMAT_A8;
   out->width = slot->bitmap.width;
   out->height = slot->bitmap.rows;
   out->left = slot->bitmap_left;

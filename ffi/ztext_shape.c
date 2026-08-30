@@ -197,6 +197,25 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
 
   hb_buffer_set_cluster_level(buffer, toHbClusterLevel(params->cluster_level));
 
+  // Ask for every optional glyph flag, on every shape.
+  //
+  // HarfBuzz produces UNSAFE_TO_BREAK unconditionally but leaves
+  // UNSAFE_TO_CONCAT and SAFE_TO_INSERT_TATWEEL off unless asked, because
+  // they cost something to compute. ztext asks always: a flag a consumer
+  // cannot rely on being computed is a flag it has to assume the worst about,
+  // and assuming the worst is exactly the re-shaping the flags exist to
+  // avoid. The cost is measured in README.md.
+  //
+  // Set here with the rest of the buffer's properties rather than once at
+  // creation. hb_buffer_t::clear() does not reset flags today
+  // (libs/harfbuzz/src/hb-buffer.cc), so once would be enough -- but buffer
+  // configuration having one home is what makes that a fact this file does
+  // not have to depend on.
+  hb_buffer_set_flags(buffer,
+                      (hb_buffer_flags_t)(
+                          HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT |
+                          HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL));
+
   if (params->direction != ZTEXT_DIRECTION_AUTO) {
     hb_buffer_set_direction(buffer, toHbDirection(params->direction));
   }
@@ -267,6 +286,10 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
   for (unsigned int i = 0u; i < glyph_count; i++) {
     glyphs[i].glyph_id = infos[i].codepoint;  // Post-shaping this IS the index.
     glyphs[i].cluster = infos[i].cluster;
+    // Masked to the flags ztext names, by HarfBuzz's own accessor. A newer
+    // HarfBuzz with a fourth flag would hand it through here otherwise, under
+    // a bit ZtextGlyphFlag has no meaning for.
+    glyphs[i].flags = (uint32_t)hb_glyph_info_get_glyph_flags(&infos[i]);
     glyphs[i].x_advance = (float)positions[i].x_advance / 64.0f;
     glyphs[i].y_advance = (float)positions[i].y_advance / 64.0f;
     glyphs[i].x_offset = (float)positions[i].x_offset / 64.0f;

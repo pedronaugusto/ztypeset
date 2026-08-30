@@ -101,7 +101,7 @@ extern "C" {
 //===----------------------------------------------------------------------===//
 
 #define ZTEXT_VERSION_MAJOR 0
-#define ZTEXT_VERSION_MINOR 1
+#define ZTEXT_VERSION_MINOR 2
 #define ZTEXT_VERSION_PATCH 0
 
 /// Version of the ztext binding, packed as (major<<16)|(minor<<8)|patch.
@@ -671,6 +671,43 @@ typedef struct ZtextShapeParams {
   int use_freetype_metrics;
 } ZtextShapeParams;
 
+/// What shaping learned about the text around one glyph, as a bit mask in
+/// ZtextGlyph::flags.
+///
+/// Singular because each enumerator is ONE flag; the field holds any OR of
+/// them. The values are HarfBuzz's own, and ztext_abi.c carries a static
+/// assertion per flag tying each to its HB_GLYPH_FLAG_ counterpart -- so this
+/// is a rename of upstream's contract, not a re-encoding of it, and a
+/// re-vendor that renumbered a flag would fail the build rather than shift
+/// every line break by one.
+///
+/// ztext always asks HarfBuzz to produce all three. Upstream leaves two of
+/// them off by default because computing them costs something, but a flag
+/// that is present on some builds and absent on others is worse than either
+/// answer: a consumer cannot tell "not set" from "not computed", and the only
+/// safe reading of that ambiguity is to assume the worst -- which throws away
+/// the entire optimisation the flags exist for. The cost is measured in
+/// README.md rather than assumed.
+typedef enum ZtextGlyphFlag {
+  /// Breaking the text at the start of this glyph's cluster may change the
+  /// shaping of BOTH sides, so both would have to be re-shaped. Its ABSENCE
+  /// is the useful half: a line broken only at unflagged clusters is
+  /// identical to the same text shaped in one piece, so no re-shape is
+  /// needed after line breaking.
+  ZTEXT_GLYPH_FLAG_UNSAFE_TO_BREAK = 0x00000001,
+  /// Changing the text on one side of this glyph's cluster may change the
+  /// shaping on the other. Absence alone does not make a concatenation safe:
+  /// both pieces being joined have to be clear of it.
+  ZTEXT_GLYPH_FLAG_UNSAFE_TO_CONCAT = 0x00000002,
+  /// U+0640 TATWEEL may be inserted before this cluster to elongate the line
+  /// without disturbing shaping. Whether elongating THERE is typographically
+  /// right is a decision this does not make.
+  ZTEXT_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL = 0x00000004,
+  /// Every flag this version defines. A consumer that masks with this ignores
+  /// bits a newer ztext may add, rather than mistaking one for another flag.
+  ZTEXT_GLYPH_FLAG_DEFINED = 0x00000007,
+} ZtextGlyphFlag;
+
 /// One positioned glyph. Advances and offsets are in pixels at the face's
 /// current size, y-up.
 typedef struct ZtextGlyph {
@@ -679,6 +716,9 @@ typedef struct ZtextGlyph {
   /// codepoint index. Several glyphs may share a cluster (one character
   /// decomposing) and several characters may share one (a ligature).
   uint32_t cluster;
+  /// An OR of ZtextGlyphFlag, 0 when none of them applies. Always produced;
+  /// see ZtextGlyphFlag for why "always" is part of the contract.
+  uint32_t flags;
   float x_advance;
   float y_advance;
   float x_offset;
@@ -1083,6 +1123,31 @@ typedef struct ZtextOutlineFuncs {
   void* user;
 } ZtextOutlineFuncs;
 
+/// How to read ZtextGlyphBitmap::pixels.
+///
+/// The format travels WITH the pixels rather than being remembered by the
+/// caller from the ZtextRenderMode it passed. A8 coverage and an SDF are both
+/// one byte per pixel, so a field sampled as coverage does not fail -- it
+/// produces a picture, a washed-out wrong one, which is the failure mode this
+/// package exists to refuse. Two independent enums rather than one shared with
+/// ZtextRenderMode, because what was asked for and what came back are
+/// different facts: a mode may one day be satisfied by more than one format,
+/// or by falling back to another.
+///
+/// Forward compatibility: switch on this and REJECT a value this header does
+/// not name. New formats will be added. `pitch` is BYTES per row and
+/// `pitch * height` is the buffer size in every format, present or future, so
+/// a consumer that only copies pixels into an atlas never has to understand
+/// them.
+typedef enum ZtextBitmapFormat {
+  /// One byte per pixel: coverage, 0 for no ink and 255 for solid.
+  ZTEXT_BITMAP_FORMAT_A8 = 0,
+  /// One byte per pixel: distance to the outline, biased so 128 is ON the
+  /// outline and larger values are inside. The ramp's half-width in pixels is
+  /// the library's SDF spread -- see ztextLibrarySetSdfSpread.
+  ZTEXT_BITMAP_FORMAT_SDF = 1,
+} ZtextBitmapFormat;
+
 typedef struct ZtextGlyphBitmap {
   /// Owned by the FACE, and valid until the next ztextFaceRenderGlyph on it.
   ///
@@ -1099,6 +1164,13 @@ typedef struct ZtextGlyphBitmap {
   ///
   /// NULL for a glyph with no ink, such as a space.
   const uint8_t* pixels;
+  /// How to read `pixels`. Written on every successful render, INCLUDING a
+  /// glyph with no ink -- so it is meaningful before the NULL check, and a
+  /// consumer that batches renders never sees an unset one.
+  ///
+  /// First after the pointer on purpose: it has to be read before the pixels
+  /// it describes are interpreted.
+  ZtextBitmapFormat format;
   uint32_t width;
   uint32_t height;
   /// Bytes per row. Always positive and always tightly packed, because the
@@ -1220,6 +1292,7 @@ typedef struct ZtextAbiLayout {
   uint32_t glyph_offset_y_advance;
   uint32_t glyph_offset_x_offset;
   uint32_t glyph_offset_y_offset;
+  uint32_t glyph_offset_flags;
 
   uint32_t feature_size;
   uint32_t feature_align;
@@ -1242,6 +1315,7 @@ typedef struct ZtextAbiLayout {
   uint32_t glyph_bitmap_size;
   uint32_t glyph_bitmap_align;
   uint32_t glyph_bitmap_offset_pixels;
+  uint32_t glyph_bitmap_offset_format;
   uint32_t glyph_bitmap_offset_pitch;
   uint32_t glyph_bitmap_offset_x_advance;
 
@@ -1271,6 +1345,14 @@ typedef struct ZtextAbiLayout {
   uint32_t render_mode_last;
   uint32_t hinting_size;
   uint32_t hinting_last;
+  uint32_t bitmap_format_size;
+  uint32_t bitmap_format_last;
+  /// ZtextGlyphFlag is a bit mask, so `glyph_flag_last` is
+  /// ZTEXT_GLYPH_FLAG_DEFINED -- the OR of every flag -- rather than the
+  /// highest single flag. A consumer masking with the value it reads here
+  /// therefore keeps exactly the bits this build can produce.
+  uint32_t glyph_flag_size;
+  uint32_t glyph_flag_last;
 } ZtextAbiLayout;
 
 /// Fills `out` with the layout the library was compiled with. Never fails.

@@ -536,6 +536,16 @@ FreeType's SDF output is verified rather than assumed: a test asserts the field
 grows by the spread on every side, that a scanline across an `o` crosses the
 128 mid-point exactly four times, and that it ramps rather than steps.
 
+**On the optional glyph flags.** ztext asks HarfBuzz for `UNSAFE_TO_CONCAT` and
+`SAFE_TO_INSERT_TATWEEL` on every shape, which upstream withholds by default
+because computing them costs something. That cost was measured on this row
+rather than argued about: three runs of the unchanged tree gave 2.35, 2.45 and
+2.60 µs, and three runs with the flags asked for gave 2.30, 2.25 and 2.30 µs —
+the second set inside the spread of the first, so the difference is below what
+this harness resolves. The blind spot is the sentence itself: it is Latin, where
+little joins and nothing elongates. A cursive script does more work for these
+flags and is not on this row.
+
 **On the memory rows.** Every handle is shaped and rendered with before being
 measured: one that has never been used has not built its table accelerators,
 scaled state or glyph buffers, and measuring the bare handle would flatter the
@@ -552,11 +562,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**99 tests**, executed twice. The second pass runs the same binary with
+**101 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **198/198 passed**.
+rather than being believed. So `zig build test` reports **202/202 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -747,6 +757,29 @@ nothing compiled either. Now there is one:
 runs, both documents quote its marked regions, and a test fails if either has
 drifted.
 
+**The glyph structs did not say what they were.** A `ZtextGlyph` carried
+positions and nothing about the text around it, so a host wrapping a paragraph
+had to re-shape every line after breaking it — the flags HarfBuzz computes to
+make that unnecessary stopped at ztext's boundary. And a `ZtextGlyphBitmap`
+described its pixels without saying how to read them: A8 coverage and an SDF
+are both one byte per pixel, so a caller that remembered the wrong
+`ZtextRenderMode` got no error, just a washed-out picture. Both were the same
+defect — a value whose meaning lived somewhere other than the value.
+
+`ZtextGlyph` now carries `flags`, an OR of `ZtextGlyphFlag` mirroring
+HarfBuzz's own with a static assertion per flag; `ZtextGlyphBitmap` carries
+`format`, written even for a glyph with no ink so it is meaningful before the
+NULL check. Both structs changed size, so the ABI went 0.1 to 0.2 in one
+change: the header's version macros, `build.zig.zon`, the `ZtextAbiLayout`
+handshake, the `ztextAbiProbe` markers and the Zig mirror move together, and
+`ci/measurements.sh --check` fails if the two version homes disagree.
+
+The bump found a third home for the version while it was at it: a test whose
+subject was `Version.format` asserted the literals `"0.1.0"` and `"2.14.3"`, so
+the first bump of ztext or of FreeType would turn a formatting test red for a
+reason that had nothing to do with formatting. It now formats a synthetic
+version it owns, and compares the real one against its own fields.
+
 ### Continuous integration
 
 CI runs the whole suite on **Linux, macOS and Windows**, in four optimize
@@ -777,15 +810,15 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **26** deliberate bugs, one at a time, to a copy of the tree, and
+applies **28** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
 |---|---|
 | ABI | a *middle* enumerator renumbered, an enum tag narrowed, two same-sized struct fields swapped, a field added to the header only, a by-value parameter widened, a parameter dropped, a function the header exports that `c.zig` never declares |
 | Bidi | a line reordered over the paragraph instead of over itself, script pieces emitted forwards inside a right-to-left run, a paragraph's end left as no break at all |
-| Faces | a glyph loaded without activating the face's own `FT_Size`, a covered prefix that splits a base from its marks or breaks at a format character, a pixel size rounded to whole pixels |
-| Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable |
+| Faces | a glyph loaded without activating the face's own `FT_Size`, a covered prefix that splits a base from its marks or breaks at a format character, a pixel size rounded to whole pixels, a bitmap that does not say which format its bytes are in |
+| Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed |
 | Reproducibility | the environment allowed to reach HarfBuzz |
