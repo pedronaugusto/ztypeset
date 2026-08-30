@@ -30,7 +30,7 @@
 //! const shaper = try ztext.Shaper.init();
 //! defer shaper.deinit();
 //!
-//! const paragraph = try ztext.Paragraph.init(text, .auto);
+//! const paragraph = try ztext.Paragraph.init(text, .{});
 //! defer paragraph.deinit();
 //!
 //! // shapingRuns, not visualRuns: one visual run can span several scripts, and
@@ -88,6 +88,9 @@ pub const resetAllocator = memory_mod.resetAllocator;
 pub const Glyph = types_mod.Glyph;
 pub const GlyphFlag = types_mod.GlyphFlag;
 pub const glyphHas = types_mod.glyphHas;
+pub const Segmentation = types_mod.Segmentation;
+pub const segmentation = types_mod.segmentation;
+pub const segmentationHas = types_mod.segmentationHas;
 pub const Feature = types_mod.Feature;
 pub const feature_global = types_mod.feature_global;
 pub const Extents = types_mod.Extents;

@@ -423,17 +423,26 @@ struct ZtextParagraph {
   /// NULL for an empty paragraph, which never reaches SheenBidi at all.
   SBParagraphRef sb_paragraph;
 
-  /// Where a line MAY break (UAX #14), where a grapheme cluster ends and
-  /// where a word ends (UAX #29), one byte each per CODE UNIT of `length`.
+  /// Which of the three segmentation passes this paragraph ran: an OR of
+  /// ZtextSegmentation, as the caller gave it.
+  uint32_t segmentation;
+
+  /// The one allocation the break arrays live in, and the three views of it.
+  ///
+  /// One byte per CODE UNIT per pass ASKED FOR, in the order lines,
+  /// graphemes, words -- so a paragraph that wanted only line breaks holds
+  /// one array, not three with two unused. Each of the three pointers is
+  /// NULL when its pass was not run, which is what the accessors return.
   ///
   /// Computed at creation rather than on demand, so every accessor stays
-  /// infallible like the rest of the paragraph's. Three bytes per byte of
-  /// text, against a handle that already holds a copy of the text and its
-  /// levels; a paragraph is small by construction.
-  ///
-  /// One allocation, sliced three ways: the three arrays are always the same
-  /// length and always live and die together.
+  /// infallible AND a built paragraph stays immutable: filling an array in on
+  /// first access would make a const accessor a writer, and the documented
+  /// promise that a paragraph is readable from several threads would go with
+  /// it.
   uint8_t* breaks;
+  uint8_t* line_breaks;
+  uint8_t* grapheme_breaks;
+  uint8_t* word_breaks;
 
   /// The whole paragraph laid out as a single line. Correct when the text
   /// fits on one; see ZtextLine for when it does not.

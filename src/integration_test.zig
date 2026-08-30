@@ -440,7 +440,7 @@ test "line breaks are offered between words, never inside one" {
     defer fixture.deinit();
 
     const text = "hello wonderful world";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const breaks = paragraph.lineBreaks();
@@ -473,7 +473,7 @@ test "a line break is offered where no space is" {
         .{ .text = "\u{4ECA}\u{65E5}\u{306F}", .at = 2 },
     };
     for (cases) |case| {
-        const paragraph = try ztext.Paragraph.init(case.text, .auto);
+        const paragraph = try ztext.Paragraph.init(case.text, .{});
         defer paragraph.deinit();
         try std.testing.expectEqual(
             ztext.Break.allowed,
@@ -490,7 +490,7 @@ test "a caret moves by grapheme, not by character" {
     // bytes. A caret that steps by character lands between the letter and its
     // accent, which is the bug this API exists to prevent.
     const text = "ae\u{301}b";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(@as(usize, 1), paragraph.nextGrapheme(0));
@@ -526,7 +526,7 @@ test "an emoji joined with ZWJ is one grapheme" {
     // U+200D are one grapheme of eleven bytes; backspace must delete all of
     // it, not half a family.
     const text = "\u{1F468}\u{200D}\u{1F469}";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(text.len, paragraph.nextGrapheme(0));
@@ -538,7 +538,7 @@ test "word boundaries are where a double-click would select" {
     defer fixture.deinit();
 
     const text = "one two";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const words = paragraph.wordBreaks();
@@ -562,7 +562,7 @@ test "the documented wrap loop covers a paragraph exactly once" {
     // ztext, the width decision from the host, reordering per line from
     // ztext, shaping with context from ztext.
     const text = "the quick brown fox jumps over the lazy dog";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
     const breaks = paragraph.lineBreaks();
 
@@ -1555,7 +1555,7 @@ test "bidi orders a mixed paragraph into visual runs that tile the text" {
     defer fixture.deinit();
 
     const text = "Hello مرحبا world";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     // First strong character is Latin, so the base is left-to-right.
@@ -1593,7 +1593,7 @@ test "bidi resolves an RTL base and reverses the run order" {
     // First strong character is Arabic, so the base is right-to-left and the
     // Latin word becomes the embedded run.
     const text = "مرحبا Hello";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(@as(u8, 1), paragraph.baseLevel());
@@ -1608,7 +1608,7 @@ test "bidi resolves an RTL base and reverses the run order" {
     try std.testing.expectEqual(ztext.Direction.rtl, ztext.runDirection(runs[1].level));
 
     // Forcing the base the other way must change the answer.
-    const forced = try ztext.Paragraph.init(text, .ltr);
+    const forced = try ztext.Paragraph.init(text, .{ .base = .ltr });
     defer forced.deinit();
     try std.testing.expectEqual(@as(u8, 0), forced.baseLevel());
 }
@@ -1618,7 +1618,7 @@ test "script itemisation splits a mixed paragraph into shapeable runs" {
     defer fixture.deinit();
 
     const text = "Hello مرحبا";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const runs = paragraph.scriptRuns();
@@ -1642,7 +1642,7 @@ test "a paragraph stops at the first separator, and says how far it got" {
     // that ignores `length()` and indexes the whole buffer with these runs
     // would silently drop the second paragraph.
     const text = "abc\ndef";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(@as(usize, 4), paragraph.length());
@@ -1653,12 +1653,12 @@ test "a paragraph stops at the first separator, and says how far it got" {
     try std.testing.expectEqual(paragraph.length(), covered);
 
     // Both CR and LF are separators, but CRLF counts as one boundary.
-    const crlf = try ztext.Paragraph.init("abc\r\ndef", .auto);
+    const crlf = try ztext.Paragraph.init("abc\r\ndef", .{});
     defer crlf.deinit();
     try std.testing.expectEqual(@as(usize, 5), crlf.length());
 
     // Text with no separator is covered whole.
-    const single = try ztext.Paragraph.init("abc def", .auto);
+    const single = try ztext.Paragraph.init("abc def", .{});
     defer single.deinit();
     try std.testing.expectEqual(@as(usize, 7), single.length());
 }
@@ -1667,13 +1667,13 @@ test "an empty paragraph is analysed rather than refused" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init("", .auto);
+    const paragraph = try ztext.Paragraph.init("", .{});
     defer paragraph.deinit();
     try std.testing.expectEqual(@as(usize, 0), paragraph.length());
     try std.testing.expectEqual(@as(usize, 0), paragraph.visualRuns().len);
     try std.testing.expectEqual(@as(u8, 0), paragraph.baseLevel());
 
-    const rtl = try ztext.Paragraph.init("", .rtl);
+    const rtl = try ztext.Paragraph.init("", .{ .base = .rtl });
     defer rtl.deinit();
     try std.testing.expectEqual(@as(u8, 1), rtl.baseLevel());
 }
@@ -1684,7 +1684,7 @@ test "the paragraph, itemiser and shaper compose into a whole line" {
 
     // The pipeline a host is meant to build: order, itemise, shape each piece.
     const text = "Hi שלום";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const latin_face = try fixture.face(fonts.latin);
@@ -1742,7 +1742,7 @@ test "a line applies rule L1, which the paragraph's own runs cannot" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .auto);
+    const paragraph = try ztext.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
     try std.testing.expectEqual(@as(u8, 0), paragraph.baseLevel());
 
@@ -1782,7 +1782,7 @@ test "a line covers exactly its own range, and offsets stay paragraph-relative" 
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .auto);
+    const paragraph = try ztext.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
 
     const second = try paragraph.line(first_line_end, wrapped.len - first_line_end);
@@ -1805,7 +1805,7 @@ test "a line spanning the whole paragraph agrees with the paragraph" {
     // The paragraph's runs are not a different algorithm, they are this same
     // one asked for the whole range -- so the two must agree exactly.
     for ([_][]const u8{ wrapped, "Hello مرحبا world", "\u{5E9}\u{5DC}\u{5D5}\u{5DD} abc" }) |text| {
-        const paragraph = try ztext.Paragraph.init(text, .auto);
+        const paragraph = try ztext.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         const line = try paragraph.line(0, paragraph.length());
@@ -1832,7 +1832,7 @@ test "a line's shaping runs are split by script as well as direction" {
     // A shaper handed that as one run would get it wrong, which is what the
     // intersection is for -- and a line has to do it too, not just a paragraph.
     const text = "x \u{5E9}\u{5DC} \u{645}\u{631} y";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const line = try paragraph.line(0, text.len);
@@ -1859,7 +1859,7 @@ test "a line outlives the paragraph it came from" {
     // allocator a borrowed pointer here would be a use-after-free.
     var line: ztext.Line = undefined;
     {
-        const paragraph = try ztext.Paragraph.init(wrapped, .auto);
+        const paragraph = try ztext.Paragraph.init(wrapped, .{});
         defer paragraph.deinit();
         line = try paragraph.line(0, first_line_end);
     }
@@ -1873,7 +1873,7 @@ test "a line refuses a range that is out of bounds or splits a character" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .auto);
+    const paragraph = try ztext.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
 
     try std.testing.expectError(error.InvalidArgument, paragraph.line(0, wrapped.len + 1));
@@ -1897,7 +1897,7 @@ test "an empty line is analysed rather than refused" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .auto);
+    const paragraph = try ztext.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
 
     const empty = try paragraph.line(4, 0);
@@ -1908,7 +1908,7 @@ test "an empty line is analysed rather than refused" {
     try std.testing.expectEqual(@as(usize, 0), empty.shapingRuns().len);
 
     // And so is a line of an empty paragraph, which never reaches SheenBidi.
-    const blank = try ztext.Paragraph.init("", .auto);
+    const blank = try ztext.Paragraph.init("", .{});
     defer blank.deinit();
     const blank_line = try blank.line(0, 0);
     defer blank_line.deinit();
@@ -2459,14 +2459,14 @@ test "malformed UTF-8 is refused rather than repaired" {
         );
         try std.testing.expectError(
             ztext.Error.InvalidText,
-            ztext.Paragraph.init(text, .auto),
+            ztext.Paragraph.init(text, .{}),
         );
     }
 
     // Valid text that merely looks unusual must still be accepted.
     for ([_][]const u8{ "", "a", "é", "€", "𝄞", "\x00between\x00" }) |text| {
         _ = try fixture.shaper.shape(face, text, .{});
-        const paragraph = try ztext.Paragraph.init(text, .auto);
+        const paragraph = try ztext.Paragraph.init(text, .{});
         paragraph.deinit();
     }
 }
@@ -2924,7 +2924,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
     // Greek and Cyrillic and lets it guess.
     {
         const text = "Hello Ελληνικά мир";
-        const paragraph = try ztext.Paragraph.init(text, .auto);
+        const paragraph = try ztext.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         try std.testing.expectEqual(@as(usize, 1), paragraph.visualRuns().len);
@@ -2942,7 +2942,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
     // the Hebrew belongs and still look like plausible text.
     {
         const text = "مرحبا שלום";
-        const paragraph = try ztext.Paragraph.init(text, .auto);
+        const paragraph = try ztext.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         try std.testing.expectEqual(@as(u8, 1), paragraph.baseLevel());
@@ -2959,7 +2959,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
     // Nested directions: Latin embedded in an RTL paragraph gets level 2.
     {
         const text = "مرحبا Hello שלום";
-        const paragraph = try ztext.Paragraph.init(text, .auto);
+        const paragraph = try ztext.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         const runs = paragraph.shapingRuns();
@@ -2986,7 +2986,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
         "plain latin only",
         "",
     }) |text| {
-        const paragraph = try ztext.Paragraph.init(text, .auto);
+        const paragraph = try ztext.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         var covered = std.mem.zeroes([64]bool);
@@ -3012,7 +3012,7 @@ test "the documented pipeline shapes every run of a mixed paragraph" {
     defer arabic.deinit();
 
     const text = "Hello مرحبا world";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     var total: usize = 0;
@@ -3612,11 +3612,11 @@ test "one text, three encodings: the same answer in different units" {
     const utf16 = try toUtf16(&utf16_storage, utf8);
     const utf32 = try toUtf32(&utf32_storage, utf8);
 
-    const p8 = try ztext.Paragraph.init(utf8, .auto);
+    const p8 = try ztext.Paragraph.init(utf8, .{});
     defer p8.deinit();
-    const p16 = try ztext.Paragraph.init(utf16, .auto);
+    const p16 = try ztext.Paragraph.init(utf16, .{});
     defer p16.deinit();
-    const p32 = try ztext.Paragraph.init(utf32, .auto);
+    const p32 = try ztext.Paragraph.init(utf32, .{});
     defer p32.deinit();
 
     // Each reports the encoding it was built from and a length in ITS units.
@@ -3718,9 +3718,9 @@ test "a range that would split a character is refused in every encoding" {
     var utf16_storage: [8]u16 = undefined;
     const utf16 = try toUtf16(&utf16_storage, utf8);
 
-    const p8 = try ztext.Paragraph.init(utf8, .auto);
+    const p8 = try ztext.Paragraph.init(utf8, .{});
     defer p8.deinit();
-    const p16 = try ztext.Paragraph.init(utf16, .auto);
+    const p16 = try ztext.Paragraph.init(utf16, .{});
     defer p16.deinit();
 
     try std.testing.expectError(ztext.Error.InvalidArgument, p8.line(3, 1));
@@ -3733,7 +3733,7 @@ test "a range that would split a character is refused in every encoding" {
     // UTF-32 has nothing to split: every index is a boundary.
     var utf32_storage: [8]u32 = undefined;
     const utf32 = try toUtf32(&utf32_storage, utf8);
-    const p32 = try ztext.Paragraph.init(utf32, .auto);
+    const p32 = try ztext.Paragraph.init(utf32, .{});
     defer p32.deinit();
     const any = try p32.line(1, 1);
     any.deinit();
@@ -3749,7 +3749,7 @@ test "a paragraph run is shaped from the paragraph's own text" {
     defer face.deinit();
 
     const text = "abc \u{5E9}\u{5DC}\u{5D5}\u{5DD} def";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     for (paragraph.shapingRuns()) |run| {
@@ -3788,7 +3788,7 @@ test "a paragraph run refuses a direction or script the caller also set" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    const paragraph = try ztext.Paragraph.init("Hello", .auto);
+    const paragraph = try ztext.Paragraph.init("Hello", .{});
     defer paragraph.deinit();
     const run = paragraph.shapingRuns()[0];
 
@@ -3816,7 +3816,7 @@ test "a run built by hand cannot reach outside its paragraph" {
     // Runs a paragraph produced are inside it and on character boundaries;
     // a struct a caller filled in is neither by construction.
     const text = "ab\u{5D0}cd";
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const bad = [_][2]u32{
@@ -3833,4 +3833,93 @@ test "a run built by hand cannot reach outside its paragraph" {
             fixture.shaper.shapeRun(face, paragraph, run, .{}),
         );
     }
+}
+
+test "a paragraph runs only the segmentation passes it was asked for" {
+    // The gate on M6. Every pass costs a walk of libunibreak and a byte per
+    // code unit kept for the paragraph's life, and a paragraph used for bidi
+    // alone was paying for all three.
+    const text = "one two \u{5D0}\u{5D1} three";
+
+    const all = try ztext.Paragraph.init(text, .{});
+    defer all.deinit();
+    try std.testing.expectEqual(
+        @as(u32, @intCast(@intFromEnum(ztext.Segmentation.all))),
+        all.segmentation(),
+    );
+    try std.testing.expectEqual(text.len, all.lineBreaks().len);
+    try std.testing.expectEqual(text.len, all.graphemeBreaks().len);
+    try std.testing.expectEqual(text.len, all.wordBreaks().len);
+
+    // One pass: the array asked for is identical to the one the full
+    // paragraph produced, and the other two do not exist.
+    const lines_only = try ztext.Paragraph.init(text, .{
+        .segmentation = ztext.segmentation(&.{.lines}),
+    });
+    defer lines_only.deinit();
+    try std.testing.expect(
+        ztext.segmentationHas(lines_only.segmentation(), .lines),
+    );
+    try std.testing.expect(
+        !ztext.segmentationHas(lines_only.segmentation(), .words),
+    );
+    try std.testing.expectEqualSlices(
+        ztext.Break,
+        all.lineBreaks(),
+        lines_only.lineBreaks(),
+    );
+    try std.testing.expectEqual(@as(usize, 0), lines_only.graphemeBreaks().len);
+    try std.testing.expectEqual(@as(usize, 0), lines_only.wordBreaks().len);
+
+    // And the pass in the MIDDLE of the mask, which is where an array laid
+    // out at a fixed offset would read the wrong one.
+    const words_only = try ztext.Paragraph.init(text, .{
+        .segmentation = ztext.segmentation(&.{.words}),
+    });
+    defer words_only.deinit();
+    try std.testing.expectEqualSlices(
+        ztext.Break,
+        all.wordBreaks(),
+        words_only.wordBreaks(),
+    );
+    try std.testing.expectEqual(@as(usize, 0), words_only.lineBreaks().len);
+    try std.testing.expectEqual(@as(usize, 0), words_only.graphemeBreaks().len);
+
+    // None at all: the bidi analysis is untouched by the choice.
+    const none = try ztext.Paragraph.init(text, .{
+        .segmentation = ztext.segmentation(&.{}),
+    });
+    defer none.deinit();
+    try std.testing.expectEqual(@as(usize, 0), none.lineBreaks().len);
+    try std.testing.expectEqual(@as(usize, 0), none.graphemeBreaks().len);
+    try std.testing.expectEqual(@as(usize, 0), none.wordBreaks().len);
+    try std.testing.expectEqual(all.baseLevel(), none.baseLevel());
+    try std.testing.expectEqual(
+        all.shapingRuns().len,
+        none.shapingRuns().len,
+    );
+    try std.testing.expectEqualSlices(u8, all.levels(), none.levels());
+}
+
+test "without the grapheme pass a caret has nowhere to move" {
+    const text = "abc";
+    const paragraph = try ztext.Paragraph.init(text, .{
+        .segmentation = ztext.segmentation(&.{.lines}),
+    });
+    defer paragraph.deinit();
+
+    // Not "jump to the end", which is what an absent array used to mean.
+    try std.testing.expectEqual(@as(usize, 1), paragraph.nextGrapheme(1));
+    try std.testing.expectEqual(@as(usize, 2), paragraph.previousGrapheme(2));
+}
+
+test "a segmentation bit this build has no name for is refused" {
+    // The same contract as an unknown encoding: a consumer compiled against a
+    // newer header is refused rather than quietly given less than it asked
+    // for. Through the C entry point, because the Zig mask cannot spell it.
+    var handle: *ztext.c.Paragraph = undefined;
+    try std.testing.expectEqual(
+        ztext.c.Result.invalid_argument,
+        ztext.c.ztextParagraphCreate("abc", 3, .utf8, .auto, 0x8, &handle),
+    );
 }

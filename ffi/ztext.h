@@ -1140,10 +1140,41 @@ typedef struct ZtextShapingRun {
   uint8_t level;
 } ZtextShapingRun;
 
+/// Which segmentation passes a paragraph runs. An OR of these, and a
+/// parameter of ztextParagraphCreate.
+///
+/// Singular for the same reason as ZtextGlyphFlag: the parameter holds any OR
+/// of these, not one of them.
+///
+/// Each pass costs one walk of libunibreak over the text and one byte per
+/// code unit, kept for the paragraph's lifetime -- which for a long paragraph
+/// is more memory than the text and the embedding levels together. A pass not
+/// asked for is not run, allocates nothing, and its accessor answers NULL.
+/// ZTEXT_SEGMENTATION_ALL is what a caller that has not thought about it
+/// should pass.
+///
+/// The choice is made here rather than on first access because a built
+/// paragraph is immutable and readable from several threads; filling an array
+/// in lazily would trade that away.
+typedef enum ZtextSegmentation {
+  ZTEXT_SEGMENTATION_NONE = 0x00000000,
+  /// UAX #14: where a line MAY break.
+  ZTEXT_SEGMENTATION_LINES = 0x00000001,
+  /// UAX #29: where a grapheme cluster ends -- caret movement, backspace.
+  ZTEXT_SEGMENTATION_GRAPHEMES = 0x00000002,
+  /// UAX #29: where a word ends -- double-click selection.
+  ZTEXT_SEGMENTATION_WORDS = 0x00000004,
+  /// The OR of every pass above.
+  ZTEXT_SEGMENTATION_ALL = 0x00000007,
+} ZtextSegmentation;
+
 /// Analyses one paragraph of text.
 ///
 /// `length` is in `encoding`'s code units, and so is every offset the
 /// paragraph reports afterwards.
+///
+/// `segmentation` is an OR of ZtextSegmentation saying which break arrays to
+/// build. A bit this build has no name for is ZTEXT_RESULT_INVALID_ARGUMENT.
 ///
 /// `text` is read during the call only; the paragraph copies what it needs and
 /// does not borrow the buffer. That differs from ztextFontCreateFromMemory on
@@ -1156,6 +1187,7 @@ typedef struct ZtextShapingRun {
 ZTEXT_API ZtextResult ztextParagraphCreate(const void* text, size_t length,
                                            ZtextEncoding encoding,
                                            ZtextBaseDirection base,
+                                           uint32_t segmentation,
                                            ZtextParagraph** out);
 
 ZTEXT_API void ztextParagraphDestroy(ZtextParagraph* paragraph);
@@ -1173,6 +1205,13 @@ ZTEXT_API size_t ztextParagraphLength(const ZtextParagraph* paragraph);
 /// paragraph's offsets as bytes indexes half a character.
 ZTEXT_API ZtextEncoding ztextParagraphEncoding(
     const ZtextParagraph* paragraph);
+
+/// The segmentation passes this paragraph ran, as they were asked for.
+///
+/// Reported for the same reason as the encoding: a paragraph outlives the
+/// call that made it, and an empty break array is otherwise indistinguishable
+/// from a pass that was never run.
+ZTEXT_API uint32_t ztextParagraphSegmentation(const ZtextParagraph* paragraph);
 
 /// Resolved base embedding level: even for LTR, odd for RTL.
 ZTEXT_API uint8_t ztextParagraphBaseLevel(const ZtextParagraph* paragraph);
@@ -1228,7 +1267,8 @@ ZTEXT_API const uint8_t* ztextParagraphLevels(
 #define ZTEXT_BREAK_MANDATORY 2u
 
 /// Borrowed, one ZTEXT_BREAK_* value per code unit of ztextParagraphLength,
-/// describing the boundary AFTER that unit. NULL for an empty paragraph.
+/// describing the boundary AFTER that unit. NULL for an empty paragraph, and
+/// NULL if ZTEXT_SEGMENTATION_LINES was not asked for.
 ///
 /// So a line may run from `start` to `i + 1` whenever `line_breaks[i]` is not
 /// ZTEXT_BREAK_NONE. Valid until the paragraph is destroyed.
@@ -1240,7 +1280,8 @@ ZTEXT_API const uint8_t* ztextParagraphLineBreaks(
     const ZtextParagraph* paragraph);
 
 /// Grapheme cluster boundaries -- what a caret moves by and what backspace
-/// deletes. Never ZTEXT_BREAK_MANDATORY.
+/// deletes. Never ZTEXT_BREAK_MANDATORY. NULL unless
+/// ZTEXT_SEGMENTATION_GRAPHEMES was asked for.
 ///
 /// This is emphatically not the same as a character: a base plus its combining
 /// marks is one grapheme, and so is a regional-indicator pair or an emoji
@@ -1249,7 +1290,8 @@ ZTEXT_API const uint8_t* ztextParagraphGraphemeBreaks(
     const ZtextParagraph* paragraph);
 
 /// Word boundaries -- double-click selection, and word-wise caret movement.
-/// Never ZTEXT_BREAK_MANDATORY.
+/// Never ZTEXT_BREAK_MANDATORY. NULL unless ZTEXT_SEGMENTATION_WORDS was
+/// asked for.
 ZTEXT_API const uint8_t* ztextParagraphWordBreaks(
     const ZtextParagraph* paragraph);
 
@@ -1258,7 +1300,9 @@ ZTEXT_API const uint8_t* ztextParagraphWordBreaks(
 /// `ztextParagraphNextGrapheme(p, length)` is `length`, and
 /// `ztextParagraphPreviousGrapheme(p, 0)` is 0, so a caret walked off either
 /// end stays put rather than wrapping or going out of range. An `offset` that
-/// is not itself a boundary is snapped outward to one.
+/// is not itself a boundary is snapped outward to one. Without
+/// ZTEXT_SEGMENTATION_GRAPHEMES there are no boundaries at all, and both
+/// return `offset` unchanged.
 ///
 /// Written as functions rather than left to the caller because the loop is
 /// three lines and everyone writes it slightly differently -- usually by
@@ -1666,6 +1710,11 @@ typedef struct ZtextAbiLayout {
   uint32_t bitmap_format_last;
   uint32_t encoding_size;
   uint32_t encoding_last;
+  /// ZtextSegmentation is a bit mask, so `segmentation_last` is
+  /// ZTEXT_SEGMENTATION_ALL -- the OR of every pass -- for the same reason as
+  /// `glyph_flag_last` below.
+  uint32_t segmentation_size;
+  uint32_t segmentation_last;
   /// ZtextGlyphFlag is a bit mask, so `glyph_flag_last` is
   /// ZTEXT_GLYPH_FLAG_DEFINED -- the OR of every flag -- rather than the
   /// highest single flag. A consumer masking with the value it reads here

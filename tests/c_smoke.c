@@ -489,7 +489,8 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
     STEP(ztextShaperCreate(&shaper), shaper)
     STEP(ztextParagraphCreate("a \xd7\xa9\xd7\x9c b", 8,
                               ZTEXT_ENCODING_UTF8,
-                              ZTEXT_BASE_DIRECTION_AUTO, &paragraph),
+                              ZTEXT_BASE_DIRECTION_AUTO,
+                              ZTEXT_SEGMENTATION_ALL, &paragraph),
          paragraph)
     STEP(ztextLineCreate(paragraph, 0, 6, &line), line)
 #undef STEP
@@ -878,7 +879,7 @@ int main(int argc, char** argv) {
   ZtextParagraph* shaped_paragraph = NULL;
   CHECK_OK(ztextParagraphCreate(shalom, strlen(shalom), ZTEXT_ENCODING_UTF8,
                                 ZTEXT_BASE_DIRECTION_AUTO,
-                                &shaped_paragraph));
+                                ZTEXT_SEGMENTATION_ALL, &shaped_paragraph));
   const ZtextShapingRun* shaped_runs =
       ztextParagraphShapingRuns(shaped_paragraph);
   const size_t shaped_run_count =
@@ -1020,7 +1021,8 @@ int main(int argc, char** argv) {
   const char* mixed = "a \xd7\xa9\xd7\x9c b";
   ZtextParagraph* paragraph = NULL;
   CHECK_OK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
-                                ZTEXT_BASE_DIRECTION_AUTO, &paragraph));
+                                ZTEXT_BASE_DIRECTION_AUTO,
+                                ZTEXT_SEGMENTATION_ALL, &paragraph));
   CHECK(ztextParagraphEncoding(paragraph) == ZTEXT_ENCODING_UTF8,
         "a paragraph should report the encoding it was built from");
   CHECK(ztextParagraphBaseLevel(paragraph) == 0,
@@ -1030,6 +1032,34 @@ int main(int argc, char** argv) {
         ztextParagraphVisualRunCount(paragraph));
   CHECK(ztextParagraphScriptRunCount(paragraph) >= 2,
         "expected at least 2 script runs");
+  CHECK(ztextParagraphSegmentation(paragraph) == ZTEXT_SEGMENTATION_ALL,
+        "a paragraph should report the passes it was asked for");
+  CHECK(ztextParagraphWordBreaks(paragraph) != NULL,
+        "all three passes were asked for");
+
+  // The same text with one pass instead of three: the arrays not asked for
+  // do not exist, and nothing else about the paragraph changes.
+  ZtextParagraph* lines_only = NULL;
+  CHECK_OK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
+                                ZTEXT_BASE_DIRECTION_AUTO,
+                                ZTEXT_SEGMENTATION_LINES, &lines_only));
+  CHECK(ztextParagraphLineBreaks(lines_only) != NULL,
+        "the pass that was asked for should have an array");
+  CHECK(ztextParagraphGraphemeBreaks(lines_only) == NULL,
+        "a pass not asked for should have no array");
+  CHECK(ztextParagraphWordBreaks(lines_only) == NULL,
+        "a pass not asked for should have no array");
+  CHECK(ztextParagraphVisualRunCount(lines_only) ==
+            ztextParagraphVisualRunCount(paragraph),
+        "segmentation should not change the bidi analysis");
+  ztextParagraphDestroy(lines_only);
+
+  // A bit this build has no name for is refused rather than ignored.
+  ZtextParagraph* unnamed = NULL;
+  CHECK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
+                             ZTEXT_BASE_DIRECTION_AUTO, 0x8u,
+                             &unnamed) == ZTEXT_RESULT_INVALID_ARGUMENT,
+        "an unnamed segmentation bit should be refused");
 
   // And one line of it, which is where rules L1 and L2 are actually applied.
   ZtextLine* line = NULL;
@@ -1062,9 +1092,11 @@ int main(int argc, char** argv) {
   ZtextParagraph* p16 = NULL;
   ZtextParagraph* p32 = NULL;
   CHECK_OK(ztextParagraphCreate(mixed16, 6, ZTEXT_ENCODING_UTF16,
-                                ZTEXT_BASE_DIRECTION_AUTO, &p16));
+                                ZTEXT_BASE_DIRECTION_AUTO,
+                                ZTEXT_SEGMENTATION_ALL, &p16));
   CHECK_OK(ztextParagraphCreate(mixed32, 6, ZTEXT_ENCODING_UTF32,
-                                ZTEXT_BASE_DIRECTION_AUTO, &p32));
+                                ZTEXT_BASE_DIRECTION_AUTO,
+                                ZTEXT_SEGMENTATION_ALL, &p32));
   CHECK(ztextParagraphEncoding(p16) == ZTEXT_ENCODING_UTF16,
         "a UTF-16 paragraph should say so");
   CHECK(ztextParagraphLength(p16) == 6u && ztextParagraphLength(p32) == 6u,
@@ -1092,24 +1124,24 @@ int main(int argc, char** argv) {
                          &params) == ZTEXT_RESULT_INVALID_TEXT,
         "malformed UTF-8 should be refused by the shaper");
   CHECK(ztextParagraphCreate(bad_utf8, 2, ZTEXT_ENCODING_UTF8,
-                             ZTEXT_BASE_DIRECTION_AUTO,
+                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
                              &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
         "malformed UTF-8 should be refused by the bidi analyser");
   CHECK(ztextShaperShape(shaper, face, bad_utf16, 2, ZTEXT_ENCODING_UTF16, 0,
                          2, &params) == ZTEXT_RESULT_INVALID_TEXT,
         "an unpaired surrogate should be refused by the shaper");
   CHECK(ztextParagraphCreate(bad_utf16, 2, ZTEXT_ENCODING_UTF16,
-                             ZTEXT_BASE_DIRECTION_AUTO,
+                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
                              &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
         "an unpaired surrogate should be refused by the bidi analyser");
   CHECK(ztextParagraphCreate(bad_utf32, 2, ZTEXT_ENCODING_UTF32,
-                             ZTEXT_BASE_DIRECTION_AUTO,
+                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
                              &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
         "a value above U+10FFFF should be refused by the bidi analyser");
   // And an encoding this build does not name is an argument error rather
   // than text read as UTF-8.
   CHECK(ztextParagraphCreate("abc", 3, (ZtextEncoding)99,
-                             ZTEXT_BASE_DIRECTION_AUTO,
+                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
                              &paragraph) == ZTEXT_RESULT_INVALID_ARGUMENT,
         "an unknown encoding should be refused");
 

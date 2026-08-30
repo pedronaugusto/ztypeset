@@ -40,6 +40,18 @@ pub const Result = enum(c_int) {
 
 /// Which encoding a caller's text is in, and therefore what every offset and
 /// length beside it counts. See the "Text" section of `ffi/ztext.h`.
+/// One segmentation pass of `ztextParagraphCreate`'s `segmentation` mask.
+/// Singular for the same reason as `GlyphFlag`: the parameter holds any OR of
+/// these, not one of them.
+pub const Segmentation = enum(c_int) {
+    none = 0x0,
+    lines = 0x1,
+    graphemes = 0x2,
+    words = 0x4,
+    /// The OR of every pass above.
+    all = 0x7,
+};
+
 pub const Encoding = enum(c_int) {
     utf8 = 0,
     utf16 = 1,
@@ -350,6 +362,8 @@ pub const AbiLayout = extern struct {
     bitmap_format_last: u32,
     encoding_size: u32,
     encoding_last: u32,
+    segmentation_size: u32,
+    segmentation_last: u32,
     glyph_flag_size: u32,
     glyph_flag_last: u32,
     metric_size: u32,
@@ -522,6 +536,7 @@ pub extern fn ztextParagraphCreate(
     length: usize,
     encoding: Encoding,
     base: BaseDirection,
+    segmentation: u32,
     out: **Paragraph,
 ) Result;
 pub extern fn ztextParagraphDestroy(paragraph: ?*Paragraph) void;
@@ -529,6 +544,7 @@ pub extern fn ztextParagraphLength(paragraph: *const Paragraph) usize;
 pub extern fn ztextParagraphEncoding(paragraph: *const Paragraph) Encoding;
 pub extern fn ztextParagraphBaseLevel(paragraph: *const Paragraph) u8;
 pub extern fn ztextParagraphLevels(paragraph: *const Paragraph) ?[*]const u8;
+pub extern fn ztextParagraphSegmentation(paragraph: *const Paragraph) u32;
 pub extern fn ztextParagraphLineBreaks(paragraph: *const Paragraph) ?[*]const u8;
 pub extern fn ztextParagraphGraphemeBreaks(paragraph: *const Paragraph) ?[*]const u8;
 pub extern fn ztextParagraphWordBreaks(paragraph: *const Paragraph) ?[*]const u8;

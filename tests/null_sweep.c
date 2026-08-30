@@ -229,8 +229,11 @@ int main(int argc, char** argv) {
   //--------------------------------------------------------------------------
   ZtextParagraph* paragraph = NULL;
   REFUSES_OUT(ztextParagraphCreate("x", 1, ZTEXT_ENCODING_UTF8,
-                                   ZTEXT_BASE_DIRECTION_AUTO, NULL));
+                                   ZTEXT_BASE_DIRECTION_AUTO,
+                                   ZTEXT_SEGMENTATION_ALL, NULL));
   CHECK(ztextParagraphLength(NULL) == 0u, "length of NULL paragraph");
+  CHECK(ztextParagraphSegmentation(NULL) == ZTEXT_SEGMENTATION_NONE,
+        "segmentation of NULL paragraph");
   CHECK(ztextParagraphEncoding(NULL) == ZTEXT_ENCODING_UTF8,
         "encoding of NULL paragraph");
   CHECK(ztextParagraphBaseLevel(NULL) == 0u, "base level of NULL paragraph");
@@ -333,7 +336,7 @@ int main(int argc, char** argv) {
   REFUSES_OUT(ztextShaperExtents(shaper, face, NULL));
 
   if (ztextParagraphCreate("abc", 3, ZTEXT_ENCODING_UTF8,
-                           ZTEXT_BASE_DIRECTION_AUTO,
+                           ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
                            &paragraph) != ZTEXT_RESULT_OK) {
     printf("  FAIL could not create a paragraph\n");
     return 1;

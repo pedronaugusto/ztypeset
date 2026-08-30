@@ -21,7 +21,7 @@ pub fn main() !void {
     const shaper = try ztext.Shaper.init();
     defer shaper.deinit();
 
-    const paragraph = try ztext.Paragraph.init("a שלום b", .auto);
+    const paragraph = try ztext.Paragraph.init("a שלום b", .{});
     defer paragraph.deinit();
     if (paragraph.visualRuns().len != 3) return error.UnexpectedRunCount;
     // At least one per visual run; a run whose script changes mid-way splits

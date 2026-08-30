@@ -53,7 +53,7 @@ pub fn main() !void {
     const shaper = try ztext.Shaper.init();
     defer shaper.deinit();
 
-    const paragraph = try ztext.Paragraph.init(text, .auto);
+    const paragraph = try ztext.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     // shapingRuns, not visualRuns: one visual run can span several scripts, and
