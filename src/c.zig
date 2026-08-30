@@ -139,6 +139,8 @@ pub const BaseDirection = enum(c_int) {
 pub const RenderMode = enum(c_int) {
     a8 = 0,
     sdf = 1,
+    lcd = 2,
+    lcd_v = 3,
 };
 
 /// How the bytes of a `GlyphBitmap` are to be read. Separate from
@@ -146,6 +148,8 @@ pub const RenderMode = enum(c_int) {
 pub const BitmapFormat = enum(c_int) {
     a8 = 0,
     sdf = 1,
+    lcd = 2,
+    lcd_v = 3,
 };
 
 /// One bit of `Glyph.flags`. Singular for the same reason as `ZtextGlyphFlag`
@@ -261,6 +265,40 @@ pub const Charmap = extern struct {
     encoding: u32,
 };
 
+pub const Matrix = extern struct {
+    xx: f32,
+    xy: f32,
+    yx: f32,
+    yy: f32,
+};
+
+pub const LineCap = enum(c_int) {
+    butt = 0,
+    round = 1,
+    square = 2,
+};
+
+pub const LineJoin = enum(c_int) {
+    round = 0,
+    bevel = 1,
+    miter = 2,
+    miter_fixed = 3,
+};
+
+pub const StrokeStyle = enum(c_int) {
+    band = 0,
+    grown = 1,
+    shrunk = 2,
+};
+
+pub const Stroke = extern struct {
+    radius: f32,
+    miter_limit: f32,
+    cap: LineCap,
+    join: LineJoin,
+    style: StrokeStyle,
+};
+
 pub const VisualRun = extern struct {
     offset: u32,
     length: u32,
@@ -364,6 +402,10 @@ pub const AbiLayout = extern struct {
 
     charmap_size: u32,
     charmap_align: u32,
+    matrix_size: u32,
+    matrix_align: u32,
+    stroke_size: u32,
+    stroke_align: u32,
     visual_run_size: u32,
     visual_run_align: u32,
     script_run_size: u32,
@@ -392,6 +434,12 @@ pub const AbiLayout = extern struct {
     hinting_last: u32,
     bitmap_format_size: u32,
     bitmap_format_last: u32,
+    line_cap_size: u32,
+    line_cap_last: u32,
+    line_join_size: u32,
+    line_join_last: u32,
+    stroke_style_size: u32,
+    stroke_style_last: u32,
     encoding_size: u32,
     encoding_last: u32,
     segmentation_size: u32,
@@ -520,6 +568,11 @@ pub extern fn ztextFaceMetricWithFallback(
     metric: Metric,
     out: *f32,
 ) Result;
+pub extern fn ztextBitmapFormatChannels(format: BitmapFormat) u32;
+pub extern fn ztextFaceSetTransform(face: *Face, matrix: ?*const Matrix) Result;
+pub extern fn ztextFaceTransform(face: *const Face, out: *Matrix) Result;
+pub extern fn ztextFaceSetStroke(face: *Face, stroke: ?*const Stroke) Result;
+pub extern fn ztextFaceStroke(face: *const Face, out: *Stroke) Result;
 pub extern fn ztextFaceSetSyntheticBold(face: *Face, strength: f32) Result;
 pub extern fn ztextFaceSetSyntheticOblique(face: *Face, slant: f32) Result;
 pub extern fn ztextFaceRenderGlyph(

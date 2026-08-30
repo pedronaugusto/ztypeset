@@ -627,6 +627,11 @@ const char* ztextResultName(ZtextResult result) {
 // Generations
 //===----------------------------------------------------------------------===//
 
+int32_t ztextToFixed266(float pixels) {
+  if (!(pixels > 0.0f) || !(pixels <= 16384.0f)) return 0;
+  return (int32_t)(pixels * 64.0f + 0.5f);
+}
+
 uint64_t ztextNextGeneration(void) {
   // Not atomic, and does not need to be: a ZtextLibrary and its faces belong
   // to one thread, so two threads creating faces are creating them in

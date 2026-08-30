@@ -109,9 +109,10 @@ Measured on x86_64-windows, both the gnu and the MSVC ABI:
 | type | 0.1.0 | 0.2.0 | |
 |---|---|---|---|
 | `ZtextGlyph` | 24 B | 28 B | `flags` at offset 8, after `cluster` |
-| `ZtextGlyphBitmap` | 32 B | 40 B | `format` at offset 8, immediately after `pixels` — it has to be read before they are interpreted |
+| `ZtextGlyphBitmap` | 32 B | 40 B | `format` at offset 8, immediately after `pixels` — it has to be read before they are interpreted. `width`, `height` and `pitch` are unchanged in size and moved meaning: pixels and bytes-per-pixel-row, which are what they already were for A8 and SDF |
 | `ZtextCharmap` | — | 8 B | new: `platform_id`, `encoding_id`, `encoding` |
-| `ZtextAbiLayout` | 192 B | 248 B | `charmap_size`, `charmap_align`, `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `segmentation_size`, `segmentation_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
+| `ZtextMatrix` | — | 16 B | new: `xx`, `xy`, `yx`, `yy` |
+| `ZtextAbiLayout` | 192 B | 288 B | `charmap_size`, `charmap_align`, `matrix_size`, `matrix_align`, `stroke_size`, `stroke_align`, `line_cap_size`, `line_cap_last`, `line_join_size`, `line_join_last`, `stroke_style_size`, `stroke_style_last`, `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `encoding_size`, `encoding_last`, `segmentation_size`, `segmentation_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
 
 `ZtextMetric` reports a **count** rather than a last value, alone among the
 enums in the handshake: its enumerators are four-character OpenType tags, so
@@ -137,6 +138,77 @@ says.
   `ztextParagraphSegmentation` reports what ran, so an absent array is never
   mistaken for a text with no boundaries. A bit this build has no name for is
   `ZTEXT_RESULT_INVALID_ARGUMENT`, as an unknown encoding is.
+- **Subpixel rasterisation.** `ZTEXT_RENDER_MODE_LCD` and
+  `ZTEXT_RENDER_MODE_LCD_V`, with `ZTEXT_BITMAP_FORMAT_LCD` and
+  `ZTEXT_BITMAP_FORMAT_LCD_V` to read the result, and
+  `ztextBitmapFormatChannels` for the bytes per pixel. Zig: `.lcd`, `.lcd_v`
+  and `ztext.bitmapChannels`.
+
+  FreeType renders these in **Harmony** mode in this build -- three coverage
+  samples a third of a pixel apart -- because
+  `FT_CONFIG_OPTION_SUBPIXEL_RENDERING` is off, upstream's default. That is a
+  compile-time choice in FreeType, not a runtime one, so `FT_Library_SetLcdFilter`
+  is deliberately not exposed: in this configuration it returns
+  `FT_Err_Unimplemented_Feature`, and an entry point that can only fail is
+  worse than none.
+
+  `ZtextGlyphBitmap.width` and `height` are in **pixels** in every format, and
+  `pitch` is bytes per pixel row, so `pitch * height` is the buffer's size
+  everywhere. FreeType counts an LCD bitmap's width in samples and an LCD_V
+  bitmap's height in sub-rows; passing either number through would have made
+  `width` mean one thing for two formats and another for a third. Normal
+  hinting now targets the grid the glyph will be sampled on
+  (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
+  unchanged.
+- **A pen traced round every glyph.** `ztextFaceSetStroke(face, const
+  ZtextStroke*)` and `ztextFaceStroke`, with `ZtextStroke` carrying a `radius`
+  in pixels, a `miter_limit`, and a `ZtextLineCap`, `ZtextLineJoin` and
+  `ZtextStrokeStyle` -- the glyph `GROWN` by the radius, the glyph `SHRUNK`
+  by it, or the hollow `BAND` the pen sweeps between them, each named for the
+  picture it produces rather than for the FreeType border it comes from. NULL or a zero radius clears it, and a face is created
+  with none. Zig: `Face.setStroke`, `Face.stroke`, `ztext.Stroke`,
+  `ztext.stroke_none` and `ztext.outline(radius)`.
+
+  Outlined text was not reachable at all: FreeType's stroker lives in
+  `ftstroke.c`, which this build did not compile, and `ftstroke.h` was
+  therefore not installed either. Both now are, and `ci/header-link.sh` is
+  what proves the header and its implementation arrived together.
+
+  Three decisions in it. The radius is in PIXELS where synthetic bold's
+  strength is a fraction of the em, because a weight is a property of the
+  design and has to hold across sizes while a pen is an ornament drawn for a
+  display -- and pixels are also FreeType's own unit for `FT_Stroker_Set`.
+  Composition is fixed at design, then ornament, then map: synthetic bold and
+  oblique, then the pen, then the face's matrix, so the pen traces the glyph
+  the font describes and is not widened by the emboldening or turned into a
+  device-space pen by the matrix. And no advance moves, as in FreeType's own
+  `FT_Glyph_Stroke`: a stroked glyph is wider than its ink box by the radius
+  on each side, and the run is still laid out on the font's advances -- which
+  also means setting a pen stales no shaped measurement.
+
+  A cap, join or style this build does not name is
+  `ZTEXT_RESULT_INVALID_ARGUMENT` rather than a silent fallback, and so is a
+  radius too large for the 26.6 fixed point it is converted to, which would
+  otherwise read as "no pen".
+- **A 2x2 transform per face.** `ztextFaceSetTransform(face, const ZtextMatrix*)`
+  and `ztextFaceTransform`, with `ZtextMatrix` holding `xx`, `xy`, `yx`, `yy`
+  as floats, y up. NULL clears it, and a face is created with the identity.
+  Zig: `Face.setTransform`, `Face.transform`, `ztext.Matrix`,
+  `ztext.matrix_identity`, and `ztext.rotation`, `ztext.scaling`,
+  `ztext.shear` as builders.
+
+  FreeType's `FT_Set_Transform` had no way through the API, so a rotated or
+  mirrored glyph was not reachable at all. Two things about this one are
+  decisions rather than transcription. It is applied AFTER any synthetic bold
+  or oblique, so emboldening stays isotropic in the font's own space instead of
+  being stretched by the caller's map -- upstream has no opinion, because
+  upstream applies its transform at load and its synthesis afterwards. And it
+  reaches the glyph IMAGE and no advance, where `FT_Set_Transform` transforms
+  the advance too: a shaped run's advances come from HarfBuzz, which has no
+  matrix to be told about, so transforming FreeType's and not HarfBuzz's would
+  make the two disagree by exactly the caller's matrix. There is also no
+  translation term, because `ztextFaceRenderGlyph`'s `offset_x`/`offset_y`
+  already is one.
 - **Which character map a font uses is now a choice.** `ztextFontCharmapCount`,
   `ztextFontCharmap`, `ztextFontActiveCharmap`, `ztextFontSelectCharmap` and
   `ztextFontSelectCharmapEncoding`, with `ZtextCharmap` carrying the

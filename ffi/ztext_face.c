@@ -511,6 +511,23 @@ void ztextFaceActivate(const ZtextFace* face) {
 }
 
 static void destroyFaceParts(ZtextFace* face) {
+  if (face->stroker != NULL) {
+    FT_Stroker_Done(face->stroker);
+    face->stroker = NULL;
+  }
+  if (face->stroked_points != 0u) {
+    // The font's shared glyph slot may still be borrowing this outline; see
+    // applyStroke. FT_Load_Glyph reassigns it before anything reads it, so
+    // this is belt and braces -- but a freed pointer left reachable is a
+    // freed pointer left reachable.
+    FT_GlyphSlot slot = face->font->ft != NULL ? face->font->ft->glyph : NULL;
+    if (slot != NULL && slot->outline.points == face->stroked.points) {
+      memset(&slot->outline, 0, sizeof(slot->outline));
+    }
+    FT_Outline_Done(face->font->library->ft, &face->stroked);
+    face->stroked_points = 0u;
+    face->stroked_contours = 0u;
+  }
   if (face->hb_ft_font != NULL) {
     hb_font_destroy(face->hb_ft_font);
     face->hb_ft_font = NULL;
@@ -545,6 +562,10 @@ ZtextResult ztextFaceCreate(ZtextFont* font, float width, float height,
   if (face == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
   memset(face, 0, sizeof(*face));
   face->font = font;
+  // The one field whose zero is not its default: an all-zero matrix collapses
+  // every glyph to a point.
+  face->transform.xx = 1.0f;
+  face->transform.yy = 1.0f;
 
   const FT_Error error = FT_New_Size(font->ft, &face->ft_size);
   if (error != FT_Err_Ok) {
@@ -610,14 +631,6 @@ ZtextFont* ztextFaceFont(const ZtextFace* face) {
   return face == NULL ? NULL : face->font;
 }
 
-/// Pixels to FreeType's 26.6, rounded to nearest. Returns 0 for anything
-/// out of range, including NaN -- so the comparisons are written
-/// positively rather than as negated bounds.
-static int32_t toFixed266(float pixels) {
-  if (!(pixels > 0.0f) || !(pixels <= 16384.0f)) return 0;
-  return (int32_t)(pixels * 64.0f + 0.5f);
-}
-
 /// Pushes a validated 26.6 size at FreeType and at HarfBuzz.
 ///
 /// Separate from ztextFaceSetPixelSize because ztextFontSetVariations has to
@@ -675,8 +688,8 @@ ZtextResult ztextFaceSetPixelSize(ZtextFace* face, float width, float height) {
 
   // Rejects zero, negatives, NaN, infinity, anything above 16384 px, and
   // anything so small it would quantise to nothing.
-  const int32_t fixed_width = toFixed266(width);
-  const int32_t fixed_height = toFixed266(height);
+  const int32_t fixed_width = ztextToFixed266(width);
+  const int32_t fixed_height = ztextToFixed266(height);
   if (fixed_width == 0 || fixed_height == 0) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }

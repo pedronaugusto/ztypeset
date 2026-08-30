@@ -176,6 +176,10 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
 
   out->charmap_size = (uint32_t)sizeof(ZtextCharmap);
   out->charmap_align = (uint32_t)_Alignof(ZtextCharmap);
+  out->matrix_size = (uint32_t)sizeof(ZtextMatrix);
+  out->matrix_align = (uint32_t)_Alignof(ZtextMatrix);
+  out->stroke_size = (uint32_t)sizeof(ZtextStroke);
+  out->stroke_align = (uint32_t)_Alignof(ZtextStroke);
 
   out->visual_run_size = (uint32_t)sizeof(ZtextVisualRun);
   out->visual_run_align = (uint32_t)_Alignof(ZtextVisualRun);
@@ -208,11 +212,17 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->base_direction_size = (uint32_t)sizeof(ZtextBaseDirection);
   out->base_direction_last = (uint32_t)ZTEXT_BASE_DIRECTION_RTL;
   out->render_mode_size = (uint32_t)sizeof(ZtextRenderMode);
-  out->render_mode_last = (uint32_t)ZTEXT_RENDER_MODE_SDF;
+  out->render_mode_last = (uint32_t)ZTEXT_RENDER_MODE_LCD_V;
   out->hinting_size = (uint32_t)sizeof(ZtextHinting);
   out->hinting_last = (uint32_t)ZTEXT_HINTING_NONE;
   out->bitmap_format_size = (uint32_t)sizeof(ZtextBitmapFormat);
-  out->bitmap_format_last = (uint32_t)ZTEXT_BITMAP_FORMAT_SDF;
+  out->bitmap_format_last = (uint32_t)ZTEXT_BITMAP_FORMAT_LCD_V;
+  out->line_cap_size = (uint32_t)sizeof(ZtextLineCap);
+  out->line_cap_last = (uint32_t)ZTEXT_LINE_CAP_SQUARE;
+  out->line_join_size = (uint32_t)sizeof(ZtextLineJoin);
+  out->line_join_last = (uint32_t)ZTEXT_LINE_JOIN_MITER_FIXED;
+  out->stroke_style_size = (uint32_t)sizeof(ZtextStrokeStyle);
+  out->stroke_style_last = (uint32_t)ZTEXT_STROKE_STYLE_SHRUNK;
   out->encoding_size = (uint32_t)sizeof(ZtextEncoding);
   out->encoding_last = (uint32_t)ZTEXT_ENCODING_UTF32;
   out->segmentation_size = (uint32_t)sizeof(ZtextSegmentation);

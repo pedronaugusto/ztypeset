@@ -107,15 +107,25 @@
  *   TT_CONFIG_OPTION_GX_VAR_SUPPORT   on. Variable fonts, no extra dependency.
  *
  *   FT_CONFIG_OPTION_SUBPIXEL_RENDERING
- *                                     off, which is upstream's default. This is
- *                                     the ClearType-style LCD filter; the
- *                                     Microsoft patents that once shadowed it
- *                                     have expired, so this is a technical
- *                                     choice and not a legal one -- ztext
- *                                     produces A8 coverage and SDF, neither of
- *                                     which is subpixel, and an engine that
- *                                     wants LCD filtering wants it in its own
- *                                     shader against its own subpixel layout.
+ *                                     off, which is upstream's default.
+ *
+ * The second one is not "no LCD". FreeType has TWO subpixel implementations
+ * and this macro chooses between them: with it OFF, FT_RENDER_MODE_LCD renders
+ * in HARMONY mode -- three coverage samples a third of a pixel apart, one per
+ * stripe -- and with it ON, FreeType renders once at triple width and runs a
+ * ClearType-style FIR filter over the result, which the caller must select
+ * with FT_Library_SetLcdFilter or get colour fringing.
+ *
+ * ztext exposes ZTEXT_RENDER_MODE_LCD and ZTEXT_RENDER_MODE_LCD_V, so both
+ * paths reach a consumer either way. Harmony is chosen because it needs no
+ * filter to be selected, has no filter to be selected WRONGLY, and produces no
+ * fringing of its own. The Microsoft patents that once shadowed the filtered
+ * path have expired, so this is a technical choice and not a legal one.
+ *
+ * It is a COMPILE-time choice in FreeType, not a runtime one, which is why
+ * ztext does not offer both and does not expose FT_Library_SetLcdFilter: in
+ * this configuration that function returns FT_Err_Unimplemented_Feature, and
+ * an entry point that can only fail is worse than none.
  */
 
 #endif /* ZTEXT_FTOPTION_H_ */
