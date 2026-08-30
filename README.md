@@ -523,7 +523,7 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-95 tests. The ones that touch a face, a shaper or a paragraph install
+96 tests. The ones that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
 fails the test; the rest check tags, versions and the ABI and allocate nothing.
 

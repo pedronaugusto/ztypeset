@@ -36,9 +36,18 @@ fail() { printf '%s%s%s\n' "$RED" "$1" "$OFF" >&2; status=1; }
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 
-# verify <name> <local-dir> <url> <tag> <commit> <exclude-args...> -- <paths...>
+# src/pins.zig is the single home for what libs/ holds. The url, tag and commit
+# used to be written both there and in this file, with nothing comparing them.
+# shellcheck source=ci/pins.sh
+. ci/pins.sh
+
+# verify <name> <local-dir> <exclude-args...> -- <paths...>
 verify() {
-  local name="$1" local_dir="$2" url="$3" tag="$4" commit="$5"; shift 5
+  local name="$1" local_dir="$2"; shift 2
+  local url tag commit
+  url=$(pin "$name" url)
+  tag=$(pin "$name" tag)
+  commit=$(pin "$name" commit)
   local excludes=() paths=()
   while [ "$1" != "--" ]; do excludes+=("$1"); shift; done
   shift
@@ -99,26 +108,18 @@ verify() {
 
 # Exclusions are documented in UPSTREAM.md under "What was excluded, and why".
 verify freetype libs/freetype \
-  https://gitlab.freedesktop.org/freetype/freetype.git \
-  VER-2-14-3 0a0221a1347e2f1e07c395263540026e9a0aa7c7 \
   -x tools -- include src LICENSE.TXT README docs/FTL.TXT docs/GPLv2.TXT
 
 verify harfbuzz libs/harfbuzz \
-  https://github.com/harfbuzz/harfbuzz.git \
-  14.3.1 ab5ecbb83985034a76214ac0b2b833dcd590d774 \
   -x __pycache__ -- src COPYING AUTHORS THANKS
 
 verify sheenbidi libs/sheenbidi \
-  https://github.com/Tehreer/SheenBidi.git \
-  v3.0.0 cfe430e7375a7845b679adae9d51dac6deaa8858 \
   -- Headers Source LICENSE README.md
 
 # The excludes here are upstream's generators, its conformance-test data and
 # its own build files -- everything that is not a translation unit ztext
 # compiles. They are listed in UPSTREAM.md; keep the two in step.
 verify libunibreak libs/libunibreak \
-  https://github.com/adah1972/libunibreak.git \
-  libunibreak_7_0 3ce4bfa3129ff3738046a44a6db533d2ce25af2b \
   -x 'generate_*.py' -x unicode_data_property.py -x '*.sed' -x '*.tmpl' \
   -x '*Test.txt' -x 'Makefile.*' -x tests.c -x test_skips.h \
   -- src LICENCE README.md

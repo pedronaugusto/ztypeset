@@ -5,7 +5,7 @@
 | | FreeType | HarfBuzz | SheenBidi | libunibreak |
 |---|---|---|---|---|
 | Source | <https://gitlab.freedesktop.org/freetype/freetype> | <https://github.com/harfbuzz/harfbuzz> | <https://github.com/Tehreer/SheenBidi> | <https://github.com/adah1972/libunibreak> |
-| Version | 2.14.3 | 14.3.1 | 3.0.0 | 7.0 |
+| Version | 2.14.3 | 14.3.1 | 3.0.0 | 7.0.0 |
 | Tag | `VER-2-14-3` | `14.3.1` | `v3.0.0` | `libunibreak_7_0` |
 | Commit | `0a0221a1347e2f1e07c395263540026e9a0aa7c7` | `ab5ecbb83985034a76214ac0b2b833dcd590d774` | `cfe430e7375a7845b679adae9d51dac6deaa8858` | `3ce4bfa3129ff3738046a44a6db533d2ce25af2b` |
 | Licence | **FTL** (see below) | Old MIT | Apache-2.0 | zlib |
