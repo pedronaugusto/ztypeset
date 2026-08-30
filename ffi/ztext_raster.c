@@ -131,7 +131,11 @@ static ZtextResult copyBitmap(ZtextFace* face, const FT_Bitmap* bitmap,
   if (width == 0u || height == 0u) return ZTEXT_RESULT_OK;
 
   const size_t row_bytes = (size_t)width;
-  if (!ztextArrayReserve(&face->bitmap, row_bytes * (size_t)height, 1u)) {
+  // The face's own allocator, which is its library's: a glyph buffer is part
+  // of the face, and a handle's memory does not depend on what happened to be
+  // installed the first time it drew something.
+  if (!ztextArrayReserve(ztextAllocatorOf(face), &face->bitmap,
+                         row_bytes * (size_t)height, 1u)) {
     return ZTEXT_RESULT_OUT_OF_MEMORY;
   }
   unsigned char* dst = (unsigned char*)face->bitmap.data;

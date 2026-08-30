@@ -3541,3 +3541,50 @@ test "handles have no destruction order: a library may go before its fonts" {
     face.deinit();
     font.deinit();
 }
+
+test "a face's glyph buffer belongs to its library, not to whatever is installed" {
+    // The allocator seam has two halves. Which allocator FREES a block was
+    // already settled -- the block's header names it -- and a test above
+    // covers it. This is the other half: which allocator MAKES it.
+    //
+    // A face's glyph buffer is the sharp case. It is allocated lazily, the
+    // first time something is drawn, which can be long after the face was
+    // made and under a completely different allocator. Charging it there
+    // would put one handle's memory in two heaps, and the only symptom would
+    // be a host's own accounting quietly not adding up.
+    var first_state: std.heap.DebugAllocator(.{ .enable_memory_limit = true }) = .init;
+    var second_state: std.heap.DebugAllocator(.{ .enable_memory_limit = true }) = .init;
+    const first = first_state.allocator();
+    const second = second_state.allocator();
+
+    ztext.warmup();
+    try warmProcessCaches();
+
+    try ztext.setAllocator(&first);
+    const library = try ztext.Library.init();
+    const font = try library.createFont(fonts.latin, 0);
+    const face = try font.face(0, 32);
+
+    // Everything from here is nominally the second allocator's.
+    try ztext.setAllocator(&second);
+    const before_first = first_state.total_requested_bytes;
+    const before_second = second_state.total_requested_bytes;
+
+    const glyph = font.glyphIndex('g');
+    const bitmap = try face.renderGlyph(glyph, .a8, .normal, 0, 0);
+    try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
+
+    // Rendering is FreeType and ztext and nothing else -- no HarfBuzz call is
+    // reachable from here -- so the second allocator must not have been asked
+    // for a single byte, and the first must have been asked for the buffer.
+    try std.testing.expectEqual(before_second, second_state.total_requested_bytes);
+    try std.testing.expect(first_state.total_requested_bytes > before_first);
+
+    face.deinit();
+    font.deinit();
+    library.deinit();
+
+    ztext.resetAllocator();
+    try std.testing.expectEqual(std.heap.Check.ok, first_state.deinit());
+    try std.testing.expectEqual(std.heap.Check.ok, second_state.deinit());
+}

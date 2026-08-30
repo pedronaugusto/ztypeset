@@ -31,12 +31,14 @@ static SBLevel toSbBaseLevel(ZtextBaseDirection base) {
 }
 
 /// Copies one SBLine's runs out, in visual order.
-static ZtextResult runsFromLine(SBLineRef line, ZtextArray* out) {
+static ZtextResult runsFromLine(ZtextAllocatorId owner, SBLineRef line,
+                                ZtextArray* out) {
   const SBUInteger run_count = SBLineGetRunCount(line);
   if (run_count == 0u) return ZTEXT_RESULT_OK;
 
   const SBRun* runs = SBLineGetRunsPtr(line);
-  if (!ztextArrayReserve(out, (size_t)run_count, sizeof(ZtextVisualRun))) {
+  if (!ztextArrayReserve(owner, out, (size_t)run_count,
+                         sizeof(ZtextVisualRun))) {
     return ZTEXT_RESULT_OUT_OF_MEMORY;
   }
 
@@ -61,7 +63,8 @@ static ZtextResult collectScriptRuns(ZtextParagraph* paragraph,
   ZtextResult result = ZTEXT_RESULT_OK;
   const SBScriptAgent* agent = SBScriptLocatorGetAgent(locator);
   while (SBScriptLocatorMoveNext(locator) != SBFalse) {
-    if (!ztextArrayReserve(&paragraph->script_runs,
+    if (!ztextArrayReserve(ztextAllocatorOf(paragraph),
+                           &paragraph->script_runs,
                            paragraph->script_runs.count + 1u,
                            sizeof(ZtextScriptRun))) {
       result = ZTEXT_RESULT_OUT_OF_MEMORY;
@@ -97,7 +100,8 @@ static ZtextResult collectScriptRuns(ZtextParagraph* paragraph,
 /// Script runs are paragraph-wide and are clipped to each visual run here,
 /// which is what lets a line reuse the paragraph's list unchanged: where the
 /// text wraps changes the visual runs, never the scripts.
-static ZtextResult intersectRuns(const ZtextVisualRun* visual,
+static ZtextResult intersectRuns(ZtextAllocatorId owner,
+                                 const ZtextVisualRun* visual,
                                  size_t visual_count,
                                  const ZtextScriptRun* scripts,
                                  size_t script_count, ZtextArray* out) {
@@ -119,7 +123,8 @@ static ZtextResult intersectRuns(const ZtextVisualRun* visual,
     // A paragraph with no script runs at all still has to produce something
     // shapeable, so the visual run passes through with an undetermined script.
     if (first == script_count) {
-      if (!ztextArrayReserve(out, out->count + 1u, sizeof(ZtextShapingRun))) {
+      if (!ztextArrayReserve(owner, out, out->count + 1u,
+                             sizeof(ZtextShapingRun))) {
         return ZTEXT_RESULT_OUT_OF_MEMORY;
       }
       ZtextShapingRun* dst = (ZtextShapingRun*)out->data;
@@ -139,7 +144,8 @@ static ZtextResult intersectRuns(const ZtextVisualRun* visual,
       if (end > run_end) end = run_end;
       if (end <= start) continue;
 
-      if (!ztextArrayReserve(out, out->count + 1u, sizeof(ZtextShapingRun))) {
+      if (!ztextArrayReserve(owner, out, out->count + 1u,
+                             sizeof(ZtextShapingRun))) {
         return ZTEXT_RESULT_OUT_OF_MEMORY;
       }
       ZtextShapingRun* dst = (ZtextShapingRun*)out->data;
@@ -158,7 +164,8 @@ static ZtextResult intersectRuns(const ZtextVisualRun* visual,
 /// paragraph's scripts. This is the whole of both ztextParagraphCreateUtf8's
 /// run collection and ztextLineCreate's -- the difference between them is
 /// only which range is asked for.
-static ZtextResult runsForRange(SBParagraphRef sb_paragraph, size_t offset,
+static ZtextResult runsForRange(ZtextAllocatorId owner,
+                                SBParagraphRef sb_paragraph, size_t offset,
                                 size_t length, const ZtextScriptRun* scripts,
                                 size_t script_count, ZtextArray* visual_out,
                                 ZtextArray* shaping_out) {
@@ -171,11 +178,11 @@ static ZtextResult runsForRange(SBParagraphRef sb_paragraph, size_t offset,
   // failure rather than a rejected range.
   if (line == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
 
-  ZtextResult result = runsFromLine(line, visual_out);
+  ZtextResult result = runsFromLine(owner, line, visual_out);
   SBLineRelease(line);
   if (result != ZTEXT_RESULT_OK) return result;
 
-  return intersectRuns((const ZtextVisualRun*)visual_out->data,
+  return intersectRuns(owner, (const ZtextVisualRun*)visual_out->data,
                        visual_out->count, scripts, script_count, shaping_out);
 }
 
@@ -331,7 +338,8 @@ ZtextResult ztextParagraphCreateUtf8(const char* text, size_t length,
   ZtextResult result = collectScriptRuns(paragraph, &paragraph_sequence);
 
   if (result == ZTEXT_RESULT_OK) {
-    result = runsForRange(paragraph->sb_paragraph, 0u, (size_t)actual_length,
+    result = runsForRange(ztextAllocatorOf(paragraph), paragraph->sb_paragraph,
+                          0u, (size_t)actual_length,
                           (const ZtextScriptRun*)paragraph->script_runs.data,
                           paragraph->script_runs.count, &paragraph->visual_runs,
                           &paragraph->shaping_runs);
@@ -353,9 +361,10 @@ void ztextParagraphDestroy(ZtextParagraph* paragraph) {
   }
   ztextFree(paragraph->breaks);
   ztextFree(paragraph->text);
-  ztextArrayFree(&paragraph->visual_runs, sizeof(ZtextVisualRun));
-  ztextArrayFree(&paragraph->script_runs, sizeof(ZtextScriptRun));
-  ztextArrayFree(&paragraph->shaping_runs, sizeof(ZtextShapingRun));
+  const ZtextAllocatorId owner = ztextAllocatorOf(paragraph);
+  ztextArrayFree(owner, &paragraph->visual_runs, sizeof(ZtextVisualRun));
+  ztextArrayFree(owner, &paragraph->script_runs, sizeof(ZtextScriptRun));
+  ztextArrayFree(owner, &paragraph->shaping_runs, sizeof(ZtextShapingRun));
   ztextFree(paragraph);
 }
 
@@ -492,7 +501,7 @@ ZtextResult ztextLineCreate(const ZtextParagraph* paragraph, size_t offset,
   }
 
   const ZtextResult result = runsForRange(
-      paragraph->sb_paragraph, offset, length,
+      ztextAllocatorOf(line), paragraph->sb_paragraph, offset, length,
       (const ZtextScriptRun*)paragraph->script_runs.data,
       paragraph->script_runs.count, &line->visual_runs, &line->shaping_runs);
   if (result != ZTEXT_RESULT_OK) {
@@ -506,8 +515,9 @@ ZtextResult ztextLineCreate(const ZtextParagraph* paragraph, size_t offset,
 
 void ztextLineDestroy(ZtextLine* line) {
   if (line == NULL) return;
-  ztextArrayFree(&line->visual_runs, sizeof(ZtextVisualRun));
-  ztextArrayFree(&line->shaping_runs, sizeof(ZtextShapingRun));
+  const ZtextAllocatorId owner = ztextAllocatorOf(line);
+  ztextArrayFree(owner, &line->visual_runs, sizeof(ZtextVisualRun));
+  ztextArrayFree(owner, &line->shaping_runs, sizeof(ZtextShapingRun));
   ztextFree(line);
 }
 

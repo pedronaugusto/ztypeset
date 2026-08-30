@@ -307,6 +307,16 @@ case_ "a font released without telling the library that owns it" \
   releaseLibrary(library);" \
   ""
 
+# The other half of the allocator seam: which allocator MAKES a block. A face's
+# glyph buffer is allocated lazily, long after the face, so charging it to
+# whatever is installed at that moment splits one handle across two heaps --
+# with no crash, no leak, and nothing but a host's own accounting to notice.
+case_ "a glyph buffer charged to whatever is installed" \
+  ffi/ztext_raster.c \
+  "belongs to its library" \
+  "ztextAllocatorOf(face)" \
+  "ZTEXT_ALLOCATOR_ANY"
+
 printf '\n%sHinting%s %s(ffi/ztext_ftoption.h, and the warm-up it needs)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

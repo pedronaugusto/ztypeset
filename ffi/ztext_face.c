@@ -275,8 +275,13 @@ ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library, const void* data,
     return ZTEXT_RESULT_UNSUPPORTED;
   }
 
-  // From the library's allocator, not the process-wide one, so everything a
-  // font owns lives and dies with the same allocator its FT_Face memory does.
+  // From the library's allocator, not the process-wide one. Every block ztext
+  // itself allocates for a handle comes from the allocator that issued that
+  // handle -- the font struct here, its axis arrays, and a face's glyph buffer
+  // -- so a font's memory does not depend on what was installed at the moment
+  // some later call happened to grow something. What ztext cannot place this
+  // way is HarfBuzz's own memory, whose seam is compile-time and process-wide;
+  // see ztextSetAllocator in ztext.h for the split and why it stops here.
   ZtextFont* font = (ZtextFont*)ztextAllocFrom(
       library->allocator, sizeof(ZtextFont), ZTEXT_DEFAULT_ALIGN);
   if (font == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
@@ -467,7 +472,7 @@ static void destroyFaceParts(ZtextFace* face) {
     FT_Done_Size(face->ft_size);
     face->ft_size = NULL;
   }
-  ztextArrayFree(&face->bitmap, 1u);
+  ztextArrayFree(ztextAllocatorOf(face), &face->bitmap, 1u);
 }
 
 ZtextResult ztextFaceCreate(ZtextFont* font, float width, float height,

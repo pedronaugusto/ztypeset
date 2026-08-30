@@ -91,6 +91,11 @@ fn deallocate(
 /// Process-wide, because HarfBuzz's seam is compile-time and cannot be
 /// anything else. Call `warmup()` first if you intend to audit this
 /// allocator's balance.
+///
+/// Which of two installed allocators a given block comes from is stated in
+/// full beside `ztextSetAllocator` in `ffi/ztext.h`: handle-owned memory
+/// follows the handle, HarfBuzz's follows whatever is installed when it
+/// asks.
 pub fn setAllocator(gpa: *const std.mem.Allocator) err.Error!void {
     const bridge = c.Allocator{
         .allocate = allocate,

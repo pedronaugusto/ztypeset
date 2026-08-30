@@ -395,6 +395,10 @@ void* ztextRealloc(void* block, size_t new_size, size_t alignment) {
 
 void ztextFree(void* block) { ztextFreeFrom(ZTEXT_ALLOCATOR_ANY, block); }
 
+ZtextAllocatorId ztextAllocatorOf(void* block) {
+  return checkedHeaderOf(block, ZTEXT_ALLOCATOR_ANY)->allocator;
+}
+
 //===----------------------------------------------------------------------===//
 // FreeType's seam
 //
@@ -780,7 +784,8 @@ bool ztextSplitsUtf8Character(const char* text, size_t length, size_t index) {
 // Growable array
 //===----------------------------------------------------------------------===//
 
-bool ztextArrayReserve(ZtextArray* array, size_t count, size_t element_size) {
+bool ztextArrayReserve(ZtextAllocatorId owner, ZtextArray* array, size_t count,
+                       size_t element_size) {
   if (count <= array->capacity) return true;
 
   size_t capacity = array->capacity == 0u ? 16u : array->capacity;
@@ -790,8 +795,8 @@ bool ztextArrayReserve(ZtextArray* array, size_t count, size_t element_size) {
   }
   if (capacity > SIZE_MAX / element_size) return false;
 
-  void* grown = ztextRealloc(array->data, capacity * element_size,
-                             ZTEXT_DEFAULT_ALIGN);
+  void* grown = ztextReallocFrom(owner, array->data, capacity * element_size,
+                                 ZTEXT_DEFAULT_ALIGN);
   if (grown == NULL) return false;
 
   array->data = grown;
@@ -799,9 +804,10 @@ bool ztextArrayReserve(ZtextArray* array, size_t count, size_t element_size) {
   return true;
 }
 
-void ztextArrayFree(ZtextArray* array, size_t element_size) {
+void ztextArrayFree(ZtextAllocatorId owner, ZtextArray* array,
+                    size_t element_size) {
   (void)element_size;
-  ztextFree(array->data);
+  ztextFreeFrom(owner, array->data);
   array->data = NULL;
   array->count = 0u;
   array->capacity = 0u;

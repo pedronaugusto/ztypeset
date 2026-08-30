@@ -260,6 +260,31 @@ typedef struct ZtextAllocator {
 /// was not true before: one handle could span two heaps, with nothing that
 /// could tell you.
 ///
+/// WHICH allocator makes a block is the other half of the rule, and it has
+/// two cases because the upstreams offer two kinds of seam:
+///
+///   * Everything ztext and FreeType allocate FOR A HANDLE comes from the
+///     allocator that issued the handle. A font's struct, its axis arrays, a
+///     face's FT_Size, and the buffer a face keeps its rendered glyph in are
+///     all their library's memory -- whatever is installed at the moment they
+///     are first created or grown. FreeType's seam takes an FT_Memory per
+///     library, and ztext's own takes the allocator read back from the
+///     handle's own block header, so neither depends on the current global.
+///   * Everything HARFBUZZ allocates comes from whatever is installed when it
+///     asks. Its seam is a compile-time pair of functions with no context
+///     argument, so there is nothing for per-handle routing to hang on: an
+///     hb_font_t built after a swap belongs to the new allocator, and is
+///     freed back to it. SheenBidi's seam is the same shape.
+///
+/// A ZtextShaper, ZtextParagraph and ZtextLine own no library, so the first
+/// rule places their memory too -- with the allocator that issued the handle
+/// simply being the one installed at the time.
+///
+/// The consequence worth stating: a host that gives each of its subsystems an
+/// allocator gets a font's FreeType and ztext memory attributed to the
+/// subsystem that made the LIBRARY, and its HarfBuzz memory attributed to
+/// whichever subsystem happened to make the face.
+///
 /// Installing the same allocator twice reuses its entry. A distinct one costs
 /// a single ZtextAllocator, allocated with malloc and never freed, because it
 /// must outlive the last block it issued. That is the only allocation ztext
