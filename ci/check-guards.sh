@@ -17,7 +17,8 @@
 #
 # Usage:
 #   ci/check-guards.sh              # every case
-#   ci/check-guards.sh <pattern>    # only cases whose name matches
+#   ci/check-guards.sh <regex>      # only cases whose name matches, e.g.
+#                                   #   ci/check-guards.sh 'enum:|struct:'
 #
 # Slow by nature: each case is a full rebuild of the ztext library plus the
 # suite. It is a separate step from ci/run.sh for that reason.
@@ -38,7 +39,18 @@ FAILED=0
 FAILED_NAMES=()
 
 WORK=$(mktemp -d)
-trap 'rm -rf "$WORK"' EXIT
+# The working copy goes; the failure logs under it do not, or the evidence for
+# a red case dies with the run that produced it.
+cleanup() {
+  if [ "${FAILED:-0}" -gt 0 ] && [ -d "$WORK/failures" ]; then
+    keep="${TMPDIR:-/tmp}/ztext-guard-failures.$$"
+    if mkdir -p "$keep" && cp "$WORK/failures/"*.log "$keep/" 2>/dev/null; then
+      printf '\nfailure logs kept in %s\n' "$keep" >&2
+    fi
+  fi
+  rm -rf "$WORK"
+}
+trap cleanup EXIT
 
 # A pristine copy, reused by every case: only the mutated file is restored
 # between them, so the build cache survives and a run takes minutes not hours.
@@ -47,6 +59,30 @@ mkdir -p "$WORK/tree"
 tar -cf - --exclude .git --exclude .zig-cache --exclude zig-out \
     --exclude tests/consumer/.zig-cache --exclude tests/consumer/zig-out . |
   tar -xf - -C "$WORK/tree"
+
+# The verdict matcher, checked before anything is judged by it.
+#
+# The bug this replaced was invisible for exactly one reason: a matcher that
+# silently fails to match is indistinguishable from a mutation that was not
+# caught, and "not caught" is a plausible answer. `grep -q` exits on its first
+# match, the printf feeding it takes SIGPIPE, and under `set -o pipefail` the
+# pipeline reports 141 -- so the longer the build output and the earlier the
+# match, the more often a caught mutation was reported as a hole in the suite.
+#
+# This is the shape that broke: a match at the very front of an output far
+# larger than a pipe buffer.
+selftest_matcher() {
+  local needle='the-line-that-must-be-found'
+  local haystack
+  haystack="$needle"$'\n'$(head -c 200000 /dev/zero | tr '\0' 'x')
+  if ! [[ "$haystack" == *"$needle"* ]]; then
+    printf '%sthe verdict matcher cannot see a match at the front of a large output;%s\n' \
+      "$RED" "$OFF" >&2
+    printf '  every "caught" and every "wrong failure" below would be unsound.\n' >&2
+    exit 1
+  fi
+}
+selftest_matcher
 
 # Warm the cache once, and refuse to go on if the unmutated tree is not green:
 # every assertion below is "this test fails", which means nothing if some test
@@ -58,6 +94,24 @@ if ! (cd "$WORK/tree" && zig build test > "$WORK/baseline.log" 2>&1); then
   exit 1
 fi
 
+LOGDIR="$WORK/failures"
+mkdir -p "$LOGDIR"
+
+# A failed case has to leave its evidence behind. The build output of a
+# 21-case run does not fit on a terminal, and the eight greppable lines this
+# used to print are how a caught mutation was misdiagnosed once already.
+report() {
+  local name="$1" verdict="$2" detail="$3" output="$4"
+  local slug
+  slug=$(printf '%s' "$name" | tr -c 'A-Za-z0-9' '-')
+  printf '%s' "$output" > "$LOGDIR/$slug.log"
+  printf '%s%s%s %s\n' "$RED" "$verdict" "$OFF" "$detail"
+  printf '%s' "$output" | grep -E "ABI drift|^error|failed:|error:" |
+    sed 's/^/      | /' | head -8
+  printf '      %sfull output: %s%s\n' "$DIM" "$LOGDIR/$slug.log" "$OFF"
+  FAILED=$((FAILED + 1)); FAILED_NAMES+=("$name")
+}
+
 # case <name> <file> <expect-substring> <old> <new>
 #
 # `expect-substring` is matched against the build output. It must name the
@@ -66,7 +120,7 @@ fi
 case_() {
   local name="$1" file="$2" expect="$3" old="$4" new="$5"
 
-  if [ -n "$FILTER" ] && [[ "$name" != *"$FILTER"* ]]; then return; fi
+  if [ -n "$FILTER" ] && ! [[ "$name" =~ $FILTER ]]; then return; fi
 
   printf '  %-52s' "$name"
 
@@ -94,16 +148,17 @@ PY
   cp "$file" "$WORK/tree/$file"
 
   if [ $status -eq 0 ]; then
-    printf '%sNOT CAUGHT%s the suite passes with this bug in it\n' "$RED" "$OFF"
-    FAILED=$((FAILED + 1)); FAILED_NAMES+=("$name (not caught)")
-  elif printf '%s' "$output" | grep -qF "$expect"; then
+    report "$name" 'NOT CAUGHT' 'the suite passes with this bug in it' "$output"
+  # A bash pattern match, NOT a pipeline. `grep -q` under `set -o pipefail`
+  # exits on its first match, printf takes SIGPIPE, and the pipeline reports
+  # 141 -- so a mutation that WAS caught reads as a wrong failure whenever the
+  # match lands early enough in a long output for printf to still be writing.
+  # That misreported a real catch as a hole in the suite.
+  elif [[ "$output" == *"$expect"* ]]; then
     printf '%scaught%s %s(%s)%s\n' "$GREEN" "$OFF" "$DIM" "$expect" "$OFF"
     PASSED=$((PASSED + 1))
   else
-    printf '%sWRONG FAILURE%s expected to see: %s\n' "$RED" "$OFF" "$expect"
-    printf '%s' "$output" | grep -E "ABI drift|^error|failed:|error:" |
-      sed 's/^/      | /' | head -8
-    FAILED=$((FAILED + 1)); FAILED_NAMES+=("$name (wrong failure)")
+    report "$name" 'WRONG FAILURE' "expected to see: $expect" "$output"
   fi
 }
 
