@@ -7,9 +7,10 @@
 //! precisely the change worth reviewing rather than absorbing.
 //!
 //! Every test installs `std.testing.allocator`, so any allocation ztext or an
-//! upstream fails to return is a test failure. That works only because
-//! `warmup()` populates the upstreams' process-lifetime caches first; see
-//! UPSTREAM.md.
+//! upstream fails to return is a test failure. That works because installing
+//! an allocator populates the upstreams' process-lifetime caches before it
+//! swaps, and because `warmProcessCaches` below reaches the two that need a
+//! face and so cannot be reached from inside ztext; see UPSTREAM.md.
 
 const std = @import("std");
 const ztext = @import("ztext.zig");
@@ -56,9 +57,8 @@ const Fixture = struct {
     shaper: ztext.Shaper,
 
     fn init() !Fixture {
-        ztext.warmup();
         try warmProcessCaches();
-        try ztext.setAllocator(&std.testing.allocator);
+        try ztext.setAllocator(std.testing.allocator);
         return .{
             .library = try ztext.Library.init(),
             .shaper = try ztext.Shaper.init(),
@@ -2906,22 +2906,20 @@ test "a library keeps its own allocator when the global one is replaced" {
     // defeated the C side's per-library capture entirely: swapping the
     // allocator and then destroying a library handed its FreeType blocks to an
     // allocator that had never issued them, and Zig's DebugAllocator aborts on
-    // exactly that. `setAllocator` taking a pointer is what makes this work,
-    // and this is the test that says so.
-    ztext.warmup();
-
+    // exactly that. `setAllocator` copying each allocator into a slot of its
+    // own is what makes this work, and this is the test that says so.
     var first_state: std.heap.DebugAllocator(.{}) = .init;
     var second_state: std.heap.DebugAllocator(.{}) = .init;
     const first = first_state.allocator();
     const second = second_state.allocator();
 
-    try ztext.setAllocator(&first);
+    try ztext.setAllocator(first);
     const library = try ztext.Library.init();
     const font = try library.createFont(fonts.hebrew, 0);
     const face = try font.face(0, 24);
 
     // Everything from here is nominally the second allocator's.
-    try ztext.setAllocator(&second);
+    try ztext.setAllocator(second);
     const other = try ztext.Library.init();
 
     // Destroying the first library must return its memory to the allocator it
@@ -3508,9 +3506,8 @@ test "handles have no destruction order: a library may go before its fonts" {
     // ztext counts live fonts instead and defers the library's teardown to
     // whichever handle is released last, so the assertions after that line
     // are the whole test.
-    ztext.warmup();
     try warmProcessCaches();
-    try ztext.setAllocator(&std.testing.allocator);
+    try ztext.setAllocator(std.testing.allocator);
     defer ztext.resetAllocator();
 
     const library = try ztext.Library.init();
@@ -3557,16 +3554,15 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
     const first = first_state.allocator();
     const second = second_state.allocator();
 
-    ztext.warmup();
     try warmProcessCaches();
 
-    try ztext.setAllocator(&first);
+    try ztext.setAllocator(first);
     const library = try ztext.Library.init();
     const font = try library.createFont(fonts.latin, 0);
     const face = try font.face(0, 32);
 
     // Everything from here is nominally the second allocator's.
-    try ztext.setAllocator(&second);
+    try ztext.setAllocator(second);
     const before_first = first_state.total_requested_bytes;
     const before_second = second_state.total_requested_bytes;
 

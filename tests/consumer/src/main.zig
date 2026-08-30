@@ -8,9 +8,7 @@ pub fn main() !void {
     var gpa_state = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(gpa_state.deinit() == .ok);
 
-    ztext.warmup();
-    const gpa = gpa_state.allocator();
-    try ztext.setAllocator(&gpa);
+    try ztext.setAllocator(gpa_state.allocator());
     defer ztext.resetAllocator();
 
     const library = try ztext.Library.init();

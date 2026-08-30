@@ -31,14 +31,10 @@ pub fn main() !void {
     //<<<usage
     const ztext = @import("ztext");
 
-    // Warm the caches the upstreams keep for the life of the process, so a
-    // tracking allocator installed next sees only ztext's working set.
-    ztext.warmup();
-
-    // A pointer, and it must outlive every handle: each Library captures the
-    // allocator it was created with.
-    const gpa = gpa_state.allocator();
-    try ztext.setAllocator(&gpa);
+    // Copied, not borrowed: ztext keeps its own copy for as long as any handle
+    // can reach it. Installing also warms the caches the upstreams keep for the
+    // life of the process, so this allocator only ever sees ztext's working set.
+    try ztext.setAllocator(gpa_state.allocator());
     defer ztext.resetAllocator();
 
     const library = try ztext.Library.init();
