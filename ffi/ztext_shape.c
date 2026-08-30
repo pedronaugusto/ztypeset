@@ -116,8 +116,9 @@ ZtextResult ztextShaperCreate(ZtextShaper** out) {
 void ztextShaperDestroy(ZtextShaper* shaper) {
   if (shaper == NULL) return;
   hb_buffer_destroy(shaper->buffer);
-  ztextArrayFree(&shaper->glyphs, sizeof(ZtextGlyph));
-  ztextArrayFree(&shaper->features, sizeof(hb_feature_t));
+  const ZtextAllocatorId owner = ztextAllocatorOf(shaper);
+  ztextArrayFree(owner, &shaper->glyphs, sizeof(ZtextGlyph));
+  ztextArrayFree(owner, &shaper->features, sizeof(hb_feature_t));
   ztextFree(shaper);
 }
 
@@ -125,7 +126,8 @@ static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
                           size_t count) {
   shaper->features.count = 0u;
   if (count == 0u) return true;
-  if (!ztextArrayReserve(&shaper->features, count, sizeof(hb_feature_t))) {
+  if (!ztextArrayReserve(ztextAllocatorOf(shaper), &shaper->features, count,
+                         sizeof(hb_feature_t))) {
     return false;
   }
 
@@ -275,7 +277,8 @@ ZtextResult ztextShaperShapeUtf8(ZtextShaper* shaper, ZtextFace* face,
     return ZTEXT_RESULT_SHAPE_FAILED;
   }
 
-  if (!ztextArrayReserve(&shaper->glyphs, glyph_count, sizeof(ZtextGlyph))) {
+  if (!ztextArrayReserve(ztextAllocatorOf(shaper), &shaper->glyphs,
+                         glyph_count, sizeof(ZtextGlyph))) {
     return ZTEXT_RESULT_OUT_OF_MEMORY;
   }
 

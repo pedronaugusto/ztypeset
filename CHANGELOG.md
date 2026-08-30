@@ -122,6 +122,27 @@ itself is generated from, so it cannot be a number someone forgot to raise.
 checked against what the library does rather than against what the header
 says.
 
+### Changed
+
+- **No handle has a destruction order.** A `ZtextLibrary` may be destroyed
+  before the fonts and faces made from it: whichever of a pair is released
+  second frees what they share. Previously a library destroyed first left every
+  font holding a freed `FT_Face` — `FT_Done_Library` destroys the faces still
+  registered with it — and the rule against it lived only in a comment. The
+  cost is one `size_t` and one `bool` per library. Building on a released
+  handle is now `ZTEXT_RESULT_INVALID_ARGUMENT` rather than undefined:
+  `ztextFontCreateFromMemory`, `ztextLibraryCountFaces` and
+  `ztextLibrarySetSdfSpread` all refuse one, as `ztextFaceCreate` already
+  refused a released font.
+- **Everything ztext allocates for a handle now comes from the allocator that
+  issued that handle.** A face's glyph buffer is allocated lazily, the first
+  time something is drawn, and was charged to whatever was installed at that
+  moment — so one handle's memory could sit in two heaps, with only a host's
+  own accounting to notice. `ffi/ztext.h` states the whole split beside
+  `ztextSetAllocator`: handle-owned memory follows its handle, HarfBuzz's and
+  SheenBidi's follows whatever is installed when they ask, because their seams
+  are compile-time and carry no context.
+
 ### Fixed
 
 - A test whose subject was `Version.format` asserted the literals `"0.1.0"`

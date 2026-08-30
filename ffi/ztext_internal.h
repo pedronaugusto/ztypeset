@@ -181,11 +181,27 @@ typedef struct ZtextArray {
   size_t capacity;
 } ZtextArray;
 
+/// The allocator that issued `block`, read back from the block's own header.
+///
+/// This is what lets an array name its owner without the owner being written
+/// down twice. An array lives inside a handle; the handle is a block; the
+/// block already records which allocator issued it. A second copy on the
+/// handle could disagree with the first, and nothing would notice.
+ZtextAllocatorId ztextAllocatorOf(void* block);
+
 /// Ensures room for `count` elements of `element_size`, growing if needed.
 /// Leaves the array untouched and returns false on allocation failure.
-bool ztextArrayReserve(ZtextArray* array, size_t count, size_t element_size);
+///
+/// `owner` is the allocator this array's memory belongs to: the one that
+/// issued the handle the array lives in, via ztextAllocatorOf. It decides the
+/// FIRST allocation -- a block that already exists keeps the allocator that
+/// issued it through every grow, and passing a different one here is a
+/// detected fatal mismatch rather than a silent migration.
+bool ztextArrayReserve(ZtextAllocatorId owner, ZtextArray* array, size_t count,
+                       size_t element_size);
 
-void ztextArrayFree(ZtextArray* array, size_t element_size);
+void ztextArrayFree(ZtextAllocatorId owner, ZtextArray* array,
+                    size_t element_size);
 
 //===----------------------------------------------------------------------===//
 // Handles
