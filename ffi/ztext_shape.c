@@ -427,7 +427,7 @@ void ztextWarmup(void) {
   // allocator, so what that allocator then sees is ztext's actual working set.
   // ztext's own allocator-balance test depends on exactly this.
   //
-  // Each of the four below was found by running that test and reading the
+  // Each of the five below was found by running that test and reading the
   // stack of what it reported, rather than by guessing from the source.
 
   // The list of compiled-in shapers (hb-shape.cc).
@@ -441,6 +441,21 @@ void ztextWarmup(void) {
   // every unspecified shape with, so this is the entry that would otherwise
   // appear on the first shape.
   (void)hb_language_from_string("und", 3);
+
+  // The same table's DEFAULT entry, which is a different tag and reached by a
+  // different path: ztext names a language on every buffer it shapes, so
+  // nothing here asks for the default -- but the autohinter does. With
+  // FT_CONFIG_OPTION_USE_HARFBUZZ (ffi/ztext_ftoption.h) FreeType builds its
+  // own hb_buffer_t for the coverage pass and calls
+  // hb_buffer_guess_segment_properties, which asks for the default language
+  // and interns it: two allocations, once per process, charged to whichever
+  // allocator was installed the first time any glyph was HINTED.
+  //
+  // The tag is "c" and not the machine's locale -- build.zig passes
+  // -DHB_NO_SETLOCALE, which makes hb_setlocale expand to the literal "C" --
+  // so this is an allocator-attribution problem and not a determinism one.
+  // See build.zig for why that is a define rather than an accident.
+  (void)hb_language_get_default();
 
   // The OpenType font-functions singleton (hb-ot-font.cc). It is built the
   // first time any font is pointed at hb-ot-font, which ztext does for every

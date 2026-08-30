@@ -69,16 +69,19 @@ that depends on whether the code reaches your binary:
 | `src/base/fthash.c`, `include/freetype/internal/fthash.h` | X Window System style, inherited from the BDF driver | **Yes.** `fthash.c` is one of the eighteen sources `ftbase.c` includes, and ztext builds `ftbase.c`. |
 | `src/bdf/`, `src/pcf/` | X Window System style | No. Neither driver is in `build.zig`'s source list or `ffi/ztext_ftmodules.h`. |
 | `src/gzip/` | zlib | No. Not built; ztext reads no compressed PCF. |
-| `src/autofit/ft-hb.c`, `ft-hb-ft.c`, `ft-hb-decls.h`, `ft-hb-types.h`, `hb-script-list.h` | "Old MIT", taken from HarfBuzz | No. The translation units are compiled, but their whole contents sit behind `FT_CONFIG_OPTION_USE_HARFBUZZ`, which `ffi/ztext_ftoption.h` does not define; each then reduces to a dummy typedef. |
+| `src/autofit/ft-hb.c`, `ft-hb-ft.c`, `ft-hb-decls.h`, `ft-hb-types.h`, `hb-script-list.h` | "Old MIT", taken from HarfBuzz | **Yes.** Their contents sit behind `FT_CONFIG_OPTION_USE_HARFBUZZ`, which `ffi/ztext_ftoption.h` defines: the autohinter takes its glyph coverage from GSUB, and these files are what call HarfBuzz to do it. `ci/measurements.sh --check` compares this cell against that macro. |
 | `src/base/md5.c` | Public domain | No. Included by `ftobjs.c` only under `FT_DEBUG_LEVEL_TRACE`, which this build does not define. |
 
 Two consequences, and they point in different directions:
 
-- **In a binary**, the only one of these you carry is the X11-style
-  `fthash.c`. Its terms are the BDF driver's, in `libs/freetype/src/bdf/README`
-  — a permissive notice-retention licence with no advertising clause. Shipping
-  `libs/freetype/LICENSE.TXT` alongside `FTL.TXT` covers it, because that file
-  is what names the sub-licences and where their texts are.
+- **In a binary** you carry two: the X11-style `fthash.c` and the "Old MIT"
+  `ft-hb` files. `fthash.c`'s terms are the BDF driver's, in
+  `libs/freetype/src/bdf/README` — a permissive notice-retention licence with
+  no advertising clause. Shipping `libs/freetype/LICENSE.TXT` alongside
+  `FTL.TXT` covers it, because that file is what names the sub-licences and
+  where their texts are. The "Old MIT" one is HarfBuzz's own licence, and you
+  already ship it for HarfBuzz itself, so it asks nothing of you that
+  `libs/harfbuzz/COPYING` did not already ask.
 - **In a source distribution** — which is what a Zig package *is*: `libs/` is
   in `build.zig.zon`'s `paths`, so a consumer fetching ztext receives every
   file above whether or not it compiles — you redistribute all four. Each
@@ -123,8 +126,8 @@ The year is the one in the version you actually ship, as the FTL instructs;
 2026 is what `libs/freetype/include/freetype/freetype.h` carries here.
 
 Ship `libs/freetype/docs/FTL.TXT` with it, and `libs/freetype/LICENSE.TXT`
-too: that second file is what names the sub-licences above, including the one
-for `fthash.c` that does reach your binary.
+too: that second file is what names the sub-licences above, including the two
+that do reach your binary — `fthash.c`'s and the `ft-hb` files'.
 
 ### HarfBuzz
 

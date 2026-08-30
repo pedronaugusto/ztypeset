@@ -288,10 +288,17 @@ distinction is load-bearing; see [what the tests found](#what-the-tests-found).
 Shaping the same string with the same build must produce the same glyphs on
 every machine. Two things had to be done for that to be true:
 
-- **The process locale is ignored.** HarfBuzz's `guess_segment_properties`
-  fills an unset language from `setlocale(LC_CTYPE, NULL)`, so out of the box
-  two machines shape differently. ztext seeds the buffer so it cannot, and
-  applies language-specific features only when you pass a language explicitly.
+- **The process locale is ignored, on both paths that could read it.**
+  HarfBuzz's `guess_segment_properties` fills an unset language from
+  `setlocale(LC_CTYPE, NULL)`, so out of the box two machines shape
+  differently. ztext seeds the buffer so it cannot, and applies
+  language-specific features only when you pass a language explicitly. The
+  second path is not shaping at all: the autohinter shapes each script's
+  blue-zone strings through HarfBuzz and does let it guess, so hinting could
+  read the locale where shaping cannot. It does not, because `build.zig`
+  passes `-DHB_NO_SETLOCALE` and `hb_setlocale` is then the literal `"C"` —
+  which was already true from the absence of `HAVE_NEWLOCALE`, and is now a
+  define rather than an absence.
 - **`FREETYPE_PROPERTIES` is ignored.** `FT_Init_FreeType` reads that
   environment variable and lets it change the TrueType interpreter version and
   the autohinter. ztext does not call the function that does it.
@@ -574,11 +581,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**109 tests**, executed twice. The second pass runs the same binary with
+**110 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **218/218 passed**.
+rather than being believed. So `zig build test` reports **220/220 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -825,6 +832,43 @@ for everything, and the font's ordinary lookups all returned `.notdef` while
 the variation sequences worked perfectly. Sorted records fix it, and a mutation
 case unsorts them again so the reason is a gate rather than a comment.
 
+**A FreeType option that changed a HarfBuzz allocation nobody was watching.**
+FreeType's autohinter can take its glyph coverage from GSUB instead of the
+character map, and that matters here more than it does for most consumers:
+`light` hinting is the autohinter and nothing else for a TrueType face (only
+the CFF driver sets `HINTS_LIGHTLY`), and a glyph shaping produced — an Arabic
+medial form, a ligature — is reachable from no character at all, so through the
+cmap alone it is hinted against no script's blue zones. Turning the option on
+changed the raster of every light-hinted glyph of all four test fonts, and of
+every glyph of the variable font in every mode, since it carries no `fpgm` and
+FreeType autohints it unconditionally.
+
+The golden that holds it is a whole-font sweep -- every glyph of the Arabic,
+Latin and Hebrew fixtures rendered with `light` hinting, reduced to a digest,
+a total ink figure and the count of glyphs FreeType's rasteriser declines. The
+first attempt was a pair of single-glyph rasters, one of them a glyph only
+shaping can reach, and the mutation harness reported it as a hole in the suite:
+both rasters are byte-identical with the option on and off. What the option
+moves is a scattered minority of each font, so only a sweep can see it. Both
+arms were measured; all three digests and all three ink totals differ.
+
+Blind spot, stated: those digests are absolute raster values, measured on
+x86_64 Windows against the pinned FreeType. FreeType's rasteriser and
+autohinter are integer-only, so the same numbers are expected everywhere, but
+that is read from the source rather than measured -- this package has never run
+the suite on a hosted runner. A hosted arm that disagrees is telling you to
+re-measure the golden, not that the option regressed.
+
+It also broke the heap balance, which is the part worth writing down. The
+coverage pass builds a HarfBuzz buffer and lets it guess its segment
+properties, which interns the default language — a **fifth** process-lifetime
+HarfBuzz singleton, on a path that did not exist in this package before, and
+charged to whichever allocator was installed the first time a glyph was
+*hinted* rather than shaped. `ztextWarmup()` now touches it, and the C smoke
+test — the one place that counts every byte in and out — now hints with the
+autohinter, because a byte count that never meets a path cannot say anything
+about it.
+
 ### Continuous integration
 
 CI runs the whole suite on **Linux, macOS and Windows**, in four optimize
@@ -855,7 +899,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **37** deliberate bugs, one at a time, to a copy of the tree, and
+applies **40** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -870,10 +914,11 @@ asserts a **named** test catches each:
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed |
 | Reproducibility | the environment allowed to reach HarfBuzz |
+| Hinting | the autohinter's glyph coverage taken from the character map alone, and the language its coverage pass interns left cold |
 | Documentation | a documented example edited away from the program it quotes |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
 | Versioning | a bump that reached two of the version's three homes, and a changelog heading reworded out from under the gate that reads it |
-| Licences | a licence text changed under the page that summarises it, and the row deleted rather than rechecked |
+| Licences | a licence text changed under the page that summarises it, the row deleted rather than rechecked, and a row whose answer the build configuration decides left behind when that configuration changed |
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose
 anchor no longer applies is reported too, so the script rots loudly rather than
@@ -949,7 +994,11 @@ Exposed today:
   declares none
 - **Run context**: shaping a range of a longer text, so joining stays correct
   where a host split a word between fonts
-- Rasterisation: A8 coverage and SDF, three hinting modes, configurable spread
+- Rasterisation: A8 coverage and SDF, three hinting modes, configurable
+  spread. `light` is FreeType's autohinter and nothing else for a TrueType
+  face, and the autohinter takes its glyph coverage from **GSUB** rather than
+  from the character map, so a glyph that only shaping can produce is hinted
+  against its own script's blue zones
 - **Subpixel positioning**: `renderGlyph` takes a fractional offset in 26.6,
   so text laid out at a fractional x is not forced onto the pixel grid.
   Ignored in SDF mode: a distance field is baked once and sampled at any

@@ -208,6 +208,20 @@ OpenType font-functions (`src/hb-ot-font.cc`), the FreeType font-functions
 (`src/hb-ft.cc`), and an intern table holding one entry per distinct language
 tag ever passed (`src/hb-common.cc:258`, `lang_find_or_insert`).
 
+One of those language entries arrives by a path that is easy to miss, and did
+not exist before the autohinter was given HarfBuzz: ztext names a language on
+every buffer it shapes, so nothing it does asks for the default one — but
+FreeType's coverage pass builds a buffer of its own and calls
+`hb_buffer_guess_segment_properties`, which asks for the default language
+(`hb_language_get_default`, `src/hb-common.cc:374`). It is charged to the
+allocator installed when the first glyph is HINTED, which is why
+`ztextWarmup()` touches it.
+
+The tag itself is not the machine's locale: `hb_setlocale` is the literal
+`"C"` unless `HAVE_NEWLOCALE` and `HAVE_USELOCALE` are both defined
+(`src/hb.hh:493-495`, `:515`), and `build.zig` passes `-DHB_NO_SETLOCALE` to
+make that a decision rather than the absence of two defines.
+
 Upstream frees them from an `atexit` handler — but only where `HAVE_ATEXIT` is
 defined. `build.zig` does not define it, so `HB_USE_ATEXIT` is 0
 (`src/hb.hh:471-476`) and `hb_atexit(f)` expands to `if (0) f()`

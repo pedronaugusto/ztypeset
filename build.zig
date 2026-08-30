@@ -386,6 +386,30 @@ const harfbuzz_defines = [_][]const u8{
     // test a second time with all three set to hostile values, and every
     // assertion in both has to hold.
     "-DHB_NO_GETENV",
+    // The other environment-shaped input, and the one that is not an
+    // environment variable at all. hb_language_get_default() answers with
+    // hb_setlocale(LC_CTYPE, nullptr) (hb-common.cc:374), which is the C
+    // library's locale rather than getenv -- so HB_NO_GETENV does not cover
+    // it. It reaches this build through FreeType: with
+    // FT_CONFIG_OPTION_USE_HARFBUZZ the autohinter shapes each script's
+    // blue-zone strings and lets HarfBuzz guess their segment properties,
+    // which asks for the default language. Nothing ztext shapes does --
+    // ztext names a language on every buffer.
+    //
+    // Without this define the behaviour is already what is wanted, twice
+    // over: hb.hh:493-495 turns HB_NO_SETLOCALE on whenever HAVE_NEWLOCALE or
+    // HAVE_USELOCALE is missing and neither is defined here, so hb_setlocale
+    // is the literal "C" (hb.hh:515); and a library that never calls
+    // setlocale(LC_ALL, "") sees the C locale regardless of the machine's
+    // settings anyway. Two accidents pointing the same way are still
+    // accidents. Stated here so that adding HAVE_NEWLOCALE for something else
+    // cannot quietly make hinting depend on the host's locale.
+    //
+    // Blind spot, stated because the harness cannot cover this one: no
+    // mutation discriminates it on a host whose locale is already C, which is
+    // every host that has not called setlocale. It is held by this define and
+    // by the two conditions above, not by ci/check-guards.sh.
+    "-DHB_NO_SETLOCALE",
     "-Dhb_malloc_impl=ztext_hb_malloc",
     "-Dhb_calloc_impl=ztext_hb_calloc",
     "-Dhb_realloc_impl=ztext_hb_realloc",

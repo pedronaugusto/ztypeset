@@ -57,6 +57,51 @@
 #endif
 
 /*
+ * The autohinter's coverage, taken from GSUB rather than from the character
+ * map alone.
+ *
+ * FreeType gives every glyph a "style" -- a script, a width and a hinting
+ * mode -- and the style is what chooses the blue zones the autohinter snaps
+ * outlines to. Without this macro the only thing that can assign one is
+ * `af_shaper_get_coverage_nohb` (src/autofit/afshaper.c), which walks the
+ * character map: a glyph that no character maps to gets no script, and falls
+ * back to a styleless default. That is precisely the set of glyphs shaping
+ * produces -- every Arabic contextual form, every Indic conjunct, every
+ * ligature, every small-cap -- and shaping is what this package is for.
+ *
+ * With it, FreeType runs each script's GSUB features over the characters that
+ * ARE mapped and takes the outputs, so a derived glyph inherits the style of
+ * the character it came from.
+ *
+ * This reaches more of ztext than it looks. `ZTEXT_HINTING_LIGHT` is the
+ * autohinter and nothing else for these faces: FT_LOAD_TARGET_LIGHT falls
+ * through to it whenever the driver does not hint lightly itself, and the CFF
+ * driver is the only one in FreeType that sets that flag (`cffdrivr.c`), so
+ * every TrueType face takes the autohinter in light mode. A TrueType face
+ * with no `fpgm` and a `prep` of seven bytes or fewer takes it in EVERY mode.
+ *
+ * Not a new dependency: HarfBuzz is already linked into every configuration
+ * of this package, because it is what does the shaping. FreeType does not
+ * include a HarfBuzz header for this either -- `ft-hb-types.h` and
+ * `ft-hb-decls.h` are its own condensed declarations -- so the FreeType
+ * translation units still compile with no HarfBuzz include path and the calls
+ * resolve when the two static libraries are linked together.
+ *
+ * What it does change: `freetype` alone now has undefined `hb_*` symbols and
+ * has to be linked alongside `harfbuzz`. Both are installed, ci/header-link.sh
+ * links every installed library together, and this is the same property
+ * upstream's own HarfBuzz-enabled build has.
+ *
+ * FT_CONFIG_OPTION_USE_HARFBUZZ_DYNAMIC is deliberately NOT defined: it makes
+ * FreeType dlopen a system libharfbuzz at run time, which for a package that
+ * vendors and statically links its own would mean hinting against a different
+ * HarfBuzz than the one that shaped the text.
+ */
+#ifndef FT_CONFIG_OPTION_USE_HARFBUZZ
+#define FT_CONFIG_OPTION_USE_HARFBUZZ
+#endif
+
+/*
  * Left exactly as upstream has it, deliberately:
  *
  *   TT_CONFIG_OPTION_GX_VAR_SUPPORT   on. Variable fonts, no extra dependency.

@@ -41,6 +41,10 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The LICENSES.md check covers the ONE row whose answer a build macro
+#     decides. The other rows are settled by whether a file is in build.zig's
+#     source list, which nothing here reads; they are prose with a citation,
+#     not a gated number.
 #   - sizeof(ZtextAbiLayout) is arithmetic over the header's field list, not a
 #     compiler's answer. It is right because every field is a uint32_t and the
 #     check refuses to compute anything when that stops holding, but it would
@@ -130,6 +134,22 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# LICENSES.md's "Reaches your binary?" cell for the FreeType autofit files
+# that call HarfBuzz, and the macro that decides it. Those five files compile
+# to a dummy typedef without FT_CONFIG_OPTION_USE_HARFBUZZ and to real code
+# with it, so one edit to ffi/ztext_ftoption.h silently makes a licence page
+# wrong about what a consumer ships. This is the pair that drifted.
+ft_hb_macro=no
+grep -qE '^#define FT_CONFIG_OPTION_USE_HARFBUZZ$' ffi/ztext_ftoption.h &&
+  ft_hb_macro=yes
+ft_hb_cell=$(grep -m1 -F 'src/autofit/ft-hb.c' LICENSES.md |
+             awk -F'|' '{ print $4 }')
+ft_hb_claim=unreadable
+case "$ft_hb_cell" in
+  ' **Yes.**'*) ft_hb_claim=yes ;;
+  ' No.'*)      ft_hb_claim=no ;;
+esac
+
 # The newest release heading in CHANGELOG.md. `grep -m1` rather than a sort,
 # because newest-first is the file's own order and a sort would quietly accept
 # an entry filed in the wrong place.
@@ -317,6 +337,15 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ "$ft_hb_macro" = "$ft_hb_claim" ]; then
+    printf '  %-42s %s%s%s\n' 'LICENSES.md ft-hb row = ftoption.h' \
+      "$GREEN" "$ft_hb_claim" "$OFF"
+  else
+    printf '  %-42s %sffi/ztext_ftoption.h defines the macro: %s; LICENSES.md claims: %s%s\n' \
+      'LICENSES.md ft-hb row' "$RED" "$ft_hb_macro" "$ft_hb_claim" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

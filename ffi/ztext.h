@@ -286,7 +286,11 @@ ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 /// process: HarfBuzz builds several singletons on first use -- the shaper
 /// list, the Unicode database, the font-functions, and an intern table with
 /// one entry per distinct language tag ever passed -- and SheenBidi creates
-/// its allocator object once and keeps it.
+/// its allocator object once and keeps it. One of those language entries is
+/// the default tag, interned the first time a glyph is HINTED rather than
+/// shaped: the autohinter takes its glyph coverage from GSUB, and the buffer
+/// it does that with asks HarfBuzz for the default language. That tag is a
+/// compile-time constant here, not the machine's locale.
 ///
 /// None of the HarfBuzz ones are freed at exit in this build. Upstream frees
 /// them from an atexit handler only where HAVE_ATEXIT is defined; ztext does
