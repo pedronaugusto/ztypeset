@@ -696,6 +696,11 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
   agrees with `glyphExtents` because both load through the same path.
   **Synthetic oblique** moves the ink without moving the advance, and reaches
   outline decomposition too, not just render and extents.
+- **Synthetic bold reaches a SHAPED run's advances**, on both metric sources,
+  by the fraction of the em the caller asked for -- the half FreeType cannot
+  reach, because a shaped advance never passes through glyph loading. Setting
+  either style ages a run shaped before it, so extents cannot mix two weights,
+  and a strength that is not a finite number is refused.
 - **Vertical face metrics report which they are**: synthesised from ascender
   and descender for every committed font, with the flag saying so rather than
   a caller having to guess.
@@ -939,7 +944,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **53** deliberate bugs, one at a time, to a copy of the tree, and
+applies **59** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -1052,8 +1057,13 @@ Exposed today:
   through move-to/line-to/conic-to/cubic-to/close callbacks, points in 26.6,
   for a host that fills its own shapes rather than sampling a bitmap.
 - **Synthetic bold and oblique**, for a family with no bold or italic face of
-  its own. Both apply at glyph loading, so `glyphExtents` and `renderGlyph`
-  always agree on the same widened, sheared glyph.
+  its own. Both are amounts rather than switches -- a fraction of the em and a
+  shear factor, with `synthetic_bold_default` and `synthetic_oblique_default`
+  the reference weights FreeType and HarfBuzz themselves use, and nothing
+  clamped above them. FreeType applies them at glyph loading, so
+  `glyphExtents`, `renderGlyph` and `decomposeOutline` agree on one widened,
+  sheared glyph; HarfBuzz is told the same two numbers, so a shaped run's
+  advances widen with the ink instead of overlapping it.
 - **Vertical face metrics**: column-direction analogues of `ascender`,
   `descender`, `line_height` and `max_advance`, plus a flag saying whether
   they are real (from a `vhea`/`vmtx`) or synthesised — see below.

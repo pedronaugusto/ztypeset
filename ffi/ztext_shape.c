@@ -82,6 +82,8 @@ static hb_font_t* freetypeFont(ZtextFace* face) {
   hb_ft_font_changed(font);
 
   face->hb_ft_font = font;
+  // The style may have been set long before this font existed.
+  ztextFaceApplySynthetic(face);
   // Built lazily, so it can come into existence long after the font's axes
   // were moved -- and hb_ft_font_create does not read them off the FT_Face in
   // this build. Assigned first, because that is what tells the helper below
@@ -430,8 +432,8 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
   // since have been destroyed and its address reused.
   if (face->generation != shaper->face_generation) {
     ztextSetErrorDetail(
-        "extents asked for a different face, or the same face resized since "
-        "it was shaped");
+        "extents asked for a different face, or the same face resized or "
+        "restyled since it was shaped");
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
 

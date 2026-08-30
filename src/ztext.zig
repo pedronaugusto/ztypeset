@@ -85,6 +85,11 @@ pub fn warmup() void {
 pub const setAllocator = memory_mod.setAllocator;
 pub const resetAllocator = memory_mod.resetAllocator;
 
+/// FreeType's and HarfBuzz's own reference synthetic styles, as fractions of
+/// the em; see `Face.setSyntheticBold`.
+pub const synthetic_bold_default = c.synthetic_bold_default;
+pub const synthetic_oblique_default = c.synthetic_oblique_default;
+
 pub const Glyph = types_mod.Glyph;
 pub const GlyphFlag = types_mod.GlyphFlag;
 pub const glyphHas = types_mod.glyphHas;

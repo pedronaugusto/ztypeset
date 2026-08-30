@@ -2371,10 +2371,10 @@ test "synthetic bold widens the ink and the advance, and rasterisation agrees" {
     const plain = try face.glyphExtents(glyph, .none);
     const plain_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
 
-    try face.setSyntheticBold(true);
+    try face.setSyntheticBold(ztext.synthetic_bold_default);
     const bold = try face.glyphExtents(glyph, .none);
     const bold_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
-    try face.setSyntheticBold(false);
+    try face.setSyntheticBold(0);
 
     // The advance has to widen or bold text overlaps the next glyph.
     try std.testing.expect(bold.x_advance > plain.x_advance);
@@ -2397,9 +2397,9 @@ test "synthetic oblique shears the ink but leaves the advance alone" {
     const glyph = face.font.glyphIndex('H');
     const upright = try face.glyphExtents(glyph, .none);
 
-    try face.setSyntheticOblique(true);
+    try face.setSyntheticOblique(ztext.synthetic_oblique_default);
     const sheared = try face.glyphExtents(glyph, .none);
-    try face.setSyntheticOblique(false);
+    try face.setSyntheticOblique(0);
 
     // A shear does not change how far the pen moves.
     try std.testing.expectEqual(upright.x_advance, sheared.x_advance);
@@ -2420,15 +2420,149 @@ test "synthetic style reaches outline decomposition, not just render and extents
     const plain_funcs = outlineFuncsInto(&plain_collector);
     try face.decomposeOutline(glyph, .none, &plain_funcs);
 
-    try face.setSyntheticBold(true);
+    try face.setSyntheticBold(ztext.synthetic_bold_default);
     var bold_collector = OutlineCollector{};
     const bold_funcs = outlineFuncsInto(&bold_collector);
     try face.decomposeOutline(glyph, .none, &bold_funcs);
-    try face.setSyntheticBold(false);
+    try face.setSyntheticBold(0);
 
     const plain_width = plain_collector.max_x - plain_collector.min_x;
     const bold_width = bold_collector.max_x - bold_collector.min_x;
     try std.testing.expect(bold_width > plain_width);
+}
+
+/// The advance a SHAPED run reports never passes through this face's glyph
+/// loading, so FreeType's emboldening cannot reach it. Both of the shaper's
+/// metric sources are checked, because they are two different HarfBuzz fonts
+/// and the FreeType-backed one is built lazily, long after a style may have
+/// been set.
+fn shapedAdvance(fixture: Fixture, face: ztext.Face, freetype: bool) !f32 {
+    var total: f32 = 0;
+    for (try fixture.shaper.shape(face, "HHHH", .{
+        .direction = .ltr,
+        .use_freetype_metrics = freetype,
+    })) |glyph| {
+        total += glyph.x_advance;
+    }
+    return total;
+}
+
+test "synthetic bold widens a shaped run's advances, both metric sources" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const plain_ot = try shapedAdvance(fixture, face, false);
+    const plain_ft = try shapedAdvance(fixture, face, true);
+
+    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    const bold_ot = try shapedAdvance(fixture, face, false);
+    const bold_ft = try shapedAdvance(fixture, face, true);
+    try face.setSyntheticBold(0);
+
+    // HarfBuzz rounds the strength to whole 26.6 units of the scale it was
+    // given, which is ppem * 64, and adds it to every advance that is not
+    // already zero -- four glyphs, four additions.
+    const strength = @round(@as(f32, @floatFromInt(ppem * 64)) *
+        ztext.synthetic_bold_default);
+    const expected = 4 * strength / 64.0;
+    try std.testing.expectApproxEqAbs(expected, bold_ot - plain_ot, 1.0 / 64.0);
+    try std.testing.expectApproxEqAbs(expected, bold_ft - plain_ft, 1.0 / 64.0);
+
+    // And it is not a one-way trip, on either source.
+    try std.testing.expectApproxEqAbs(plain_ot, try shapedAdvance(fixture, face, false), 0);
+    try std.testing.expectApproxEqAbs(plain_ft, try shapedAdvance(fixture, face, true), 0);
+}
+
+test "a style set before the FreeType metrics font exists still reaches it" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    // The FreeType-backed HarfBuzz font is built on the first shape that asks
+    // for FreeType metrics, so a face that has never been shaped that way has
+    // not built one yet -- and a style set now has to survive until it is.
+    const plain_face = try fixture.face(fonts.latin);
+    defer plain_face.deinit();
+    const plain = try shapedAdvance(fixture, plain_face, true);
+
+    const styled_face = try fixture.face(fonts.latin);
+    defer styled_face.deinit();
+    try styled_face.setSyntheticBold(ztext.synthetic_bold_default);
+    const bold = try shapedAdvance(fixture, styled_face, true);
+
+    const strength = @round(@as(f32, @floatFromInt(ppem * 64)) *
+        ztext.synthetic_bold_default);
+    try std.testing.expectApproxEqAbs(4 * strength / 64.0, bold - plain, 1.0 / 64.0);
+}
+
+test "synthetic bold is a strength the caller chooses, not a switch" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+
+    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    const reference = try face.glyphExtents(glyph, .none);
+    try face.setSyntheticBold(ztext.synthetic_bold_default * 3);
+    const heavy = try face.glyphExtents(glyph, .none);
+    // Nothing clamps the strength at the reference weight: a display face at
+    // three times it is a legitimate thing to ask for.
+    try std.testing.expect(heavy.x_advance > reference.x_advance);
+    try std.testing.expect(heavy.x_advance - reference.x_advance >
+        reference.x_advance - plain.x_advance);
+
+    // A negative strength thins rather than being read as "off".
+    try face.setSyntheticBold(-ztext.synthetic_bold_default);
+    const thin = try face.glyphExtents(glyph, .none);
+    try std.testing.expect(thin.x_advance < plain.x_advance);
+    try face.setSyntheticBold(0);
+
+    // The shear is a number too, and a bigger one leans further.
+    try face.setSyntheticOblique(ztext.synthetic_oblique_default);
+    const leaned = try face.glyphExtents(glyph, .none);
+    try face.setSyntheticOblique(ztext.synthetic_oblique_default * 2);
+    const leaned_more = try face.glyphExtents(glyph, .none);
+    try face.setSyntheticOblique(0);
+    try std.testing.expect(leaned_more.x_max - leaned_more.x_min >
+        leaned.x_max - leaned.x_min);
+}
+
+test "a synthetic strength that is not a number is refused" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    for ([_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) }) |bad| {
+        try std.testing.expectError(ztext.Error.InvalidArgument, face.setSyntheticBold(bad));
+        try std.testing.expectError(ztext.Error.InvalidArgument, face.setSyntheticOblique(bad));
+    }
+
+    // A refused strength leaves the face where it was, rather than half-set.
+    const glyph = face.font.glyphIndex('H');
+    const plain = try face.glyphExtents(glyph, .none);
+    try std.testing.expectError(ztext.Error.InvalidArgument, face.setSyntheticBold(std.math.nan(f32)));
+    try std.testing.expectEqual(plain.x_advance, (try face.glyphExtents(glyph, .none)).x_advance);
+}
+
+test "setting a synthetic style ages a run shaped before it" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    _ = try fixture.shaper.shape(face, "H", .{ .direction = .ltr });
+    _ = try fixture.shaper.extents(face);
+
+    // Shaped advances move with the strength now, so extents taken across the
+    // change would mix two weights rather than report either.
+    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    try std.testing.expectError(ztext.Error.InvalidArgument, fixture.shaper.extents(face));
+    try face.setSyntheticBold(0);
 }
 
 //=============================================================================
