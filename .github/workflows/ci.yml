@@ -94,6 +94,17 @@ jobs:
         working-directory: tests/consumer
         run: zig build run
 
+      # What a consumer is HANDED rather than what the suite builds. Every
+      # installed header is compiled, checked to be reachable from a documented
+      # root, and every entry point it declares is referenced by a probe the
+      # linker has to resolve against the libraries installed beside it. Four
+      # HarfBuzz headers had no compiled translation unit at all and three
+      # FreeType entry points were declared and never built; both classes reach
+      # a consumer as an error and reach no in-repo test.
+      - name: Test — installed headers compile and link
+        shell: bash
+        run: ci/header-link.sh
+
       # Zig's default ABI for Windows is gnu, so every step above exercises
       # that one and the MSVC branches in build.zig would never be built at
       # all. On a Windows runner the MSVC ABI is native, so the suite can run
@@ -111,6 +122,13 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: ci/crash-loop.sh 200 -Dtarget=x86_64-windows-msvc
+
+      # The header gate on the other Windows ABI. It links and runs a probe, so
+      # it needs the host that can execute the result.
+      - name: Test — installed headers link, Windows MSVC ABI
+        if: runner.os == 'Windows'
+        shell: bash
+        run: ci/header-link.sh --target=x86_64-windows-msvc
 
   # Compile-only coverage of the targets the suite cannot execute on. These
   # prove the sources and build graph are portable; the `test` job above is

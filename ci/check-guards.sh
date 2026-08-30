@@ -38,6 +38,13 @@ PASSED=0
 FAILED=0
 FAILED_NAMES=()
 
+# What a case runs to see whether the mutation was caught. Almost every
+# guard in this package is a test in the Zig suite, so that is the default;
+# a guard that lives in a script instead sets this around its own cases and
+# puts it back. It is not a parameter of case_ because the grouping is what
+# makes the cost visible: each of these is a build of its own.
+GUARD_CMD=(zig build test)
+
 WORK=$(mktemp -d)
 # The working copy goes; the failure logs under it do not, or the evidence for
 # a red case dies with the run that produced it.
@@ -142,7 +149,7 @@ PY
   fi
 
   local output status
-  output=$(cd "$WORK/tree" && zig build test 2>&1)
+  output=$(cd "$WORK/tree" && "${GUARD_CMD[@]}" 2>&1)
   status=$?
 
   cp "$file" "$WORK/tree/$file"
@@ -353,6 +360,37 @@ case_ "SheenBidi handed memory ztext did not write" \
   "during phase: injection-poisoned" \
   "  if (block != NULL) memset(block, 0, (size_t)size);" \
   "  (void)0;"
+
+printf '\n%sInstalled headers%s %s(ci/header-link.sh, not the suite)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# These two are held by a script rather than by `zig build test`, because
+# neither defect is visible from inside the tree: both reach a consumer and
+# nothing else. `zig build test` passes with either mutation applied, which is
+# the whole reason the gate exists.
+GUARD_CMD=(ci/header-link.sh)
+
+# A header put back into the install list with nothing behind it. hb-gpu.h is
+# the public face of upstream's libharfbuzz-gpu, which this package does not
+# build; it was installed for real until the gate said so.
+case_ "an installed header no compiled code stands behind" \
+  build.zig \
+  "no root reaches it" \
+  '    "hb-ft.h",' \
+  '    "hb-ft.h",
+    "hb-gpu.h",'
+
+# And the other direction: the header stays, its implementation goes. A
+# consumer that calls FT_Get_FSType_Flags then compiles and fails at link,
+# which is exactly what happened before ftfstype.c was compiled.
+case_ "a declared entry point with no implementation" \
+  build.zig \
+  "declares an entry point nothing defines" \
+  '    "libs/freetype/src/base/ftfstype.c",
+' \
+  ''
+
+GUARD_CMD=(zig build test)
 
 printf '\n'
 if [ $FAILED -eq 0 ]; then

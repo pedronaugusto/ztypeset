@@ -120,6 +120,17 @@ exe.root_module.linkLibrary(ztext_dep.artifact("harfbuzz"));
 That is deliberate. For anything past ztext's scope, HarfBuzz's own API is
 better documented and more capable than a façade over it could be.
 
+What is installed is exactly what was compiled. ztext builds a reduced
+configuration of each upstream — FreeType without the modules it does not
+register, and `libharfbuzz` without the four separate libraries upstream builds
+beside it (`-subset`, `-raster`, `-vector`, `-gpu`, each with its own external
+dependency) — so the headers for those are not installed either.
+`ci/header-link.sh` is what makes that sentence true rather than intended: it
+compiles every installed header, checks each is reachable from a documented
+root, and references every entry point any of them declares so the linker has
+to resolve it against the libraries installed beside them. It runs on both
+Windows ABIs.
+
 ## Design
 
 ### The pipeline stops at runs
@@ -685,6 +696,18 @@ that never issued them — an abort under Zig's DebugAllocator, heap corruption
 under a pool. Both halves are fixed, and `setAllocator` takes a pointer
 precisely so the Zig wrapper cannot re-break it.
 
+**Seven headers promised an API that was not there.** Four HarfBuzz headers —
+`hb-gpu.h`, `hb-raster.h`, `hb-subset-depend.h`, `hb-vector.h` — were installed
+with no compiled translation unit behind them, which is a compile for the
+consumer and a link error afterwards; `hb-subset-depend.h` could not even be
+compiled, since it opens by demanding a header from a library ztext does not
+build. FreeType's `ftrender.h` included `ftglyph.h`, which was not installed at
+all, and `freetype.h` declared three entry points — `FT_Get_FSType_Flags`,
+`FT_Face_CheckTrueTypePatents`, `FT_Face_SetUnpatentedHinting` — whose sources
+were not compiled. A comment in `build.zig` said the lists were restricted to
+headers whose translation units were built. It was prose, and it was wrong in
+seven places; `ci/header-link.sh` is the gate that replaced it.
+
 **The quickstart itemised incorrectly and leaked.** It looped over
 `visualRuns()`, which hands HarfBuzz one run spanning three scripts for
 `"Hello Ελληνικά мир"`, and it omitted `warmup()`, so running it verbatim under
@@ -713,6 +736,7 @@ ci/run.sh              # the full matrix
 ci/run.sh --quick      # native Debug only, for the inner loop
 ci/run.sh --full       # + the mutation harness below
 ci/check-guards.sh     # break each guard on purpose; minutes, not seconds
+ci/header-link.sh      # every installed header compiles, is reachable, links
 ci/verify-vendor.sh    # diff libs/ against pinned upstream (needs network)
 ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ```
@@ -720,7 +744,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **22** deliberate bugs, one at a time, to a copy of the tree, and
+applies **24** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -729,7 +753,9 @@ asserts a **named** test catches each:
 | Bidi | a line reordered over the paragraph instead of over itself, script pieces emitted forwards inside a right-to-left run, a paragraph's end left as no break at all |
 | Faces | a glyph loaded without activating the face's own `FT_Size`, a covered prefix that splits a base from its marks or breaks at a format character, a pixel size rounded to whole pixels |
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable |
-| Allocator | a declined `reallocate` reported as out of memory |
+| Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
+| Caches | the process-lifetime caches left unwarmed |
+| Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose
 anchor no longer applies is reported too, so the script rots loudly rather than
@@ -737,9 +763,11 @@ quietly passing. Writing it caught three expectation strings naming the wrong
 test — which is precisely the failure mode the hand-run version had and could
 not detect.
 
-Measured on macOS/aarch64: **28 seconds warm, 3 minutes 4 seconds cold.**
-HarfBuzz is a large, template-heavy C++ library and dominates the cold build —
-`--quick` exists because of that, not despite it.
+Each case is a rebuild, and the last two are a rebuild plus an install, a
+translate and a link — minutes rather than seconds for the set, which is why
+it is a step of its own rather than part of every push. HarfBuzz is a large,
+template-heavy C++ library and dominates a cold build; `--quick` exists
+because of that, not despite it.
 
 ### Platform coverage
 

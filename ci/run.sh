@@ -125,6 +125,13 @@ if [ $QUICK -eq 0 ]; then
   # and the difference has bitten before -- see tests/consumer/build.zig.
   run 'consumer (module + artifacts)' \
     env -C tests/consumer zig build run
+
+  # What a consumer is HANDED, checked against what was built: every
+  # installed header compiles, is reachable from a documented root, and has
+  # every entry point it declares defined by a library installed beside it.
+  # Four HarfBuzz headers and three FreeType entry points were on the wrong
+  # side of that when this was written.
+  run 'installed headers compile and link' ci/header-link.sh
 fi
 
 #-----------------------------------------------------------------------------
@@ -160,6 +167,17 @@ section 'Build configurations'
 run 'shared library' zig build -Dshared=true
 run 'sanitizer on in ReleaseSafe' \
   zig build -Doptimize=ReleaseSafe -Dsanitize_c=true
+
+# The header gate again, on the other Windows ABI. It sits here rather than
+# in the cross-compilation block because it LINKS and RUNS a probe, which
+# needs a host that can execute the result -- the same reason the msvc
+# target is absent above.
+case "$(uname -s 2> /dev/null)" in
+  MINGW* | MSYS* | CYGWIN* | Windows*)
+    run 'installed headers link (msvc ABI)' \
+      ci/header-link.sh --target=native-native-msvc
+    ;;
+esac
 fi
 
 #-----------------------------------------------------------------------------
