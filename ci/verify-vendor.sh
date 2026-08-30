@@ -40,6 +40,8 @@ trap 'rm -rf "$work"' EXIT
 # used to be written both there and in this file, with nothing comparing them.
 # shellcheck source=ci/pins.sh
 . ci/pins.sh
+# shellcheck source=ci/sha256.sh
+. ci/sha256.sh
 
 # verify <name> <local-dir> <exclude-args...> -- <paths...>
 verify() {
@@ -133,17 +135,9 @@ verify libunibreak libs/libunibreak \
 #-----------------------------------------------------------------------------
 
 printf '\n%sfonts%s %stests/fonts/SHA256SUMS%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
-if command -v sha256sum > /dev/null 2>&1; then
-  checker="sha256sum -c --quiet"
-elif command -v shasum > /dev/null 2>&1; then
-  checker="shasum -a 256 -c --status"
-else
-  checker=""
-fi
-
-if [ -z "$checker" ]; then
+if [ -z "$(sha256_tool)" ]; then
   fail "  no sha256sum or shasum available"
-elif (cd tests/fonts && $checker SHA256SUMS); then
+elif (cd tests/fonts && sha256_verify SHA256SUMS); then
   printf '  %-26s %sidentical%s\n' "$(ls tests/fonts/*.ttf | wc -l | tr -d ' ') fonts + licences" "$GREEN" "$OFF"
 else
   fail "  a committed font or licence file does not match tests/fonts/SHA256SUMS"
