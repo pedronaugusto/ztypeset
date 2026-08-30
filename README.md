@@ -613,6 +613,15 @@ header ever grows an entry point the sweep does not name, because a sweep that
 silently covers less as the surface grows is worse than none: it reads like
 coverage.
 
+`ci/api-surface.sh --gaps` holds the other half. Every entry point has up to
+six homes -- the header, an implementation, a Zig extern, a Zig wrapper, a
+test, this file -- and the script fails if one of them is empty without a
+written reason. Not every hole is a defect: `ztextFaceFont` has no Zig wrapper
+because the Zig `Face` already carries its `Font` as a field, and wrapping the
+accessor too would be a second way to ask one question. That is a decision, so
+it is declared in the script. Anything not declared is a failure, which is the
+difference between a report and a gate.
+
 ### What the tests found
 
 Two bugs worth naming, because both were invisible from reading the code:
