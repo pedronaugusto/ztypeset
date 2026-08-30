@@ -457,11 +457,15 @@ those macros into the `@cImport`; ztext's does not.
 - Only headers whose implementation is actually compiled are installed. A
   header for a module ztext leaves out would compile for a consumer and then
   fail at link; `FT_Stroker_New` was the one that made the point.
-- A shared build compiles with `-fvisibility=hidden`, so the ~10 000 upstream
-  symbols statically inside it stay internal — exported symbols drop from
-  10 218 to 215. The 150 that remain are FreeType's public API, which upstream
-  marks `visibility("default")` itself; if you load a shared ztext beside a
-  system FreeType, link statically or add a version script.
+- A shared build compiles with `-fvisibility=hidden`, so the upstream symbols
+  statically inside it stay internal instead of being exported alongside
+  ztext's own. What remains beyond ztext's entry points is FreeType's public
+  API, which upstream marks `visibility("default")` itself; if you load a
+  shared ztext beside a system FreeType, link statically or add a version
+  script. `ci/measurements.sh` prints the exact counts, and they are printed
+  rather than quoted here on purpose: a macOS `.dylib`, a Linux `.so` and a
+  Windows `.dll` do not export the same set, so any single number in this
+  sentence would be wrong on two platforms out of three.
 - Build options are declared once and mirrored into a Zig `options` module, so
   the wrapper cannot disagree with how the C was compiled.
 - `-fno-exceptions`/`-fno-rtti` are off under the MSVC ABI, where disabling
@@ -515,7 +519,8 @@ in [Font and Face](#font-and-face-are-separate-and-why-the-bitmap-is-copied).
 zig build test        # the whole suite
 zig build test-c      # the C boundary alone
 ci/check-guards.sh    # and prove the guards can fail -- see below
-ci/measurements.sh    # every number this file claims, recomputed
+ci/measurements.sh          # every number this file claims, recomputed
+ci/measurements.sh --check  # ... and compared against what it says
 ```
 
 95 tests. The ones that touch a face, a shaper or a paragraph install
@@ -715,7 +720,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies eighteen deliberate bugs, one at a time, to a copy of the tree, and
+applies **21** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |

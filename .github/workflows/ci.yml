@@ -54,6 +54,12 @@ jobs:
         shell: bash
         run: ci/api-surface.sh --gaps
 
+      # The counts README.md states, recomputed and compared. --with-build
+      # covers the ones that need the suite and the C boundary to have run.
+      - name: Source — README numbers still hold
+        shell: bash
+        run: ci/measurements.sh --check --with-build
+
       # The sanitizer is opt-in, because a library must not force its runtime
       # into a consumer's link. ztext's own Debug run asks for it, and this is
       # what would catch UB in ztext's own C.
