@@ -65,9 +65,9 @@ defer paragraph.deinit();
 // shapingRuns, not visualRuns: one visual run can span several scripts, and
 // HarfBuzz shapes one script at a time.
 for (paragraph.shapingRuns()) |run| {
-    // shapeRun, not shape: the WHOLE text goes in and the run selects part of
-    // it, so HarfBuzz can see the characters either side. Direction and script
-    // come from the run, because that is what a run is for.
+    // shapeRun, not shape: the WHOLE text goes in and the run selects part
+    // of it, so HarfBuzz can see the characters either side. Direction and
+    // script come from the run, because that is what a run is for.
     const glyphs = try shaper.shapeRun(face, text, run, .{});
     for (glyphs) |glyph| {
         const bitmap = try face.renderGlyph(glyph.glyph_id, .a8, .light, 0, 0);
@@ -80,11 +80,16 @@ for (paragraph.shapingRuns()) |run| {
 Pick the face per run from `run.script` when you carry more than one; ztext has
 no fallback chain of its own.
 
+Both blocks on this page are quoted from
+[`examples/quickstart.zig`](examples/quickstart.zig), which `zig build test`
+compiles and runs; a test fails if they stop matching it. They were two copies
+before that, and the two disagreed — see the defect list below.
+
 If the text wraps, ask where it may break, decide with your own width, and
 iterate a `Line` per visual line:
 
 ```zig
-const breaks = paragraph.lineBreaks();   // one entry per byte
+const breaks = paragraph.lineBreaks(); // one entry per byte
 var start: usize = 0;
 while (start < text.len) {
     // Furthest permitted break that still fits. ztext says where a break is
@@ -93,7 +98,11 @@ while (start < text.len) {
 
     const line = try paragraph.line(start, end - start);
     defer line.deinit();
-    for (line.shapingRuns()) |run| { /* shapeRun, as above */ }
+    for (line.shapingRuns()) |run| {
+        // Shaped and rendered exactly as above, per line this time.
+        const glyphs = try shaper.shapeRun(face, text, run, .{});
+        _ = glyphs;
+    }
     start = end;
 }
 ```
@@ -543,11 +552,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**96 tests**, executed twice. The second pass runs the same binary with
+**99 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **192/192 passed**.
+rather than being believed. So `zig build test` reports **198/198 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -723,11 +732,20 @@ were not compiled. A comment in `build.zig` said the lists were restricted to
 headers whose translation units were built. It was prose, and it was wrong in
 seven places; `ci/header-link.sh` is the gate that replaced it.
 
-**The quickstart itemised incorrectly and leaked.** It looped over
-`visualRuns()`, which hands HarfBuzz one run spanning three scripts for
-`"Hello Ελληνικά мир"`, and it omitted `warmup()`, so running it verbatim under
-a debug allocator reported leaks. `shapingRuns()` exists because of the first;
-the example now shows the second.
+**The quickstart itemised incorrectly and leaked, and the fix reached one of
+its two copies.** It looped over `visualRuns()`, which hands HarfBuzz one run
+spanning three scripts for `"Hello Ελληνικά мир"`, and it omitted `warmup()`,
+so running it verbatim under a debug allocator reported leaks. `shapingRuns()`
+exists because of the first.
+
+Then this page was corrected to `shapeRun` — the whole text in, the run
+selecting part of it — and the same example in `src/ztext.zig`'s module doc
+went on shaping `text[run.offset..][0..run.length]`, which is precisely the
+defect this paragraph claimed was fixed. Two homes for one example, and
+nothing compiled either. Now there is one:
+[`examples/quickstart.zig`](examples/quickstart.zig) is a program the build
+runs, both documents quote its marked regions, and a test fails if either has
+drifted.
 
 ### Continuous integration
 
@@ -759,7 +777,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **25** deliberate bugs, one at a time, to a copy of the tree, and
+applies **26** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -771,6 +789,7 @@ asserts a **named** test catches each:
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed |
 | Reproducibility | the environment allowed to reach HarfBuzz |
+| Documentation | a documented example edited away from the program it quotes |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose

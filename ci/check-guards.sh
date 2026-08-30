@@ -361,6 +361,23 @@ case_ "SheenBidi handed memory ztext did not write" \
   "  if (block != NULL) memset(block, 0, (size_t)size);" \
   "  (void)0;"
 
+printf '\n%sDocumentation%s %s(the examples are one text)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# README.md and src/ztext.zig quote examples/quickstart.zig, which the build
+# compiles and runs. Put the old bug back into the README copy -- shaping a
+# SLICE of the text instead of the run in place -- and a named test has to say
+# the document no longer quotes the program. It went the other way once: the
+# README was corrected and the module doc kept the bug for as long as nobody
+# read both.
+case_ "a documented example edited away from the program" \
+  README.md \
+  "README.md quotes the usage example verbatim" \
+  '    // script come from the run, because that is what a run is for.
+    const glyphs = try shaper.shapeRun(face, text, run, .{});' \
+  '    // script come from the run, because that is what a run is for.
+    const glyphs = try shaper.shape(face, text[run.offset..][0..run.length], .{});'
+
 printf '\n%sReproducibility%s %s(the environment must not reach the picture)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
