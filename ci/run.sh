@@ -112,6 +112,11 @@ if [ $QUICK -eq 0 ]; then
   # The C boundary on its own, with no Zig in the picture.
   run 'test-c (C ABI standalone)' zig build test-c
 
+  # And the same boundary two hundred times, because one run cannot see an
+  # intermittent fault. This package shipped a 1.8%-per-run segfault that
+  # every single-run gate was green on. See ci/crash-loop.sh.
+  run 'crash loop (200 x test-c)' ci/crash-loop.sh 200
+
   # Consuming ztext as a dependency is a different code path from building it,
   # and the difference has bitten before -- see tests/consumer/build.zig.
   run 'consumer (module + artifacts)' \

@@ -306,9 +306,42 @@ printf '\n%sAllocator%s %s(ffi/ztext_core.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 case_ "a declined reallocate reported as out of memory" \
   ffi/ztext_core.c \
   "a rendered bitmap survives anything but the next render on its own face" \
-  "  void* fresh = ztextAllocWith(allocator, new_size, backing);" \
+  "  void* fresh = ztextAllocFrom(owner, new_size, backing);" \
   "  if (allocator->reallocate != NULL) return NULL;
-  void* fresh = ztextAllocWith(allocator, new_size, backing);"
+  void* fresh = ztextAllocFrom(owner, new_size, backing);"
+
+# The block header records WHICH allocator issued a block, and every free is
+# routed back to that entry. Route it to whatever is installed instead -- the
+# behaviour before the registry existed -- and a handle created under one
+# allocator and destroyed under another goes to the wrong heap.
+case_ "a block freed through whatever is installed now" \
+  ffi/ztext_core.c \
+  "never returned to the creating allocator" \
+  "  const ZtextAllocator* allocator = g_registry[header->allocator];
+  const size_t total = header->total_size;" \
+  "  const ZtextAllocator* allocator = g_registry[g_installed];
+  const size_t total = header->total_size;"
+
+# The other half: the check that says a library-owned block really is the
+# library's. Free a font through the default allocator by name and the
+# mismatch has to stop the process rather than corrupt a heap.
+case_ "a library-owned block released by the wrong allocator" \
+  ffi/ztext_face.c \
+  "released through the wrong allocator" \
+  "  FT_Done_Face(font->ft);
+  ztextFreeFrom(library->allocator, font);" \
+  "  FT_Done_Face(font->ft);
+  ztextFreeFrom(ZTEXT_ALLOCATOR_DEFAULT, font);"
+
+# SheenBidi 3.0.0 reads a field it has not written on its own
+# allocation-failure path, and ztext's seam zeroes every block it hands over
+# so that read finds NULL. Remove the memset and the poisoned injection arm
+# dies -- every run, at the same injection point, rather than one run in fifty.
+case_ "SheenBidi handed memory ztext did not write" \
+  ffi/ztext_core.c \
+  "during phase: injection-poisoned" \
+  "  if (block != NULL) memset(block, 0, (size_t)size);" \
+  "  (void)0;"
 
 printf '\n'
 if [ $FAILED -eq 0 ]; then

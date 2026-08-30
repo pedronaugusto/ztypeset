@@ -9,11 +9,26 @@
 // Usage: ztext-c-smoke <path-to-font.ttf>
 //===----------------------------------------------------------------------===//
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#define ZTEXT_SMOKE_WRITE(fd, buf, len) (void)_write((fd), (buf), (unsigned)(len))
+#else
+#include <unistd.h>
+#define ZTEXT_SMOKE_WRITE(fd, buf, len) (void)write((fd), (buf), (len))
+#endif
+
 #include "ztext.h"
+
+/// Exit code this test uses when the process faults. Distinct from 1 (a
+/// check failed) and from 2 (it could not start), so a harness can tell a
+/// memory fault from a wrong answer without parsing anything.
+#define ZTEXT_SMOKE_EXIT_FAULT 86
 
 static int failures = 0;
 
@@ -33,6 +48,98 @@ static int failures = 0;
     CHECK(result_ == ZTEXT_RESULT_OK, "%s -> %s (%s)", #expression,      \
           ztextResultName(result_), ztextLastErrorDetail());       \
   } while (0)
+
+//===----------------------------------------------------------------------===//
+// Phase markers.
+//
+// stdout is a fully-buffered pipe whenever this runs under a script, and the
+// whole transcript is well under one buffer -- so a process that dies takes
+// every line it ever printed with it and the report is "exit 139" and nothing
+// else. That is how an intermittent segfault here stayed unlocated.
+//
+// Two things fix that, and both are permanent: stdout is switched to
+// unbuffered in main, and each phase announces itself on stderr, which C
+// guarantees is never fully buffered. ci/crash-loop.sh reads the last marker,
+// so a crash names the phase it died in with nothing to rebuild.
+//===----------------------------------------------------------------------===//
+
+/// The phase now running, kept so the fault reporter below can name it. It is
+/// only ever read from a signal handler, so it is written in one snprintf and
+/// is always NUL-terminated.
+static char g_phase[96] = "start";
+
+static void phase(const char* name) {
+  snprintf(g_phase, sizeof(g_phase), "%s", name);
+  fprintf(stderr, "phase: %s\n", name);
+  fflush(stderr);
+}
+
+/// The same, for a phase that repeats: the injection sweep runs the whole
+/// pipeline 220 times, so "died in the sweep" is not a location and "died at
+/// point 62" is.
+static void phaseAt(const char* name, long index) {
+  snprintf(g_phase, sizeof(g_phase), "%s %ld", name, index);
+  fprintf(stderr, "phase: %s %ld\n", name, index);
+  fflush(stderr);
+}
+
+//===----------------------------------------------------------------------===//
+// A fault names the phase it died in.
+//
+// Without this, a process that faults leaves an exit code and nothing else --
+// "error code 5" from the Zig build runner on Windows, "exit 139" under a
+// POSIX shell -- and neither says where. That is not a theoretical loss: the
+// mutation ci/check-guards.sh plants over the SheenBidi seam produces a memory
+// fault, and that script's whole contract is that a mutation must be caught by
+// a NAMED check rather than by something merely going wrong. A bare exit code
+// names nothing, so the guard could not be written at all.
+//
+// The handler runs in async-signal context: no printf, no malloc, only write()
+// to a fixed descriptor, and _Exit rather than exit so no atexit handler or
+// crash reporter runs on top of whatever is already broken.
+//===----------------------------------------------------------------------===//
+
+static void emit(const char* text) {
+  ZTEXT_SMOKE_WRITE(2, text, strlen(text));
+}
+
+static void reportFault(const char* what) {
+  emit("\nc smoke: FAULT (");
+  emit(what);
+  emit(") during phase: ");
+  emit(g_phase);
+  emit("\n");
+  _Exit(ZTEXT_SMOKE_EXIT_FAULT);
+}
+
+static void onSignal(int sig) {
+  reportFault(sig == SIGSEGV   ? "SIGSEGV"
+              : sig == SIGILL  ? "SIGILL"
+              : sig == SIGFPE  ? "SIGFPE"
+              : sig == SIGABRT ? "SIGABRT"
+                               : "a fatal signal");
+}
+
+#ifdef _WIN32
+/// Windows delivers an access violation as a structured exception first, and
+/// whether the C runtime goes on to translate it into SIGSEGV depends on which
+/// runtime is linked. The unhandled-exception filter does not depend on that.
+static LONG WINAPI onWindowsFault(EXCEPTION_POINTERS* info) {
+  (void)info;
+  reportFault("a structured exception");
+  return EXCEPTION_EXECUTE_HANDLER; /* unreachable: reportFault exits */
+}
+#endif
+
+static void installFaultReporter(void) {
+  signal(SIGSEGV, onSignal);
+  signal(SIGILL, onSignal);
+  signal(SIGFPE, onSignal);
+  signal(SIGABRT, onSignal);
+#ifdef _WIN32
+  SetUnhandledExceptionFilter(onWindowsFault);
+#endif
+}
 
 //===----------------------------------------------------------------------===//
 // A counting allocator, so the seam is measurably in use.
@@ -95,59 +202,81 @@ static int checkPerLibraryAllocator(const unsigned char* font,
   ZtextAllocator a = {countingAllocate, NULL, countingDeallocate, &first};
   ZtextAllocator b = {countingAllocate, NULL, countingDeallocate, &second};
 
-  ztextSetAllocator(&a);
   ZtextLibrary* library = NULL;
+  ZtextFont* the_font = NULL;
+  int failed = 0;
+  size_t first_used = 0u;
+
+  ztextSetAllocator(&a);
   if (ztextLibraryCreate(&library) != ZTEXT_RESULT_OK) {
     printf("  FAIL per-library: could not create a library\n");
-    return 1;
+    failed = 1;
+  }
+  // A font is created here too, so the OTHER half of the claim is covered:
+  // its FreeType memory is the library's, but its hb_face_t comes from the
+  // process-wide seam, which HarfBuzz makes compile-time and therefore
+  // unswitchable. Both have to come back to `a` below.
+  if (!failed && ztextFontCreateFromMemory(library, font, font_size, 0,
+                                           &the_font) != ZTEXT_RESULT_OK) {
+    printf("  FAIL per-library: could not create a font\n");
+    failed = 1;
   }
 
-  // Everything from here on is nominally the second allocator's.
-  ztextSetAllocator(&b);
-  const size_t second_before = second.total_allocations;
-  const size_t first_before = first.total_allocations;
+  if (!failed) {
+    // Everything from here on is nominally the second allocator's.
+    ztextSetAllocator(&b);
+    const size_t second_before = second.total_allocations;
+    const size_t first_before = first.total_allocations;
 
-  uint32_t faces = 0;
-  if (ztextLibraryCountFaces(library, font, font_size, &faces) !=
-      ZTEXT_RESULT_OK) {
-    printf("  FAIL per-library: counting faces failed\n");
-    return 1;
+    uint32_t faces = 0;
+    if (ztextLibraryCountFaces(library, font, font_size, &faces) !=
+        ZTEXT_RESULT_OK) {
+      printf("  FAIL per-library: counting faces failed\n");
+      failed = 1;
+    } else {
+      first_used = first.total_allocations - first_before;
+      const size_t second_used = second.total_allocations - second_before;
+
+      if (first_used == 0) {
+        printf("  FAIL per-library: FreeType made no allocations to "
+               "observe\n");
+        failed = 1;
+      } else if (second_used != 0) {
+        printf("  FAIL per-library: %zu FreeType allocations leaked to the "
+               "process-wide allocator; the library did not capture its own\n",
+               second_used);
+        failed = 1;
+      }
+    }
   }
 
-  const size_t first_used = first.total_allocations - first_before;
-  const size_t second_used = second.total_allocations - second_before;
-
-  if (first_used == 0) {
-    printf("  FAIL per-library: FreeType made no allocations to observe\n");
-    return 1;
-  }
-  if (second_used != 0) {
-    printf("  FAIL per-library: %zu FreeType allocations leaked to the "
-           "process-wide allocator; the library did not capture its own\n",
-           second_used);
-    return 1;
-  }
-
-  // Destroying the library while the OTHER allocator is installed must still
-  // return every byte to the one that issued it.
+  // Destroyed while the OTHER allocator is installed, deliberately. Every
+  // byte must go back to the one that issued it -- the FreeType memory
+  // because the library recorded its allocator, and the HarfBuzz memory
+  // because the block itself did. Getting the second one wrong is what a
+  // reviewer found and what the block header now makes impossible.
+  ztextFontDestroy(the_font);
   ztextLibraryDestroy(library);
   ztextSetAllocator(NULL);
 
-  if (first.live_blocks != 0 || first.live_bytes != 0) {
+  if (!failed && (first.live_blocks != 0 || first.live_bytes != 0)) {
     printf("  FAIL per-library: %zu blocks / %zu bytes never returned to the "
            "creating allocator\n", first.live_blocks, first.live_bytes);
-    return 1;
+    failed = 1;
   }
-  if (second.live_blocks != 0) {
+  if (!failed && second.live_blocks != 0) {
     printf("  FAIL per-library: %zu blocks left with the wrong allocator\n",
            second.live_blocks);
-    return 1;
+    failed = 1;
   }
 
-  printf("  per-library allocator: %zu FreeType allocations followed the "
-         "library across a global swap, 0 went to the new global\n",
-         first_used);
-  return 0;
+  if (!failed) {
+    printf("  per-library allocator: %zu FreeType allocations followed the "
+           "library across a global swap, 0 went to the new global, and the "
+           "font's HarfBuzz memory came back to the allocator that made it\n",
+           first_used);
+  }
+  return failed;
 }
 
 //===----------------------------------------------------------------------===//
@@ -172,6 +301,10 @@ static int checkSteadyStateAllocations(const unsigned char* font,
   ZtextShaper* shaper = NULL;
   int failed = 0;
 
+  // Every path below this point falls through to the single teardown at the
+  // end: a `return` here would leave a stack allocator installed and a stack
+  // Counters registered under it, and the next allocation through either
+  // would be writing into a frame that no longer exists.
   if (ztextLibraryCreate(&library) != ZTEXT_RESULT_OK ||
       ztextFontCreateFromMemory(library, font, font_size, 0, &ffont) !=
           ZTEXT_RESULT_OK ||
@@ -253,6 +386,7 @@ static int checkSteadyStateAllocations(const unsigned char* font,
 typedef struct Injector {
   long budget;   /* allocations to serve before failing; negative = fail */
   size_t live;   /* blocks currently handed out */
+  int poison;    /* fill every block with 0xCD before handing it over */
 } Injector;
 
 static void* injectAllocate(void* user, size_t size, size_t alignment) {
@@ -260,7 +394,14 @@ static void* injectAllocate(void* user, size_t size, size_t alignment) {
   (void)alignment;
   if (injector->budget-- <= 0) return NULL;
   void* block = malloc(size);
-  if (block != NULL) injector->live += 1u;
+  if (block != NULL) {
+    // Malloc's leftovers are whatever the process last had there, which on a
+    // short-lived test is mostly zeros -- so a read of uninitialised memory
+    // looks like a rare crash instead of a bug. Poisoning removes the luck:
+    // see the poisoned arm below.
+    if (injector->poison) memset(block, 0xCD, size);
+    injector->live += 1u;
+  }
   return block;
 }
 
@@ -273,15 +414,39 @@ static void injectDeallocate(void* user, void* block, size_t size,
   free(block);
 }
 
-/// Returns non-zero on a violation.
-static int runInjectionSweep(const unsigned char* font, size_t font_size) {
+/// Walks a failure point across the whole pipeline. Returns non-zero on a
+/// violation, ALWAYS with the process-wide allocator restored and every
+/// handle destroyed -- see the note on the single exit below.
+///
+/// `poison` decides what an allocation that succeeds contains. Both values
+/// matter and both are run:
+///
+///   0  what a host's allocator normally returns, which is malloc's leftovers.
+///   1  0xCD in every byte, which is what an allocator returns when nothing
+///      is allowed to depend on the previous contents.
+///
+/// The poisoned arm exists because of a measured defect. SheenBidi 3.0.0
+/// reads a field it has not written on its own allocation-failure path
+/// (Core/Object.c ObjectCreate, API/SBParagraph.c FinalizeParagraph), and
+/// ztext's SheenBidi seam zeroes every block it hands over so that read finds
+/// a NULL rather than a pointer. With malloc's leftovers the defect segfaulted
+/// about one run in fifty and stayed unlocated; with 0xCD it is every run.
+/// Remove the memset in ztext_core.c's sbAllocateBlock and this arm dies
+/// immediately and always, which is the only kind of gate worth having over an
+/// intermittent fault.
+static int runInjectionSweep(const unsigned char* font, size_t font_size,
+                             int poison) {
   const long points = 220;
+  const char* arm = poison ? "poisoned" : "plain";
   int completed = 0, out_of_memory = 0, other_error = 0;
+  int violated = 0;
 
-  for (long limit = 0; limit < points; limit++) {
+  for (long limit = 0; limit < points && !violated; limit++) {
+    phaseAt(poison ? "injection-poisoned" : "injection", limit);
     Injector injector;
     injector.budget = limit;
     injector.live = 0u;
+    injector.poison = poison;
 
     ZtextAllocator allocator;
     allocator.allocate = injectAllocate;
@@ -299,15 +464,21 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size) {
     ZtextResult result = ZTEXT_RESULT_OK;
     int stopped = 0;
 
+    // A failed step that still wrote its handle is a violation, and it is
+    // recorded rather than returned from: `injector` and `allocator` are on
+    // this frame and the process-wide allocator still points at them, so
+    // leaving here without tearing down and restoring would hand the next
+    // allocation a pointer into a dead frame. Every exit from this loop body
+    // is the bottom of it.
 #define STEP(call, handle)                                                  \
     if (!stopped) {                                                         \
       result = (call);                                                      \
       if (result != ZTEXT_RESULT_OK) {                                      \
         stopped = 1;                                                        \
         if ((handle) != NULL) {                                             \
-          printf("  FAIL injection %ld: %s failed but wrote its handle\n",  \
-                 limit, #call);                                             \
-          return 1;                                                         \
+          printf("  FAIL injection %s %ld: %s failed but wrote its handle\n",\
+                 arm, limit, #call);                                        \
+          violated = 1;                                                     \
         }                                                                   \
       }                                                                     \
     }
@@ -348,23 +519,31 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size) {
     ztextLibraryDestroy(library);
 
     if (injector.live != 0u) {
-      printf("  FAIL injection %ld: %zu blocks leaked after teardown (%s)\n",
-             limit, injector.live, ztextResultName(result));
-      return 1;
+      printf("  FAIL injection %s %ld: %zu blocks leaked after teardown (%s)\n",
+             arm, limit, injector.live, ztextResultName(result));
+      violated = 1;
     }
+
+    // Restored before the frame holding `injector` goes away, on every path
+    // through this body including the two violations above.
+    ztextSetAllocator(NULL);
   }
 
-  printf("  injection: %ld failure points — %d completed, %d out-of-memory, "
-         "%d other typed error, 0 leaks, 0 crashes\n",
-         points, completed, out_of_memory, other_error);
+  if (violated) return 1;
+
+  printf("  injection (%s): %ld failure points - %d completed, %d "
+         "out-of-memory, %d other typed error, 0 leaks, 0 crashes\n",
+         arm, points, completed, out_of_memory, other_error);
 
   // Both ends must occur, or the sweep is not testing what it claims.
   if (completed == 0) {
-    printf("  FAIL injection: no failure point ever let the pipeline finish\n");
+    printf("  FAIL injection %s: no failure point ever let the pipeline "
+           "finish\n", arm);
     return 1;
   }
   if (out_of_memory == 0) {
-    printf("  FAIL injection: no failure point ever reported out-of-memory\n");
+    printf("  FAIL injection %s: no failure point ever reported "
+           "out-of-memory\n", arm);
     return 1;
   }
   return 0;
@@ -452,6 +631,11 @@ static ZtextResult countClose(void* user) {
 }
 
 int main(int argc, char** argv) {
+  // See the phase-marker note above: a buffered transcript is lost on a
+  // crash, which is the one run where it is worth having.
+  setvbuf(stdout, NULL, _IONBF, 0);
+  installFaultReporter();
+
   if (argc < 2) {
     printf("usage: %s <font.ttf>\n", argv[0]);
     return 2;
@@ -482,8 +666,10 @@ int main(int argc, char** argv) {
 
   // The upstreams' process-lifetime caches are populated before the counting
   // allocator goes in, so what it counts is ztext's own working set.
+  phase("warmup");
   ztextWarmup();
 
+  phase("install-counting-allocator");
   Counters counters;
   memset(&counters, 0, sizeof(counters));
   ZtextAllocator allocator;
@@ -499,6 +685,7 @@ int main(int argc, char** argv) {
   CHECK(ztextSetAllocator(&broken) == ZTEXT_RESULT_INVALID_ARGUMENT,
         "an allocator with no allocate should be refused");
 
+  phase("library+font");
   ZtextLibrary* library = NULL;
   CHECK_OK(ztextLibraryCreate(&library));
 
@@ -514,6 +701,7 @@ int main(int argc, char** argv) {
   // font with no axes says 0 and refuses the rest rather than answering with
   // whatever was already in the caller's struct. The Zig suite drives the
   // other half against a variable font.
+  phase("variations");
   ZtextVariationAxis axis;
   memset(&axis, 0xFF, sizeof(axis));
   ZtextVariation wanted;
@@ -539,6 +727,7 @@ int main(int argc, char** argv) {
   CHECK(ztextFontAxisCount(NULL) == 0, "a NULL font should report 0 axes");
 
   // A fractional size through the C boundary, where the 26.6 conversion is.
+  phase("faces");
   ZtextFace* fractional_face = NULL;
   CHECK_OK(ztextFaceCreate(the_font, 0, 24.5f, &fractional_face));
   ZtextFaceMetrics fractional;
@@ -577,6 +766,7 @@ int main(int argc, char** argv) {
          metrics.units_per_em);
 
   // Shape a right-to-left run: the font passed in is Hebrew.
+  phase("shape");
   ZtextShaper* shaper = NULL;
   CHECK_OK(ztextShaperCreate(&shaper));
 
@@ -611,6 +801,7 @@ int main(int argc, char** argv) {
   CHECK(extents.x_advance > 0.0f, "a shaped run should advance the pen");
   CHECK(extents.x_max > extents.x_min, "extents should enclose some ink");
 
+  phase("raster");
   // Rasterise.
   if (glyphs != NULL && glyph_count > 0) {
     ZtextGlyphBitmap bitmap;
@@ -632,6 +823,7 @@ int main(int argc, char** argv) {
           "an offset render should still produce a non-empty bitmap");
   }
 
+  phase("outline");
   // Outline decomposition: a letter's outline has at least one contour, and
   // every contour opened by move_to is closed exactly once.
   if (glyphs != NULL && glyph_count > 0) {
@@ -646,6 +838,7 @@ int main(int argc, char** argv) {
           "every contour opened should be closed exactly once");
   }
 
+  phase("synthetic");
   // Synthetic bold widens the advance; synthetic oblique moves the ink
   // without touching it. Reset each afterwards so nothing below inherits it.
   if (glyphs != NULL && glyph_count > 0) {
@@ -672,6 +865,7 @@ int main(int argc, char** argv) {
     CHECK_OK(ztextFaceSetSyntheticOblique(face, 0));
   }
 
+  phase("bidi");
   // Bidi, with no face involved at all.
   const char* mixed = "a \xd7\xa9\xd7\x9c b";
   ZtextParagraph* paragraph = NULL;
@@ -707,6 +901,7 @@ int main(int argc, char** argv) {
 
   ztextParagraphDestroy(paragraph);
 
+  phase("malformed");
   // Malformed input must be refused rather than substituted.
   const char bad_utf8[] = {(char)0xC3, (char)0x28, 0};
   CHECK(ztextShaperShapeUtf8(shaper, face, bad_utf8, 2, 0, 2, &params) ==
@@ -716,6 +911,7 @@ int main(int argc, char** argv) {
                                  &paragraph) == ZTEXT_RESULT_INVALID_UTF8,
         "malformed UTF-8 should be refused by the bidi analyser");
 
+  phase("count-faces");
   // Face counting: a plain TTF has exactly one face.
   uint32_t face_count = 0;
   CHECK_OK(ztextLibraryCountFaces(library, font, font_size, &face_count));
@@ -731,6 +927,7 @@ int main(int argc, char** argv) {
   CHECK(ztextLibrarySetSdfSpread(library, 33) == ZTEXT_RESULT_INVALID_ARGUMENT,
         "a spread above FreeType's range should be refused");
 
+  phase("null-destructors");
   // NULL handles are tolerated by every destructor.
   ztextShaperDestroy(NULL);
   ztextFaceDestroy(NULL);
@@ -744,6 +941,7 @@ int main(int argc, char** argv) {
   ztextFontDestroy(the_font);
   ztextLibraryDestroy(library);
 
+  phase("main-teardown");
   printf("  allocations: %zu total, %zu live, %zu bytes live\n",
          counters.total_allocations, counters.live_blocks, counters.live_bytes);
   CHECK(counters.total_allocations > 0,
@@ -755,13 +953,27 @@ int main(int argc, char** argv) {
 
   // These install allocators of their own, so they come after the balance
   // check above rather than inside it.
+  phase("per-library");
   if (checkPerLibraryAllocator(font, font_size) != 0) failures++;
+  phase("steady-state");
   if (checkSteadyStateAllocations(font, font_size) != 0) failures++;
 
-  // Injection sweep last: it walks a failure point across the whole pipeline.
-  if (runInjectionSweep(font, font_size) != 0) failures++;
+  // Injection sweeps last: they walk a failure point across the whole
+  // pipeline. The POISONED arm runs first, deliberately. Anything that reads
+  // memory before writing it faults there on every run, and in the plain arm
+  // on roughly one run in fifty -- so running the deterministic arm first is
+  // what makes a fault reproducible at the point it is reported, instead of
+  // landing wherever the previous contents of the heap happened to send it.
+  phase("injection-sweep-poisoned");
+  if (runInjectionSweep(font, font_size, 1) != 0) failures++;
+
+  // The same sweep over an allocator that returns malloc's leftovers, which
+  // is what a host's allocator normally hands back.
+  phase("injection-sweep");
+  if (runInjectionSweep(font, font_size, 0) != 0) failures++;
   ztextSetAllocator(NULL);
 
+  phase("done");
   free(font);
 
   if (failures != 0) {

@@ -201,10 +201,10 @@ surfaced rather than hidden behind a per-object parameter that could not be
 honoured.
 
 FreeType is the exception, and it is genuinely per-library: ztext builds it
-with `FT_New_Library` rather than `FT_Init_FreeType`, copies the installed
-allocator into the `Library` at creation, and points FreeType's `FT_Memory` at
-that copy. So a `Library` and its faces keep allocating and freeing through the
-allocator they were born with even if the process-wide one is replaced
+with `FT_New_Library` rather than `FT_Init_FreeType`, records the installed
+allocator in the `Library` at creation, and points FreeType's `FT_Memory` at
+that record. So a `Library` and its faces keep allocating and freeing through
+the allocator they were born with even if the process-wide one is replaced
 underneath them. A test in `tests/c_smoke.c` proves it by swapping the global
 mid-life and watching which allocator the FreeType traffic goes to — the claim
 was false once, in a way nothing noticed, because every test installed one
@@ -218,6 +218,46 @@ sized allocator — Zig's `std.mem.Allocator`, a pool, an arena with accounting 
 therefore needs no bookkeeping of its own. It costs two pointer-sized words per
 allocation — sixteen bytes on a 64-bit target — and it is why the Zig bridge is
 three straight calls into `std.mem.Allocator` rather than a shadow table.
+
+### Every block is freed through the allocator that made it
+
+That sentence used to be a rule in a comment, and the rule was not kept.
+HarfBuzz's seam is compile-time and therefore process-wide, so an `hb_face_t`
+allocated under one installed allocator was destroyed under whichever one was
+installed later — while the FreeType memory of the *same font* went back to the
+right one. One handle, two heaps, and nothing that could tell you.
+
+So ztext does not rely on the rule being kept. Every allocator ever installed
+gets an entry in a small registry, the block header records the **index** of
+the one that issued the block, and every free and every grow is routed back to
+that entry rather than to whatever is installed at the time. The index shares
+the sixteen bytes the size and alignment already occupied, so it costs no
+memory at all.
+
+What that buys, concretely:
+
+- Swapping the process-wide allocator with live handles is **safe**, not
+  undefined. `resetAllocator` has a precondition a host can actually meet.
+- The upstreams' process-lifetime caches — HarfBuzz's language intern table is
+  the one that grows — are reallocated through the allocator that made them,
+  not through whichever came next.
+- A ztext-internal mistake, a block allocated in one place and released by
+  naming another, **stops the process** with both allocators named on stderr
+  and exit code `ZTEXT_EXIT_ALLOCATOR_MISMATCH` (70). The block is not freed:
+  leaking one block is recoverable, handing a pointer to a heap that never
+  issued it is not. `ci/check-guards.sh` plants that mistake to prove the check
+  is live.
+
+What it costs: one `ZtextAllocator` per **distinct** allocator ever installed
+(installing the same one twice reuses its entry), allocated with `malloc` and
+never freed, because it has to outlive the last block it issued. That is the
+only allocation ztext makes outside the installed allocator.
+
+The header check is a detector, not a checksum: sixteen bytes leave no room for
+a magic number, so a prefix that was overrun into garbage whose two fields
+happen to be in range still passes. What it does catch, for free on every
+deallocation, is an allocator index past the end of the registry and an
+alignment that is not a power of two at or below `max_align_t`'s.
 
 `reallocate` is optional, and returning null from it means *"I decline"*, not
 *"out of memory"* — ztext falls back to allocate-copy-free either way. That
