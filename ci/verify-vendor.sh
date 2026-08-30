@@ -54,7 +54,18 @@ verify() {
   fi
 
   local clone="$work/$name"
-  if ! git clone --quiet --depth 1 --branch "$tag" "$url" "$clone" 2>/dev/null; then
+  # The three -c flags are all Windows, and without them this script reports a
+  # pristine tree as modified:
+  #   core.autocrlf  Git for Windows installs with autocrlf=true, so a fresh
+  #                  clone arrives with CRLF and every single vendored file
+  #                  "DIFFERS" -- a total false positive that reads exactly
+  #                  like a tampered-with tree.
+  #   core.eol       the same thing by the other route.
+  #   core.longpaths HarfBuzz's src/OT/Layout/... paths overrun MAX_PATH under
+  #                  a temp directory, and the checkout then fails PARTWAY:
+  #                  files are reported missing rather than the clone failing.
+  # None of them change anything on Linux or macOS.
+  if ! git -c core.autocrlf=false -c core.eol=lf -c core.longpaths=true        clone --quiet --depth 1 --branch "$tag" "$url" "$clone" 2>/dev/null; then
     fail "  clone failed"
     return
   fi
