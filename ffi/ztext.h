@@ -247,6 +247,13 @@ typedef struct ZtextAllocator {
 /// `user` must outlive every handle allocated through it. Passing NULL
 /// restores malloc/free.
 ///
+/// Calls ztextWarmup() first, so the upstreams' process-lifetime caches are
+/// charged to whatever was installed BEFORE this call rather than to the
+/// allocator arriving now. Those caches are never freed, so an allocator that
+/// paid for one can never report a balanced heap -- and the host would have
+/// had to know to warm up first to avoid it. See ztextWarmup for the two
+/// caches this cannot reach, which need a face and so belong to the host.
+///
 /// EVERY BLOCK IS FREED THROUGH THE ALLOCATOR THAT MADE IT, BY CONSTRUCTION
 /// RATHER THAN BY DISCIPLINE. Every allocator ever installed keeps an entry in
 /// a small registry; each block's header records the INDEX of the entry that
@@ -346,8 +353,11 @@ ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 /// host that audits and uses either can warm them by shaping one throwaway run
 /// before installing its allocator.
 ///
-/// Call it before ztextSetAllocator if you intend to audit. Safe to call more
-/// than once, and safe never to call.
+/// ztextSetAllocator calls this before it installs anything, so a host that
+/// audits its heap does not have to know to. Call it directly only to warm the
+/// caches earlier than that -- or to warm the two above that need a face, by
+/// shaping a throwaway run. Safe to call more than once, and safe never to
+/// call.
 ZTEXT_API void ztextWarmup(void);
 
 //===----------------------------------------------------------------------===//

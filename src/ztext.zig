@@ -8,14 +8,10 @@
 //! ```zig
 //! const ztext = @import("ztext");
 //!
-//! // Warm the caches the upstreams keep for the life of the process, so a
-//! // tracking allocator installed next sees only ztext's working set.
-//! ztext.warmup();
-//!
-//! // A pointer, and it must outlive every handle: each Library captures the
-//! // allocator it was created with.
-//! const gpa = gpa_state.allocator();
-//! try ztext.setAllocator(&gpa);
+//! // Copied, not borrowed: ztext keeps its own copy for as long as any handle
+//! // can reach it. Installing also warms the caches the upstreams keep for the
+//! // life of the process, so this allocator only ever sees ztext's working set.
+//! try ztext.setAllocator(gpa_state.allocator());
 //! defer ztext.resetAllocator();
 //!
 //! const library = try ztext.Library.init();
@@ -77,8 +73,10 @@ pub const lastErrorDetail = error_mod.lastDetail;
 /// Populates the process-global caches the upstreams never free before exit,
 /// so a tracking allocator installed afterwards sees a balanced heap.
 ///
-/// Optional; nothing needs it to work correctly. See `ffi/ztext.h` and
-/// UPSTREAM.md for what those caches are and why they exist.
+/// `setAllocator` calls this before it installs anything, so a host never has
+/// to know to. Two caches are out of its reach because both need a real face:
+/// shape one throwaway run before installing if you audit and use either. See
+/// `ffi/ztext.h` and UPSTREAM.md for what they are.
 pub fn warmup() void {
     c.ztextWarmup();
 }

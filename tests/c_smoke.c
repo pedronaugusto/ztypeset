@@ -664,11 +664,11 @@ int main(int argc, char** argv) {
                                      ZTEXT_VERSION_PATCH),
         "the header and the library disagree about ztext's version");
 
-  // The upstreams' process-lifetime caches are populated before the counting
-  // allocator goes in, so what it counts is ztext's own working set.
-  phase("warmup");
-  ztextWarmup();
-
+  // No ztextWarmup() here on purpose. Installing an allocator warms the
+  // upstreams' process-lifetime caches first, so what this counts is ztext's
+  // own working set without the host having been told to ask -- and this
+  // phase is what proves it, since a count that only balances because the
+  // test remembered would prove nothing about a host that did not.
   phase("install-counting-allocator");
   Counters counters;
   memset(&counters, 0, sizeof(counters));

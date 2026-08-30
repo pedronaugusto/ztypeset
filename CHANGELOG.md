@@ -124,6 +124,24 @@ says.
 
 ### Changed
 
+- **`ztext.setAllocator` takes a `std.mem.Allocator` by value.** It took a
+  `*const std.mem.Allocator` whose pointee the caller had to keep alive for
+  longer than a caller can compute: the C side copies the bridge — `user`
+  included — into every `Library`, and a library's FreeType memory outlives
+  the install that made it. ztext now copies the allocator into a slot of its
+  own, one per distinct allocator ever installed, allocated with `malloc` and
+  never freed — the same bargain `ffi/ztext_core.c` already makes for its
+  registry entries. Installing the same allocator twice reuses its slot, which
+  is gated.
+- **`ztextSetAllocator` warms the process-lifetime caches before it installs.**
+  HarfBuzz's singletons are never freed in this build, so whichever allocator
+  paid for one can never report a balanced heap; the fix was a documented rule
+  saying to call `ztextWarmup` first, which a host could only discover by not
+  following it. The warm-up now happens inside `ztextSetAllocator`, before the
+  swap, so the caches are charged to whatever was installed before the call.
+  `ztextWarmup` stays public for the two caches that need a real face and so
+  cannot be reached from inside ztext. No test warms up by hand any more,
+  which is what makes the mutation that deletes the internal call meaningful.
 - **No handle has a destruction order.** A `ZtextLibrary` may be destroyed
   before the fonts and faces made from it: whichever of a pair is released
   second frees what they share. Previously a library destroyed first left every

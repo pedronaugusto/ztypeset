@@ -382,7 +382,8 @@ case_ "a rejected shape leaves the previous run queryable" \
   "  // shaper->shaped = false;
   // shaper->glyphs.count = 0u;"
 
-printf '\n%sAllocator%s %s(ffi/ztext_core.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
+printf '\n%sAllocator%s %s(the seam, both sides of it)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
 
 # Named, like every other case here. It asserted the substring "error" once,
 # which any build failure satisfies — including one caused by a typo in the
@@ -419,14 +420,27 @@ case_ "a library-owned block released by the wrong allocator" \
 
 # HarfBuzz's process-lifetime singletons are never freed in this build --
 # hb_atexit expands to nothing without HAVE_ATEXIT -- so a host that audits its
-# heap only balances if ztextWarmup() populated them before its allocator went
-# in. Delete the call and the C boundary's own accounting says so.
+# heap only balances if they were populated before its allocator went in.
+# ztextSetAllocator is the one place that does that, and no test warms up by
+# hand any more, so deleting it there deletes it everywhere: the C boundary's
+# own accounting says so.
 case_ "the process-lifetime caches left unwarmed" \
-  tests/c_smoke.c \
+  ffi/ztext_core.c \
   "blocks leaked" \
-  "  phase(\"warmup\");
-  ztextWarmup();" \
-  "  phase(\"warmup\");"
+  "  ztextWarmup();" \
+  ""
+
+# A slot outlives every block its allocator issued, so slots are never
+# freed -- which makes one slot per install a leak with a slow fuse and no
+# allocator left to report it. A host that installs per frame, or a suite
+# that installs per test, is exactly the shape that finds it late.
+case_ "an allocator slot per install rather than per allocator" \
+  src/memory.zig \
+  "installing the same allocator twice reuses its slot" \
+  "    for (slots.items) |slot| {
+        if (slot.ptr == gpa.ptr and slot.vtable == gpa.vtable) return slot;
+    }" \
+  ""
 
 # SheenBidi 3.0.0 reads a field it has not written on its own
 # allocation-failure path, and ztext's seam zeroes every block it hands over

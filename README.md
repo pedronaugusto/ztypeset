@@ -33,14 +33,10 @@ Status: **v0.1**. See [Scope](#scope) for what is deliberately absent.
 ```zig
 const ztext = @import("ztext");
 
-// Warm the caches the upstreams keep for the life of the process, so a
-// tracking allocator installed next sees only ztext's working set.
-ztext.warmup();
-
-// A pointer, and it must outlive every handle: each Library captures the
-// allocator it was created with.
-const gpa = gpa_state.allocator();
-try ztext.setAllocator(&gpa);
+// Copied, not borrowed: ztext keeps its own copy for as long as any handle
+// can reach it. Installing also warms the caches the upstreams keep for the
+// life of the process, so this allocator only ever sees ztext's working set.
+try ztext.setAllocator(gpa_state.allocator());
 defer ztext.resetAllocator();
 
 const library = try ztext.Library.init();
@@ -586,11 +582,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**112 tests**, executed twice. The second pass runs the same binary with
+**113 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **224/224 passed**.
+rather than being believed. So `zig build test` reports **226/226 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -635,8 +631,9 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
   and keeps drawing cannot redraw last frame's text.
 - **Extents refuse a face the run was not shaped against**, or the same face
   resized since.
-- **A library keeps its own allocator** when the process-wide one is replaced —
-  which is what `setAllocator` taking a pointer is for.
+- **A library keeps its own allocator** when the process-wide one is replaced,
+  and a face's glyph buffer is its library's however long after the face it is
+  first drawn.
 - **Shaping runs tile the paragraph exactly once**, split by both direction and
   script, with the script pieces reversed inside a right-to-left run.
 - **Bracket mirroring stays HarfBuzz's job**: `(` shaped right-to-left must
@@ -751,8 +748,9 @@ directly" example could never have worked, while every in-repo test passed.
 five places; the shims ignored their `FT_Memory` and used the global. Swapping
 allocators mid-life then handed a library's FreeType blocks to an allocator
 that never issued them — an abort under Zig's DebugAllocator, heap corruption
-under a pool. Both halves are fixed, and `setAllocator` takes a pointer
-precisely so the Zig wrapper cannot re-break it.
+under a pool. Both halves are fixed, and the Zig wrapper cannot re-break it:
+`setAllocator` copies the allocator into a slot ztext owns and never frees, so
+there is no single mutable global for a later install to overwrite.
 
 **Seven headers promised an API that was not there.** Four HarfBuzz headers —
 `hb-gpu.h`, `hb-raster.h`, `hb-subset-depend.h`, `hb-vector.h` — were installed
@@ -770,7 +768,9 @@ seven places; `ci/header-link.sh` is the gate that replaced it.
 its two copies.** It looped over `visualRuns()`, which hands HarfBuzz one run
 spanning three scripts for `"Hello Ελληνικά мир"`, and it omitted `warmup()`,
 so running it verbatim under a debug allocator reported leaks. `shapingRuns()`
-exists because of the first.
+exists because of the first. The second is gone at the root rather than by
+remembering: `setAllocator` warms those caches itself, so there is no longer a
+call to omit.
 
 Then this page was corrected to `shapeRun` — the whole text in, the run
 selecting part of it — and the same example in `src/ztext.zig`'s module doc
@@ -904,7 +904,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **42** deliberate bugs, one at a time, to a copy of the tree, and
+applies **43** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -916,8 +916,8 @@ asserts a **named** test catches each:
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for |
-| Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
-| Caches | the process-lifetime caches left unwarmed |
+| Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, an allocator slot taken per install rather than per allocator, SheenBidi handed memory ztext did not write |
+| Caches | the process-lifetime caches left unwarmed — planted where `ztextSetAllocator` warms them, since nothing warms up by hand any more |
 | Handle lifetimes | a font released without telling the library that owns it, a face's glyph buffer charged to whatever allocator is installed when it is first drawn |
 | Reproducibility | the environment allowed to reach HarfBuzz |
 | Hinting | the autohinter's glyph coverage taken from the character map alone, and the language its coverage pass interns left cold |

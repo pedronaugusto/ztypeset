@@ -145,6 +145,13 @@ ZtextResult ztextSetAllocator(const ZtextAllocator* alloc) {
   if (alloc->allocate == NULL || alloc->deallocate == NULL) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
+  // The upstreams' process-lifetime caches, populated HERE -- before the swap,
+  // so they are charged to whatever was installed before this call and never
+  // to the allocator arriving now. They are never freed, so an allocator that
+  // issued one can never balance, and "call ztextWarmup first" was a rule a
+  // host had to know and could only discover by not following it. Idempotent,
+  // and free after the first time.
+  ztextWarmup();
   const ZtextAllocatorId id = registerAllocator(alloc);
   // Same bargain: a registry that could not grow leaves the installed
   // allocator exactly as it was.
