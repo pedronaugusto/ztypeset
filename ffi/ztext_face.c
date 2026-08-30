@@ -411,13 +411,19 @@ static bool isMark(hb_unicode_funcs_t* unicode, uint32_t cp) {
   }
 }
 
-ZtextResult ztextFontCoveredPrefix(const ZtextFont* font, const char* utf8,
-                                   size_t length, size_t* out) {
+ZtextResult ztextFontCoveredPrefix(const ZtextFont* font, const void* text,
+                                   size_t length, ZtextEncoding encoding,
+                                   size_t* out) {
   if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
   *out = 0u;
   if (font == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (utf8 == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (!ztextIsValidUtf8(utf8, length)) return ZTEXT_RESULT_INVALID_UTF8;
+  if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (ztextEncodingUnitSize(encoding) == 0u) {
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+  if (!ztextTextIsWellFormed(text, length, encoding)) {
+    return ZTEXT_RESULT_INVALID_TEXT;
+  }
   if (length == 0u) return ZTEXT_RESULT_OK;
 
   hb_unicode_funcs_t* unicode = hb_unicode_funcs_get_default();
@@ -426,7 +432,7 @@ ZtextResult ztextFontCoveredPrefix(const ZtextFont* font, const char* utf8,
   size_t boundary = 0u;
   while (i < length) {
     uint32_t cp = 0u;
-    const size_t step = ztextDecodeUtf8(utf8 + i, length - i, &cp);
+    const size_t step = ztextTextDecode(text, length, encoding, i, &cp);
 
     if (!ignorableForCoverage(unicode, cp) &&
         FT_Get_Char_Index(font->ft, (FT_ULong)cp) == 0u) {
@@ -443,7 +449,7 @@ ZtextResult ztextFontCoveredPrefix(const ZtextFont* font, const char* utf8,
       break;
     }
     uint32_t next = 0u;
-    ztextDecodeUtf8(utf8 + i, length - i, &next);
+    ztextTextDecode(text, length, encoding, i, &next);
     if (!isMark(unicode, next)) boundary = i;
   }
 

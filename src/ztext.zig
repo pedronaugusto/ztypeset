@@ -102,6 +102,7 @@ pub const ScriptRun = types_mod.ScriptRun;
 pub const Direction = types_mod.Direction;
 pub const ClusterLevel = types_mod.ClusterLevel;
 pub const BaseDirection = types_mod.BaseDirection;
+pub const Encoding = types_mod.Encoding;
 pub const RenderMode = types_mod.RenderMode;
 pub const Hinting = types_mod.Hinting;
 pub const tag = types_mod.tag;

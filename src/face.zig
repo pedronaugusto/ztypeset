@@ -14,6 +14,7 @@ const std = @import("std");
 const c = @import("c.zig");
 const err = @import("error.zig");
 const types = @import("types.zig");
+const text_mod = @import("text.zig");
 
 /// Owns a FreeType library and the modules registered in it.
 ///
@@ -265,8 +266,11 @@ pub const Font = struct {
         try err.check(c.ztextFontSetNamedInstance(self.handle, index));
     }
 
-    /// How many leading bytes of `utf8` this font can draw, for a host walking
-    /// its own fallback list.
+    /// How many leading code units of `text` this font can draw, for a host
+    /// walking its own fallback list.
+    ///
+    /// `text` is a slice of `u8`, `u16` or `u32`; the answer is in the same
+    /// units, so it slices the same value you passed.
     ///
     /// ztext does not own the list -- which font to fall back to is a policy
     /// question -- but it owns the part that is not: the prefix never ends
@@ -274,9 +278,16 @@ pub const Font = struct {
     /// same font, and format characters like ZWJ never break a run.
     ///
     /// A prefix of 0 means this font cannot start the text at all.
-    pub fn coveredPrefix(self: Font, utf8: []const u8) err.Error!usize {
+    pub fn coveredPrefix(self: Font, text: anytype) err.Error!usize {
+        const view = text_mod.view(text);
         var out: usize = 0;
-        try err.check(c.ztextFontCoveredPrefix(self.handle, utf8.ptr, utf8.len, &out));
+        try err.check(c.ztextFontCoveredPrefix(
+            self.handle,
+            view.ptr,
+            view.len,
+            view.encoding,
+            &out,
+        ));
         return out;
     }
 };

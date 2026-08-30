@@ -10,8 +10,8 @@ pub const Error = error{
     /// A null handle, an empty buffer, an out-of-range index, or a face with
     /// no pixel size set.
     InvalidArgument,
-    /// The text was not well-formed UTF-8.
-    InvalidUtf8,
+    /// The text was not well-formed in the encoding it was passed in.
+    InvalidText,
     /// FreeType refused the bytes: not a font, truncated, or broken.
     BadFont,
     /// A font in a format this build does not compile support for.
@@ -44,7 +44,7 @@ pub fn check(result: c.Result) Error!void {
         .ok => {},
         .out_of_memory => Error.OutOfMemory,
         .invalid_argument => Error.InvalidArgument,
-        .invalid_utf8 => Error.InvalidUtf8,
+        .invalid_text => Error.InvalidText,
         .bad_font => Error.BadFont,
         .unsupported => Error.Unsupported,
         .glyph_not_found => Error.GlyphNotFound,

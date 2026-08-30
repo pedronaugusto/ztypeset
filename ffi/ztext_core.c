@@ -602,8 +602,8 @@ const char* ztextResultName(ZtextResult result) {
       return "out of memory";
     case ZTEXT_RESULT_INVALID_ARGUMENT:
       return "invalid argument";
-    case ZTEXT_RESULT_INVALID_UTF8:
-      return "invalid UTF-8";
+    case ZTEXT_RESULT_INVALID_TEXT:
+      return "text not well-formed in its encoding";
     case ZTEXT_RESULT_BAD_FONT:
       return "bad font";
     case ZTEXT_RESULT_UNSUPPORTED:
@@ -690,10 +690,26 @@ ZtextResult ztextFromFtError(FT_Error error) {
 }
 
 //===----------------------------------------------------------------------===//
-// UTF-8
+// Text
 //===----------------------------------------------------------------------===//
 
-bool ztextIsValidUtf8(const char* text, size_t length) {
+size_t ztextEncodingUnitSize(ZtextEncoding encoding) {
+  switch (encoding) {
+    case ZTEXT_ENCODING_UTF8:
+      return 1u;
+    case ZTEXT_ENCODING_UTF16:
+      return 2u;
+    case ZTEXT_ENCODING_UTF32:
+      return 4u;
+    default:
+      // Not an encoding this build names. Reported as a size of zero rather
+      // than defaulted to one, so a caller compiled against a newer header
+      // gets ZTEXT_RESULT_INVALID_ARGUMENT instead of its text read as UTF-8.
+      return 0u;
+  }
+}
+
+static bool isValidUtf8(const char* text, size_t length) {
   const unsigned char* p = (const unsigned char*)text;
   size_t i = 0;
 
@@ -747,7 +763,52 @@ bool ztextIsValidUtf8(const char* text, size_t length) {
   return true;
 }
 
-size_t ztextDecodeUtf8(const char* text, size_t length, uint32_t* out) {
+/// A high surrogate must be followed by a low one, and a low one may not
+/// stand alone. Nothing else in UTF-16 can be malformed: every other unit is
+/// a character.
+static bool isValidUtf16(const uint16_t* text, size_t length) {
+  for (size_t i = 0u; i < length; i++) {
+    const uint16_t unit = text[i];
+    if (unit < 0xD800u || unit > 0xDFFFu) continue;
+    if (unit >= 0xDC00u) return false;   // A low surrogate with no high one.
+    if (i + 1u >= length) return false;  // A high surrogate at the end.
+    const uint16_t low = text[i + 1u];
+    if (low < 0xDC00u || low > 0xDFFFu) return false;
+    i++;
+  }
+  return true;
+}
+
+/// One unit, one character -- so the only malformations are values that are
+/// not scalars at all.
+static bool isValidUtf32(const uint32_t* text, size_t length) {
+  for (size_t i = 0u; i < length; i++) {
+    const uint32_t code = text[i];
+    if (code > 0x10FFFFu) return false;
+    if (code >= 0xD800u && code <= 0xDFFFu) return false;
+  }
+  return true;
+}
+
+bool ztextTextIsWellFormed(const void* text, size_t length,
+                           ZtextEncoding encoding) {
+  // A zero length is well-formed in every encoding, including with a NULL
+  // pointer: an empty label is not a malformed one.
+  if (length == 0u) return true;
+  if (text == NULL) return false;
+  switch (encoding) {
+    case ZTEXT_ENCODING_UTF8:
+      return isValidUtf8((const char*)text, length);
+    case ZTEXT_ENCODING_UTF16:
+      return isValidUtf16((const uint16_t*)text, length);
+    case ZTEXT_ENCODING_UTF32:
+      return isValidUtf32((const uint32_t*)text, length);
+    default:
+      return false;
+  }
+}
+
+static size_t decodeUtf8(const char* text, size_t length, uint32_t* out) {
   const unsigned char* p = (const unsigned char*)text;
   const unsigned char lead = p[0];
 
@@ -782,9 +843,48 @@ size_t ztextDecodeUtf8(const char* text, size_t length, uint32_t* out) {
   return extra + 1u;
 }
 
-bool ztextSplitsUtf8Character(const char* text, size_t length, size_t index) {
+size_t ztextTextDecode(const void* text, size_t length,
+                       ZtextEncoding encoding, size_t index, uint32_t* out) {
+  switch (encoding) {
+    case ZTEXT_ENCODING_UTF16: {
+      const uint16_t* units = (const uint16_t*)text;
+      const uint16_t lead = units[index];
+      if (lead >= 0xD800u && lead <= 0xDBFFu && index + 1u < length) {
+        const uint32_t high = (uint32_t)(lead - 0xD800u);
+        const uint32_t low = (uint32_t)(units[index + 1u] - 0xDC00u);
+        *out = 0x10000u + ((high << 10) | low);
+        return 2u;
+      }
+      *out = lead;
+      return 1u;
+    }
+    case ZTEXT_ENCODING_UTF32:
+      *out = ((const uint32_t*)text)[index];
+      return 1u;
+    case ZTEXT_ENCODING_UTF8:
+    default:
+      return decodeUtf8((const char*)text + index, length - index, out);
+  }
+}
+
+bool ztextTextSplitsCharacter(const void* text, size_t length,
+                              ZtextEncoding encoding, size_t index) {
   if (index >= length) return false;
-  return ((unsigned char)text[index] & 0xC0u) == 0x80u;
+  switch (encoding) {
+    case ZTEXT_ENCODING_UTF16: {
+      // Validated text has no unpaired low surrogate, so a low surrogate is
+      // always the second half of a pair -- and a boundary there is inside a
+      // character.
+      const uint16_t unit = ((const uint16_t*)text)[index];
+      return unit >= 0xDC00u && unit <= 0xDFFFu;
+    }
+    case ZTEXT_ENCODING_UTF32:
+      // One unit, one character: no index can be inside one.
+      return false;
+    case ZTEXT_ENCODING_UTF8:
+    default:
+      return (((const unsigned char*)text)[index] & 0xC0u) == 0x80u;
+  }
 }
 
 //===----------------------------------------------------------------------===//

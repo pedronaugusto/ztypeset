@@ -93,13 +93,15 @@ int main(int argc, char** argv) {
   params.script = ZTEXT_TAG('L', 'a', 't', 'n');
 
   for (int i = 0; i < 32; i++) {
-    ztextShaperShapeUtf8(shaper, face, sentence, sentence_length, 0,
+    ztextShaperShape(shaper, face, sentence, sentence_length,
+                     ZTEXT_ENCODING_UTF8, 0,
                          sentence_length, &params);
   }
   const long shape_runs = 20000;
   clock_t start = clock();
   for (long i = 0; i < shape_runs; i++) {
-    ztextShaperShapeUtf8(shaper, face, sentence, sentence_length, 0,
+    ztextShaperShape(shaper, face, sentence, sentence_length,
+                     ZTEXT_ENCODING_UTF8, 0,
                          sentence_length, &params);
   }
   clock_t elapsed = clock() - start;
@@ -174,7 +176,8 @@ int main(int argc, char** argv) {
   ztextFontCreateFromMemory(library, font, (size_t)file_size, 0, &measured);
   ZtextFace* faces[4];
   ztextFaceCreate(measured, 0, sizes[0], &faces[0]);
-  ztextShaperShapeUtf8(shaper, faces[0], sentence, sentence_length, 0,
+  ztextShaperShape(shaper, faces[0], sentence, sentence_length,
+                   ZTEXT_ENCODING_UTF8, 0,
                        sentence_length, &params);
   ztextFaceRenderGlyph(faces[0], glyphs[0], ZTEXT_RENDER_MODE_A8,
                        ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
@@ -183,7 +186,8 @@ int main(int argc, char** argv) {
   // Three more sizes over the same font.
   for (size_t i = 1; i < 4; i++) {
     ztextFaceCreate(measured, 0, sizes[i], &faces[i]);
-    ztextShaperShapeUtf8(shaper, faces[i], sentence, sentence_length, 0,
+    ztextShaperShape(shaper, faces[i], sentence, sentence_length,
+                     ZTEXT_ENCODING_UTF8, 0,
                          sentence_length, &params);
     ztextFaceRenderGlyph(faces[i], glyphs[0], ZTEXT_RENDER_MODE_A8,
                          ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
@@ -220,7 +224,8 @@ int main(int argc, char** argv) {
     ztextFontCreateFromMemory(library, font, (size_t)file_size, 0,
                               &collapsed[i]);
     ztextFaceCreate(collapsed[i], 0, sizes[i], &collapsed_faces[i]);
-    ztextShaperShapeUtf8(shaper, collapsed_faces[i], sentence, sentence_length,
+    ztextShaperShape(shaper, collapsed_faces[i], sentence,
+                     sentence_length, ZTEXT_ENCODING_UTF8,
                          0, sentence_length, &params);
     ztextFaceRenderGlyph(collapsed_faces[i], glyphs[0], ZTEXT_RENDER_MODE_A8,
                          ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);

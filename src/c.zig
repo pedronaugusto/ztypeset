@@ -27,7 +27,7 @@ pub const Result = enum(c_int) {
     ok = 0,
     out_of_memory = 1,
     invalid_argument = 2,
-    invalid_utf8 = 3,
+    invalid_text = 3,
     bad_font = 4,
     unsupported = 5,
     glyph_not_found = 6,
@@ -36,6 +36,14 @@ pub const Result = enum(c_int) {
     bidi_failed = 9,
     buffer_too_small = 10,
     _,
+};
+
+/// Which encoding a caller's text is in, and therefore what every offset and
+/// length beside it counts. See the "Text" section of `ffi/ztext.h`.
+pub const Encoding = enum(c_int) {
+    utf8 = 0,
+    utf16 = 1,
+    utf32 = 2,
 };
 
 //=============================================================================
@@ -340,6 +348,8 @@ pub const AbiLayout = extern struct {
     hinting_last: u32,
     bitmap_format_size: u32,
     bitmap_format_last: u32,
+    encoding_size: u32,
+    encoding_last: u32,
     glyph_flag_size: u32,
     glyph_flag_last: u32,
     metric_size: u32,
@@ -411,8 +421,9 @@ pub extern fn ztextFontGlyphCount(font: *const Font) u32;
 pub extern fn ztextFontUnitsPerEm(font: *const Font) u32;
 pub extern fn ztextFontCoveredPrefix(
     font: *const Font,
-    utf8: [*]const u8,
+    text: ?*const anyopaque,
     length: usize,
+    encoding: Encoding,
     out: *usize,
 ) Result;
 pub extern fn ztextFontAxisCount(font: *const Font) u32;
@@ -484,11 +495,12 @@ pub extern fn ztextFaceDecomposeOutline(
 
 pub extern fn ztextShaperCreate(out: **Shaper) Result;
 pub extern fn ztextShaperDestroy(shaper: ?*Shaper) void;
-pub extern fn ztextShaperShapeUtf8(
+pub extern fn ztextShaperShape(
     shaper: *Shaper,
     face: *Face,
-    text: [*]const u8,
+    text: ?*const anyopaque,
     length: usize,
+    encoding: Encoding,
     run_offset: usize,
     run_length: usize,
     params: *const ShapeParams,
@@ -498,14 +510,16 @@ pub extern fn ztextShaperGlyphs(shaper: *const Shaper) ?[*]const Glyph;
 pub extern fn ztextShaperDirection(shaper: *const Shaper) Direction;
 pub extern fn ztextShaperExtents(shaper: *const Shaper, face: *Face, out: *Extents) Result;
 
-pub extern fn ztextParagraphCreateUtf8(
-    text: [*]const u8,
+pub extern fn ztextParagraphCreate(
+    text: ?*const anyopaque,
     length: usize,
+    encoding: Encoding,
     base: BaseDirection,
     out: **Paragraph,
 ) Result;
 pub extern fn ztextParagraphDestroy(paragraph: ?*Paragraph) void;
 pub extern fn ztextParagraphLength(paragraph: *const Paragraph) usize;
+pub extern fn ztextParagraphEncoding(paragraph: *const Paragraph) Encoding;
 pub extern fn ztextParagraphBaseLevel(paragraph: *const Paragraph) u8;
 pub extern fn ztextParagraphLevels(paragraph: *const Paragraph) ?[*]const u8;
 pub extern fn ztextParagraphLineBreaks(paragraph: *const Paragraph) ?[*]const u8;

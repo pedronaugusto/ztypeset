@@ -161,7 +161,7 @@ static ZtextResult intersectRuns(ZtextAllocatorId owner,
 }
 
 /// Reorders one byte range of a paragraph and intersects the result with the
-/// paragraph's scripts. This is the whole of both ztextParagraphCreateUtf8's
+/// paragraph's scripts. This is the whole of both ztextParagraphCreate's
 /// run collection and ztextLineCreate's -- the difference between them is
 /// only which range is asked for.
 static ZtextResult runsForRange(ZtextAllocatorId owner,
@@ -217,6 +217,40 @@ static uint8_t fromClusterBreak(char code) {
   return code == 0 ? ZTEXT_BREAK_ALLOWED : ZTEXT_BREAK_NONE;
 }
 
+/// libunibreak's three algorithms over one paragraph, in its own encoding.
+///
+/// Written as one switch rather than three, so an encoding cannot be handled
+/// by two of the three algorithms: upstream numbers its entry points by
+/// encoding, and the arms are what pairs them up.
+static void segment(const ZtextParagraph* paragraph, char* lines,
+                    char* graphemes, char* words) {
+  const size_t length = paragraph->length;
+  switch (paragraph->encoding) {
+    case ZTEXT_ENCODING_UTF16: {
+      const utf16_t* text = (const utf16_t*)paragraph->text;
+      set_linebreaks_utf16(text, length, NULL, lines);
+      set_graphemebreaks_utf16(text, length, NULL, graphemes);
+      set_wordbreaks_utf16(text, length, NULL, words);
+      break;
+    }
+    case ZTEXT_ENCODING_UTF32: {
+      const utf32_t* text = (const utf32_t*)paragraph->text;
+      set_linebreaks_utf32(text, length, NULL, lines);
+      set_graphemebreaks_utf32(text, length, NULL, graphemes);
+      set_wordbreaks_utf32(text, length, NULL, words);
+      break;
+    }
+    case ZTEXT_ENCODING_UTF8:
+    default: {
+      const utf8_t* text = (const utf8_t*)paragraph->text;
+      set_linebreaks_utf8(text, length, NULL, lines);
+      set_graphemebreaks_utf8(text, length, NULL, graphemes);
+      set_wordbreaks_utf8(text, length, NULL, words);
+      break;
+    }
+  }
+}
+
 /// Fills the paragraph's three break arrays. One allocation, sliced three
 /// ways, because they are always the same length and always live together.
 static ZtextResult collectBreaks(ZtextParagraph* paragraph) {
@@ -226,12 +260,12 @@ static ZtextResult collectBreaks(ZtextParagraph* paragraph) {
   paragraph->breaks = (uint8_t*)ztextAlloc(length * 3u, ZTEXT_DEFAULT_ALIGN);
   if (paragraph->breaks == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
 
-  // libunibreak writes one char per input byte and reads nothing else, so its
-  // output buffer can be ztext's own storage rather than a staging copy.
+  // libunibreak writes one char per input code unit and reads nothing else,
+  // so its output buffer can be ztext's own storage rather than a staging
+  // copy.
   char* out = (char*)paragraph->breaks;
-  const utf8_t* text = (const utf8_t*)paragraph->text;
 
-  set_linebreaks_utf8(text, length, NULL, out);
+  segment(paragraph, out, out + length, out + length * 2u);
   for (size_t i = 0u; i < length; i++) out[i] = (char)fromLineBreak(out[i]);
 
   // The end of a paragraph is always a break, and libunibreak does not say so:
@@ -243,8 +277,6 @@ static ZtextResult collectBreaks(ZtextParagraph* paragraph) {
   // caught.
   out[length - 1u] = (char)ZTEXT_BREAK_MANDATORY;
 
-  set_graphemebreaks_utf8(text, length, NULL, out + length);
-  set_wordbreaks_utf8(text, length, NULL, out + length * 2u);
   for (size_t i = length; i < length * 3u; i++) {
     out[i] = (char)fromClusterBreak(out[i]);
   }
@@ -252,19 +284,30 @@ static ZtextResult collectBreaks(ZtextParagraph* paragraph) {
   return ZTEXT_RESULT_OK;
 }
 
-ZtextResult ztextParagraphCreateUtf8(const char* text, size_t length,
-                                     ZtextBaseDirection base,
-                                     ZtextParagraph** out) {
+ZtextResult ztextParagraphCreate(const void* text, size_t length,
+                                 ZtextEncoding encoding,
+                                 ZtextBaseDirection base,
+                                 ZtextParagraph** out) {
   if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
   *out = NULL;
   if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  // Zero for an encoding this build does not name, which is how a consumer
+  // compiled against a newer header is refused rather than misread.
+  const size_t unit = ztextEncodingUnitSize(encoding);
+  if (unit == 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
   // Run offsets and lengths are reported as uint32_t. Past that, they would
   // wrap while ztextParagraphLength kept returning the true size_t, and a
   // caller slicing its buffer by those offsets would read the wrong bytes --
   // or past the end. ztext_abi.c asserts this bound is enforced somewhere;
   // here is where.
   if (length > 0xFFFFFFFFu) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (!ztextIsValidUtf8(text, length)) return ZTEXT_RESULT_INVALID_UTF8;
+  // The copy below is `length * unit` bytes. On a 32-bit target that product
+  // can exceed what size_t holds even under the uint32_t bound above, so it
+  // is checked as a division rather than computed and hoped for.
+  if (length > SIZE_MAX / unit) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (!ztextTextIsWellFormed(text, length, encoding)) {
+    return ZTEXT_RESULT_INVALID_TEXT;
+  }
 
   const ZtextResult installed = ztextInstallSheenbidiAllocator();
   if (installed != ZTEXT_RESULT_OK) return installed;
@@ -275,6 +318,7 @@ ZtextResult ztextParagraphCreateUtf8(const char* text, size_t length,
   // An empty paragraph is legitimate -- an empty label, a blank line -- and is
   // answered directly rather than pushed through SheenBidi, which has nothing
   // to say about zero code units.
+  paragraph->encoding = encoding;
   if (length == 0u) {
     paragraph->base_level = (base == ZTEXT_BASE_DIRECTION_RTL) ? 1u : 0u;
     *out = paragraph;
@@ -283,15 +327,20 @@ ZtextResult ztextParagraphCreateUtf8(const char* text, size_t length,
 
   // Copied before anything else, so every SheenBidi object below is built over
   // memory this paragraph owns. See ZtextParagraph::text for why that matters.
-  paragraph->text = (char*)ztextAlloc(length, ZTEXT_DEFAULT_ALIGN);
+  // ZTEXT_DEFAULT_ALIGN is max_align_t, so the copy is aligned for uint16_t
+  // and uint32_t as well as for bytes -- which is what lets the text helpers
+  // and libunibreak read it as an array of its own unit type.
+  paragraph->text = (char*)ztextAlloc(length * unit, ZTEXT_DEFAULT_ALIGN);
   if (paragraph->text == NULL) {
     ztextFree(paragraph);
     return ZTEXT_RESULT_OUT_OF_MEMORY;
   }
-  memcpy(paragraph->text, text, length);
+  memcpy(paragraph->text, text, length * unit);
 
   SBCodepointSequence sequence;
-  sequence.stringEncoding = SBStringEncodingUTF8;
+  // ztext_abi.c asserts the three values are SheenBidi's own, which is what
+  // makes this a cast rather than a translation table.
+  sequence.stringEncoding = (SBStringEncoding)encoding;
   sequence.stringBuffer = paragraph->text;
   sequence.stringLength = (SBUInteger)length;
 
@@ -370,6 +419,12 @@ void ztextParagraphDestroy(ZtextParagraph* paragraph) {
 
 size_t ztextParagraphLength(const ZtextParagraph* paragraph) {
   return paragraph == NULL ? 0u : paragraph->length;
+}
+
+ZtextEncoding ztextParagraphEncoding(const ZtextParagraph* paragraph) {
+  // UTF-8 for a NULL paragraph, like every other accessor's zero: it is the
+  // enum's own zero, and there is no text to misread.
+  return paragraph == NULL ? ZTEXT_ENCODING_UTF8 : paragraph->encoding;
 }
 
 uint8_t ztextParagraphBaseLevel(const ZtextParagraph* paragraph) {
@@ -476,9 +531,10 @@ ZtextResult ztextLineCreate(const ZtextParagraph* paragraph, size_t offset,
   // A range that splits a character would produce runs slicing one glyph's
   // bytes across two lines. Refused rather than reordered: it is always a
   // caller bug, and the paragraph holds the bytes needed to see it.
-  if (ztextSplitsUtf8Character(paragraph->text, paragraph->length, offset) ||
-      ztextSplitsUtf8Character(paragraph->text, paragraph->length,
-                               offset + length)) {
+  if (ztextTextSplitsCharacter(paragraph->text, paragraph->length,
+                               paragraph->encoding, offset) ||
+      ztextTextSplitsCharacter(paragraph->text, paragraph->length,
+                               paragraph->encoding, offset + length)) {
     return ZTEXT_RESULT_INVALID_ARGUMENT;
   }
 

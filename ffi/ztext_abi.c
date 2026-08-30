@@ -39,14 +39,14 @@ _Static_assert(sizeof(((hb_feature_t*)0)->start) >= 4, "hb_feature_t::start");
 _Static_assert(sizeof(((hb_feature_t*)0)->end) >= 4, "hb_feature_t::end");
 
 // ZtextGlyphFlag republishes HarfBuzz's glyph flags under ztext's names, and
-// ztextShaperShapeUtf8 copies the mask straight across with no translation
+// ztextShaperShape copies the mask straight across with no translation
 // table. That is only sound while the two agree value for value, so each pair
 // is asserted rather than trusted -- a renumbering upstream would otherwise
 // turn "safe to break here" into "unsafe to concat here" silently, and the
 // symptom would be a paragraph re-shaped at the wrong places or not at all.
 //
 // HB_GLYPH_FLAG_DEFINED is asserted too, because it is the mask
-// ztextShaperShapeUtf8 relies on to drop any bit HarfBuzz gains before ztext
+// ztextShaperShape relies on to drop any bit HarfBuzz gains before ztext
 // has a name for it.
 _Static_assert((int)ZTEXT_GLYPH_FLAG_UNSAFE_TO_BREAK ==
                    (int)HB_GLYPH_FLAG_UNSAFE_TO_BREAK,
@@ -105,6 +105,29 @@ _Static_assert(sizeof(SBLevel) == 1,
 // pointer-sized, so the narrowing is safe only because ztext refuses text
 // longer than a uint32_t can index.
 _Static_assert(sizeof(SBUInteger) >= 4, "SBUInteger is unexpectedly narrow");
+
+// ZtextEncoding's enumerators ARE SBStringEncoding's values -- ztext_bidi.c
+// casts one to the other and hands it to SheenBidi -- so the mapping is the
+// identity and the only thing that can go wrong is the two lists drifting.
+// A renumbering upstream would analyse UTF-16 text as UTF-8: not a crash, a
+// paragraph of wrong levels.
+_Static_assert((int)ZTEXT_ENCODING_UTF8 == (int)SBStringEncodingUTF8,
+               "SBStringEncodingUTF8 moved");
+_Static_assert((int)ZTEXT_ENCODING_UTF16 == (int)SBStringEncodingUTF16,
+               "SBStringEncodingUTF16 moved");
+_Static_assert((int)ZTEXT_ENCODING_UTF32 == (int)SBStringEncodingUTF32,
+               "SBStringEncodingUTF32 moved");
+
+// libunibreak names its unit types itself and ztext casts its own uint16_t
+// and uint32_t text to them. The casts are only sound while the widths agree,
+// and a mismatch would read one paragraph's units as another's -- silently,
+// because the pointer types would still convert.
+_Static_assert(sizeof(utf16_t) == 2,
+               "libunibreak's utf16_t is no longer 16 bits; ztext_bidi.c "
+               "casts uint16_t text to it");
+_Static_assert(sizeof(utf32_t) == 4,
+               "libunibreak's utf32_t is no longer 32 bits; ztext_bidi.c "
+               "casts uint32_t text to it");
 
 //===----------------------------------------------------------------------===//
 // ztext's own layout, for the Zig side to assert against
@@ -187,6 +210,8 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->hinting_last = (uint32_t)ZTEXT_HINTING_NONE;
   out->bitmap_format_size = (uint32_t)sizeof(ZtextBitmapFormat);
   out->bitmap_format_last = (uint32_t)ZTEXT_BITMAP_FORMAT_SDF;
+  out->encoding_size = (uint32_t)sizeof(ZtextEncoding);
+  out->encoding_last = (uint32_t)ZTEXT_ENCODING_UTF32;
   out->glyph_flag_size = (uint32_t)sizeof(ZtextGlyphFlag);
   // The OR of every flag, not the highest one -- see ztext.h.
   out->glyph_flag_last = (uint32_t)ZTEXT_GLYPH_FLAG_DEFINED;

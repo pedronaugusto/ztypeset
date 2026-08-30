@@ -179,9 +179,9 @@ printf '\n%sABI cross-check%s %s(src/abi_check.zig, against ffi/ztext.h)%s\n' \
 
 case_ "enum: a MIDDLE enumerator renumbered" \
   ffi/ztext.h \
-  "type Result.invalid_utf8 is 3 in src/c.zig" \
-  "  ZTEXT_RESULT_INVALID_UTF8 = 3," \
-  "  ZTEXT_RESULT_INVALID_UTF8 = 99,"
+  "type Result.invalid_text is 3 in src/c.zig" \
+  "  ZTEXT_RESULT_INVALID_TEXT = 3," \
+  "  ZTEXT_RESULT_INVALID_TEXT = 99,"
 
 case_ "enum: the tag narrowed on the Zig side" \
   src/c.zig \
@@ -345,15 +345,56 @@ case_ "the language the autohinter interns, left cold" \
   "  (void)hb_language_get_default();" \
   ""
 
+printf '\n%sEncodings%s %s(three upstreams, three seams)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# SheenBidi takes the encoding as a field of the sequence it is handed. Pin it
+# to UTF-8 and a UTF-16 paragraph is analysed as if its high bytes were
+# characters: no crash, no error, just the wrong embedding levels -- which is
+# the whole reason the gate is a differential test rather than a golden.
+case_ "SheenBidi told the text is UTF-8 whatever it is" \
+  ffi/ztext_bidi.c \
+  "one text, three encodings" \
+  "  sequence.stringEncoding = (SBStringEncoding)encoding;" \
+  "  sequence.stringEncoding = SBStringEncodingUTF8;"
+
+# libunibreak has three entry points per algorithm and ztext pairs them up in
+# one switch. Cross one pair and the line breaks of a UTF-16 paragraph are
+# computed over its bytes.
+case_ "libunibreak given UTF-16 through its UTF-8 entry point" \
+  ffi/ztext_bidi.c \
+  "one text, three encodings" \
+  "      set_linebreaks_utf16(text, length, NULL, lines);" \
+  "      set_linebreaks_utf8((const utf8_t*)text, length, NULL, lines);"
+
+# The same seam again, in HarfBuzz. Shaping UTF-16 through hb_buffer_add_utf8
+# produces glyphs -- for a text nobody wrote.
+case_ "HarfBuzz handed UTF-16 as UTF-8" \
+  ffi/ztext_shape.c \
+  "one text, three encodings" \
+  "      hb_buffer_add_utf16(buffer, (const uint16_t*)text, (int)length,
+                          (unsigned int)run_offset, (int)run_length);" \
+  "      hb_buffer_add_utf8(buffer, (const char*)text, (int)length,
+                         (unsigned int)run_offset, (int)run_length);"
+
+# And the half of an encoding that is not an upstream's business: which
+# indices are inside a character. Say none are, and a line may start on the
+# second half of a surrogate pair.
+case_ "a UTF-16 surrogate pair treated as two characters" \
+  ffi/ztext_core.c \
+  "a range that would split a character is refused" \
+  "      return unit >= 0xDC00u && unit <= 0xDFFFu;" \
+  "      return false;"
+
 printf '\n%sShaping%s %s(ffi/ztext_shape.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 
 case_ "a run shaped without the text around it" \
   ffi/ztext_shape.c \
   "shaping a run with context matches" \
-  "  hb_buffer_add_utf8(buffer, text, (int)length, (unsigned int)run_offset,
-                     (int)run_length);" \
-  "  hb_buffer_add_utf8(buffer, text + run_offset, (int)run_length, 0u,
-                     (int)run_length);"
+  "      hb_buffer_add_utf8(buffer, (const char*)text, (int)length,
+                         (unsigned int)run_offset, (int)run_length);" \
+  "      hb_buffer_add_utf8(buffer, (const char*)text + run_offset,
+                         (int)run_length, 0u, (int)run_length);"
 
 # HarfBuzz produces unsafe-to-break whether or not it is asked, and withholds
 # the other two unless told. Stop asking, and the flags a line-breaker acts on

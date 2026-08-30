@@ -325,8 +325,8 @@ static int checkSteadyStateAllocations(const unsigned char* font,
 
     // Warm: let every buffer reach its high-water mark.
     for (int i = 0; i < 8; i++) {
-      if (ztextShaperShapeUtf8(shaper, face, text, length, 0, length,
-                               &params) !=
+      if (ztextShaperShape(shaper, face, text, length,
+                           ZTEXT_ENCODING_UTF8, 0, length, &params) !=
           ZTEXT_RESULT_OK) {
         printf("  FAIL steady-state: warm-up shape failed\n");
         failed = 1;
@@ -337,8 +337,8 @@ static int checkSteadyStateAllocations(const unsigned char* font,
     if (!failed) {
       const size_t before = counters.total_allocations;
       for (int i = 0; i < 500; i++) {
-        if (ztextShaperShapeUtf8(shaper, face, text, length, 0, length,
-                                 &params) !=
+        if (ztextShaperShape(shaper, face, text, length,
+                             ZTEXT_ENCODING_UTF8, 0, length, &params) !=
             ZTEXT_RESULT_OK) {
           printf("  FAIL steady-state: shape failed\n");
           failed = 1;
@@ -487,8 +487,9 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
     STEP(ztextFontCreateFromMemory(library, font, font_size, 0, &fnt), fnt)
     STEP(ztextFaceCreate(fnt, 0, 24.5f, &face), face)
     STEP(ztextShaperCreate(&shaper), shaper)
-    STEP(ztextParagraphCreateUtf8("a \xd7\xa9\xd7\x9c b", 8,
-                                  ZTEXT_BASE_DIRECTION_AUTO, &paragraph),
+    STEP(ztextParagraphCreate("a \xd7\xa9\xd7\x9c b", 8,
+                              ZTEXT_ENCODING_UTF8,
+                              ZTEXT_BASE_DIRECTION_AUTO, &paragraph),
          paragraph)
     STEP(ztextLineCreate(paragraph, 0, 6, &line), line)
 #undef STEP
@@ -498,9 +499,9 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
       memset(&params, 0, sizeof(params));
       params.direction = ZTEXT_DIRECTION_RTL;
       params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
-      result = ztextShaperShapeUtf8(
-          shaper, face, "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d", 8, 0, 8,
-          &params);
+      result = ztextShaperShape(
+          shaper, face, "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d", 8,
+          ZTEXT_ENCODING_UTF8, 0, 8, &params);
       if (result != ZTEXT_RESULT_OK) stopped = 1;
     }
 
@@ -830,7 +831,8 @@ int main(int argc, char** argv) {
   memset(&params, 0, sizeof(params));
   params.direction = ZTEXT_DIRECTION_RTL;
   params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
-  CHECK_OK(ztextShaperShapeUtf8(shaper, face, shalom, strlen(shalom), 0,
+  CHECK_OK(ztextShaperShape(shaper, face, shalom, strlen(shalom),
+                            ZTEXT_ENCODING_UTF8, 0,
                                 strlen(shalom), &params));
 
   const size_t glyph_count = ztextShaperGlyphCount(shaper);
@@ -966,8 +968,10 @@ int main(int argc, char** argv) {
   // Bidi, with no face involved at all.
   const char* mixed = "a \xd7\xa9\xd7\x9c b";
   ZtextParagraph* paragraph = NULL;
-  CHECK_OK(ztextParagraphCreateUtf8(mixed, strlen(mixed),
-                                    ZTEXT_BASE_DIRECTION_AUTO, &paragraph));
+  CHECK_OK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
+                                ZTEXT_BASE_DIRECTION_AUTO, &paragraph));
+  CHECK(ztextParagraphEncoding(paragraph) == ZTEXT_ENCODING_UTF8,
+        "a paragraph should report the encoding it was built from");
   CHECK(ztextParagraphBaseLevel(paragraph) == 0,
         "a paragraph starting with Latin should resolve to an LTR base");
   CHECK(ztextParagraphVisualRunCount(paragraph) == 3,
@@ -998,15 +1002,65 @@ int main(int argc, char** argv) {
 
   ztextParagraphDestroy(paragraph);
 
+  phase("encodings");
+  // The same paragraph in all three encodings, which must agree about
+  // everything except the units it is counted in. "a <shalom> b": 8 bytes,
+  // 6 UTF-16 units, 6 UTF-32 units, and the same three visual runs.
+  const uint16_t mixed16[] = {'a', ' ', 0x05E9, 0x05DC, ' ', 'b'};
+  const uint32_t mixed32[] = {'a', ' ', 0x05E9, 0x05DC, ' ', 'b'};
+  ZtextParagraph* p16 = NULL;
+  ZtextParagraph* p32 = NULL;
+  CHECK_OK(ztextParagraphCreate(mixed16, 6, ZTEXT_ENCODING_UTF16,
+                                ZTEXT_BASE_DIRECTION_AUTO, &p16));
+  CHECK_OK(ztextParagraphCreate(mixed32, 6, ZTEXT_ENCODING_UTF32,
+                                ZTEXT_BASE_DIRECTION_AUTO, &p32));
+  CHECK(ztextParagraphEncoding(p16) == ZTEXT_ENCODING_UTF16,
+        "a UTF-16 paragraph should say so");
+  CHECK(ztextParagraphLength(p16) == 6u && ztextParagraphLength(p32) == 6u,
+        "lengths are in code units, so both should be 6");
+  CHECK(ztextParagraphVisualRunCount(p16) == 3u &&
+            ztextParagraphVisualRunCount(p32) == 3u,
+        "the same text reorders the same way in every encoding");
+  CHECK(ztextParagraphBaseLevel(p16) == 0u &&
+            ztextParagraphBaseLevel(p32) == 0u,
+        "the base level is a property of the text, not of its encoding");
+  // The Hebrew run is units 2..4 in both, where in UTF-8 it is bytes 2..6.
+  CHECK(ztextParagraphScriptRuns(p16)[1].offset == 2u,
+        "UTF-16 offsets should be counted in UTF-16 units");
+  ztextParagraphDestroy(p16);
+  ztextParagraphDestroy(p32);
+
   phase("malformed");
-  // Malformed input must be refused rather than substituted.
+  // Malformed input must be refused rather than substituted, in every
+  // encoding: a truncated UTF-8 sequence, an unpaired UTF-16 surrogate, and
+  // a UTF-32 unit that is not a scalar value at all.
   const char bad_utf8[] = {(char)0xC3, (char)0x28, 0};
-  CHECK(ztextShaperShapeUtf8(shaper, face, bad_utf8, 2, 0, 2, &params) ==
-            ZTEXT_RESULT_INVALID_UTF8,
+  const uint16_t bad_utf16[] = {'a', 0xD800};
+  const uint32_t bad_utf32[] = {'a', 0x110000};
+  CHECK(ztextShaperShape(shaper, face, bad_utf8, 2, ZTEXT_ENCODING_UTF8, 0, 2,
+                         &params) == ZTEXT_RESULT_INVALID_TEXT,
         "malformed UTF-8 should be refused by the shaper");
-  CHECK(ztextParagraphCreateUtf8(bad_utf8, 2, ZTEXT_BASE_DIRECTION_AUTO,
-                                 &paragraph) == ZTEXT_RESULT_INVALID_UTF8,
+  CHECK(ztextParagraphCreate(bad_utf8, 2, ZTEXT_ENCODING_UTF8,
+                             ZTEXT_BASE_DIRECTION_AUTO,
+                             &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
         "malformed UTF-8 should be refused by the bidi analyser");
+  CHECK(ztextShaperShape(shaper, face, bad_utf16, 2, ZTEXT_ENCODING_UTF16, 0,
+                         2, &params) == ZTEXT_RESULT_INVALID_TEXT,
+        "an unpaired surrogate should be refused by the shaper");
+  CHECK(ztextParagraphCreate(bad_utf16, 2, ZTEXT_ENCODING_UTF16,
+                             ZTEXT_BASE_DIRECTION_AUTO,
+                             &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
+        "an unpaired surrogate should be refused by the bidi analyser");
+  CHECK(ztextParagraphCreate(bad_utf32, 2, ZTEXT_ENCODING_UTF32,
+                             ZTEXT_BASE_DIRECTION_AUTO,
+                             &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
+        "a value above U+10FFFF should be refused by the bidi analyser");
+  // And an encoding this build does not name is an argument error rather
+  // than text read as UTF-8.
+  CHECK(ztextParagraphCreate("abc", 3, (ZtextEncoding)99,
+                             ZTEXT_BASE_DIRECTION_AUTO,
+                             &paragraph) == ZTEXT_RESULT_INVALID_ARGUMENT,
+        "an unknown encoding should be refused");
 
   phase("count-faces");
   // Face counting: a plain TTF has exactly one face.

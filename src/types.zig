@@ -10,9 +10,10 @@ const c = @import("c.zig");
 /// One positioned glyph. Advances and offsets are in pixels at the face's
 /// current size, y-up.
 ///
-/// `cluster` is a BYTE offset into the UTF-8 that was shaped, not a codepoint
-/// index. Several glyphs may share a cluster (one character decomposing) and
-/// several characters may share one (a ligature).
+/// `cluster` is a CODE-UNIT offset into the text that was shaped, in that
+/// text's own encoding, not a codepoint index. Several glyphs may share a
+/// cluster (one character decomposing) and several characters may share one
+/// (a ligature).
 ///
 /// `flags` is a bit mask; read it through `glyphHas`.
 pub const Glyph = c.Glyph;
@@ -33,9 +34,14 @@ pub fn glyphHas(glyph: Glyph, flag: GlyphFlag) bool {
     return glyph.flags & bit != 0;
 }
 
-/// One OpenType feature setting. `start`/`end` are byte offsets into the run;
-/// use `0` and `feature_global` for the whole run.
+/// One OpenType feature setting. `start`/`end` are code-unit offsets into the
+/// run; use `0` and `feature_global` for the whole run.
 pub const Feature = c.Feature;
+
+/// Which encoding a piece of text is in. Zig callers never pass this: it is
+/// read off the element type of the slice they hand over. It is here because
+/// a `Paragraph` reports the one it was built with.
+pub const Encoding = c.Encoding;
 
 pub const feature_global: u32 = 0xFFFF_FFFF;
 

@@ -865,8 +865,8 @@ test "covered prefix stops where the font does" {
     try std.testing.expectEqual(@as(usize, 0), try latin.coveredPrefix(""));
 
     try std.testing.expectError(
-        ztext.Error.InvalidUtf8,
-        latin.coveredPrefix(&.{ 0xC3, 0x28 }),
+        ztext.Error.InvalidText,
+        latin.coveredPrefix(&[_]u8{ 0xC3, 0x28 }),
     );
 }
 
@@ -2476,11 +2476,11 @@ test "malformed UTF-8 is refused rather than repaired" {
 
     for (bad) |text| {
         try std.testing.expectError(
-            ztext.Error.InvalidUtf8,
+            ztext.Error.InvalidText,
             fixture.shaper.shape(face, text, .{}),
         );
         try std.testing.expectError(
-            ztext.Error.InvalidUtf8,
+            ztext.Error.InvalidText,
             ztext.Paragraph.init(text, .auto),
         );
     }
@@ -2841,8 +2841,8 @@ test "a rejected shape does not leave the previous run queryable" {
     // successful run again. Every rejection path has to clear, not just the
     // ones that fail late.
     try std.testing.expectError(
-        ztext.Error.InvalidUtf8,
-        fixture.shaper.shape(face, &.{ 0xFF, 0xFE }, .{}),
+        ztext.Error.InvalidText,
+        fixture.shaper.shape(face, &[_]u8{ 0xFF, 0xFE }, .{}),
     );
     try std.testing.expectEqual(@as(usize, 0), fixture.shaper.glyphs().len);
     try std.testing.expectEqual(ztext.Direction.auto, fixture.shaper.direction());
@@ -2857,11 +2857,12 @@ test "a rejected shape does not leave the previous run queryable" {
 
     var inconsistent = std.mem.zeroes(ztext.c.ShapeParams);
     inconsistent.feature_count = 3;
-    try std.testing.expectEqual(ztext.c.Result.invalid_argument, ztext.c.ztextShaperShapeUtf8(
+    try std.testing.expectEqual(ztext.c.Result.invalid_argument, ztext.c.ztextShaperShape(
         fixture.shaper.handle,
         face.handle,
         "Hello",
         5,
+        .utf8,
         0,
         5,
         &inconsistent,
@@ -3583,4 +3584,179 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
     ztext.resetAllocator();
     try std.testing.expectEqual(std.heap.Check.ok, first_state.deinit());
     try std.testing.expectEqual(std.heap.Check.ok, second_state.deinit());
+}
+
+/// UTF-16 for `utf8`, in NATIVE byte order -- which is what ztext takes, and
+/// what `std.unicode.utf8ToUtf16Le` would not give on a big-endian host.
+fn toUtf16(out: []u16, utf8: []const u8) ![]const u16 {
+    var count: usize = 0;
+    var it = (try std.unicode.Utf8View.init(utf8)).iterator();
+    while (it.nextCodepoint()) |cp| {
+        if (cp < 0x10000) {
+            out[count] = @intCast(cp);
+            count += 1;
+        } else {
+            const rest = cp - 0x10000;
+            out[count] = @intCast(0xD800 + (rest >> 10));
+            out[count + 1] = @intCast(0xDC00 + (rest & 0x3FF));
+            count += 2;
+        }
+    }
+    return out[0..count];
+}
+
+/// UTF-32 for `utf8`: one unit per character, so this is the codepoint list.
+fn toUtf32(out: []u32, utf8: []const u8) ![]const u32 {
+    var count: usize = 0;
+    var it = (try std.unicode.Utf8View.init(utf8)).iterator();
+    while (it.nextCodepoint()) |cp| : (count += 1) out[count] = cp;
+    return out[0..count];
+}
+
+test "one text, three encodings: the same answer in different units" {
+    // The gate on M4. Every one of the three upstreams has a separate entry
+    // point per encoding -- SheenBidi an SBStringEncoding, libunibreak three
+    // functions per algorithm, HarfBuzz three hb_buffer_add_* -- so an
+    // encoding can be wired into one of them and not the others, and the
+    // symptom is not a crash: it is a paragraph of plausible, wrong levels.
+    // Nothing but a differential comparison sees that.
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+    const face = try fixture.face(fonts.hebrew);
+    defer face.deinit();
+
+    // Latin, Hebrew, a space run between two right-to-left words, and one
+    // ASTRAL character -- the case where the three encodings disagree most
+    // about length: four bytes, a surrogate pair, one unit.
+    const utf8: []const u8 = "a \u{5E9}\u{5DC}\u{5D5}\u{5DD}  \u{5D0} b\u{1D11E}";
+    var utf16_storage: [64]u16 = undefined;
+    var utf32_storage: [64]u32 = undefined;
+    const utf16 = try toUtf16(&utf16_storage, utf8);
+    const utf32 = try toUtf32(&utf32_storage, utf8);
+
+    const p8 = try ztext.Paragraph.init(utf8, .auto);
+    defer p8.deinit();
+    const p16 = try ztext.Paragraph.init(utf16, .auto);
+    defer p16.deinit();
+    const p32 = try ztext.Paragraph.init(utf32, .auto);
+    defer p32.deinit();
+
+    // Each reports the encoding it was built from and a length in ITS units.
+    try std.testing.expectEqual(ztext.Encoding.utf8, p8.encoding());
+    try std.testing.expectEqual(ztext.Encoding.utf16, p16.encoding());
+    try std.testing.expectEqual(ztext.Encoding.utf32, p32.encoding());
+    try std.testing.expectEqual(utf8.len, p8.length());
+    try std.testing.expectEqual(utf16.len, p16.length());
+    try std.testing.expectEqual(utf32.len, p32.length());
+    // The three lengths really are different, or this test proves nothing.
+    try std.testing.expect(utf8.len != utf16.len and utf16.len != utf32.len);
+
+    // Everything that is a property of the TEXT rather than of its spelling.
+    try std.testing.expectEqual(p8.baseLevel(), p16.baseLevel());
+    try std.testing.expectEqual(p8.baseLevel(), p32.baseLevel());
+    try std.testing.expectEqual(p8.visualRuns().len, p16.visualRuns().len);
+    try std.testing.expectEqual(p8.visualRuns().len, p32.visualRuns().len);
+    try std.testing.expectEqual(p8.scriptRuns().len, p16.scriptRuns().len);
+    try std.testing.expectEqual(p8.scriptRuns().len, p32.scriptRuns().len);
+    try std.testing.expectEqual(p8.shapingRuns().len, p16.shapingRuns().len);
+    try std.testing.expectEqual(p8.shapingRuns().len, p32.shapingRuns().len);
+
+    // Per CHARACTER, walked in all three at once: the level UAX #9 resolved
+    // and the three UAX #14/#29 boundaries after it have to agree. This is
+    // what catches one algorithm wired to the wrong upstream entry point --
+    // the counts above would not move.
+    {
+        var at8: usize = 0;
+        var at16: usize = 0;
+        var at32: usize = 0;
+        var it = (try std.unicode.Utf8View.init(utf8)).iterator();
+        while (it.nextCodepoint()) |cp| {
+            const len8 = std.unicode.utf8CodepointSequenceLength(cp) catch
+                unreachable;
+            const len16: usize = if (cp < 0x10000) 1 else 2;
+
+            try std.testing.expectEqual(p8.levels()[at8], p16.levels()[at16]);
+            try std.testing.expectEqual(p8.levels()[at8], p32.levels()[at32]);
+
+            // The entry at i describes the boundary AFTER unit i, so the
+            // character's own boundary is at its LAST unit in each encoding.
+            const end8 = at8 + len8 - 1;
+            const end16 = at16 + len16 - 1;
+            inline for (.{ "lineBreaks", "graphemeBreaks", "wordBreaks" }) |name| {
+                const b8 = @field(ztext.Paragraph, name)(p8)[end8];
+                const b16 = @field(ztext.Paragraph, name)(p16)[end16];
+                const b32 = @field(ztext.Paragraph, name)(p32)[at32];
+                try std.testing.expectEqual(b8, b16);
+                try std.testing.expectEqual(b8, b32);
+            }
+
+            at8 += len8;
+            at16 += len16;
+            at32 += 1;
+        }
+        try std.testing.expectEqual(utf8.len, at8);
+        try std.testing.expectEqual(utf16.len, at16);
+        try std.testing.expectEqual(utf32.len, at32);
+    }
+
+    // And the glyphs. Cluster values are code-unit offsets and so differ by
+    // construction; everything else -- which glyph, where it goes -- must be
+    // identical, because it is the same text.
+    for (p8.shapingRuns(), p16.shapingRuns(), p32.shapingRuns()) |r8, r16, r32| {
+        const g8 = try fixture.shaper.shapeRun(face, utf8, r8, .{});
+        var copied: [64]ztext.Glyph = undefined;
+        @memcpy(copied[0..g8.len], g8);
+        const kept = copied[0..g8.len];
+
+        const g16 = try fixture.shaper.shapeRun(face, utf16, r16, .{});
+        try std.testing.expectEqual(kept.len, g16.len);
+        for (kept, g16) |a, b| {
+            try std.testing.expectEqual(a.glyph_id, b.glyph_id);
+            try std.testing.expectEqual(a.flags, b.flags);
+            try std.testing.expectEqual(a.x_advance, b.x_advance);
+            try std.testing.expectEqual(a.y_advance, b.y_advance);
+            try std.testing.expectEqual(a.x_offset, b.x_offset);
+            try std.testing.expectEqual(a.y_offset, b.y_offset);
+        }
+
+        const g32 = try fixture.shaper.shapeRun(face, utf32, r32, .{});
+        try std.testing.expectEqual(kept.len, g32.len);
+        for (kept, g32) |a, b| {
+            try std.testing.expectEqual(a.glyph_id, b.glyph_id);
+            try std.testing.expectEqual(a.x_advance, b.x_advance);
+        }
+    }
+}
+
+test "a range that would split a character is refused in every encoding" {
+    var fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    // U+1D11E is one UTF-32 unit, a surrogate pair in UTF-16 and four bytes
+    // in UTF-8, so "one past the start of the last character" is a different
+    // index in each -- and has to be refused in the two where it is inside a
+    // character, allowed in the one where there is nothing to split.
+    const utf8: []const u8 = "ab\u{1D11E}";
+    var utf16_storage: [8]u16 = undefined;
+    const utf16 = try toUtf16(&utf16_storage, utf8);
+
+    const p8 = try ztext.Paragraph.init(utf8, .auto);
+    defer p8.deinit();
+    const p16 = try ztext.Paragraph.init(utf16, .auto);
+    defer p16.deinit();
+
+    try std.testing.expectError(ztext.Error.InvalidArgument, p8.line(3, 1));
+    try std.testing.expectError(ztext.Error.InvalidArgument, p16.line(3, 1));
+    const whole8 = try p8.line(0, p8.length());
+    whole8.deinit();
+    const whole16 = try p16.line(0, p16.length());
+    whole16.deinit();
+
+    // UTF-32 has nothing to split: every index is a boundary.
+    var utf32_storage: [8]u32 = undefined;
+    const utf32 = try toUtf32(&utf32_storage, utf8);
+    const p32 = try ztext.Paragraph.init(utf32, .auto);
+    defer p32.deinit();
+    const any = try p32.line(1, 1);
+    any.deinit();
 }

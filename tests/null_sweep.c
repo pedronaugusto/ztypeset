@@ -126,9 +126,11 @@ int main(int argc, char** argv) {
   CHECK(ztextFontAxisCount(NULL) == 0u, "axis count of NULL");
 
   size_t covered = 999u;
-  REFUSES(ztextFontCoveredPrefix(NULL, "abc", 3, &covered));
+  REFUSES(ztextFontCoveredPrefix(NULL, "abc", 3, ZTEXT_ENCODING_UTF8,
+                                 &covered));
   CHECK(covered == 0u, "a refused covered prefix wrote its out-parameter");
-  REFUSES_OUT(ztextFontCoveredPrefix(NULL, "abc", 3, NULL));
+  REFUSES_OUT(ztextFontCoveredPrefix(NULL, "abc", 3, ZTEXT_ENCODING_UTF8,
+                                     NULL));
 
   ZtextVariationAxis axis;
   memset(&axis, 0, sizeof(axis));
@@ -210,7 +212,8 @@ int main(int argc, char** argv) {
 
   ZtextShapeParams params;
   memset(&params, 0, sizeof(params));
-  REFUSES(ztextShaperShapeUtf8(NULL, NULL, "x", 1, 0, 1, &params));
+  REFUSES(ztextShaperShape(NULL, NULL, "x", 1, ZTEXT_ENCODING_UTF8, 0, 1,
+                           &params));
   CHECK(ztextShaperGlyphCount(NULL) == 0u, "glyph count of NULL shaper");
   CHECK(ztextShaperGlyphs(NULL) == NULL, "glyphs of NULL shaper");
   CHECK(ztextShaperDirection(NULL) == ZTEXT_DIRECTION_AUTO,
@@ -222,9 +225,11 @@ int main(int argc, char** argv) {
   // Paragraphs and lines.
   //--------------------------------------------------------------------------
   ZtextParagraph* paragraph = NULL;
-  REFUSES_OUT(
-      ztextParagraphCreateUtf8("x", 1, ZTEXT_BASE_DIRECTION_AUTO, NULL));
+  REFUSES_OUT(ztextParagraphCreate("x", 1, ZTEXT_ENCODING_UTF8,
+                                   ZTEXT_BASE_DIRECTION_AUTO, NULL));
   CHECK(ztextParagraphLength(NULL) == 0u, "length of NULL paragraph");
+  CHECK(ztextParagraphEncoding(NULL) == ZTEXT_ENCODING_UTF8,
+        "encoding of NULL paragraph");
   CHECK(ztextParagraphBaseLevel(NULL) == 0u, "base level of NULL paragraph");
   CHECK(ztextParagraphLevels(NULL) == NULL, "levels of NULL paragraph");
   CHECK(ztextParagraphVisualRunCount(NULL) == 0u, "visual run count of NULL");
@@ -286,8 +291,10 @@ int main(int argc, char** argv) {
   }
 
   REFUSES_OUT(ztextFaceCreate(font, 0, 16, NULL));
-  REFUSES_OUT(ztextFontCoveredPrefix(font, "abc", 3, NULL));
-  REFUSES(ztextFontCoveredPrefix(font, NULL, 3, &covered));
+  REFUSES_OUT(ztextFontCoveredPrefix(font, "abc", 3, ZTEXT_ENCODING_UTF8,
+                                     NULL));
+  REFUSES(ztextFontCoveredPrefix(font, NULL, 3, ZTEXT_ENCODING_UTF8,
+                                 &covered));
   REFUSES_OUT(ztextFontAxis(font, 0, NULL));
   REFUSES_OUT(ztextFontVariation(font, 0, NULL));
   REFUSES(ztextFontSetVariations(font, NULL, 3));
@@ -310,13 +317,17 @@ int main(int argc, char** argv) {
     printf("  FAIL could not create a shaper\n");
     return 1;
   }
-  REFUSES(ztextShaperShapeUtf8(shaper, face, "x", 1, 0, 1, NULL));
-  REFUSES(ztextShaperShapeUtf8(shaper, NULL, "x", 1, 0, 1, &params));
-  REFUSES(ztextShaperShapeUtf8(shaper, face, NULL, 1, 0, 1, &params));
+  REFUSES(ztextShaperShape(shaper, face, "x", 1, ZTEXT_ENCODING_UTF8, 0, 1,
+                           NULL));
+  REFUSES(ztextShaperShape(shaper, NULL, "x", 1, ZTEXT_ENCODING_UTF8, 0, 1,
+                           &params));
+  REFUSES(ztextShaperShape(shaper, face, NULL, 1, ZTEXT_ENCODING_UTF8, 0, 1,
+                           &params));
   REFUSES_OUT(ztextShaperExtents(shaper, face, NULL));
 
-  if (ztextParagraphCreateUtf8("abc", 3, ZTEXT_BASE_DIRECTION_AUTO,
-                               &paragraph) != ZTEXT_RESULT_OK) {
+  if (ztextParagraphCreate("abc", 3, ZTEXT_ENCODING_UTF8,
+                           ZTEXT_BASE_DIRECTION_AUTO,
+                           &paragraph) != ZTEXT_RESULT_OK) {
     printf("  FAIL could not create a paragraph\n");
     return 1;
   }
