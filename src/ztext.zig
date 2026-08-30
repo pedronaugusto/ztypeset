@@ -96,6 +96,7 @@ pub const FaceMetrics = types_mod.FaceMetrics;
 pub const GlyphBitmap = types_mod.GlyphBitmap;
 pub const BitmapFormat = types_mod.BitmapFormat;
 pub const OutlineFuncs = types_mod.OutlineFuncs;
+pub const Metric = types_mod.Metric;
 pub const VariationAxis = types_mod.VariationAxis;
 pub const Variation = types_mod.Variation;
 pub const VisualRun = types_mod.VisualRun;
@@ -362,6 +363,14 @@ test "the C library agrees with the extern declarations in c.zig" {
     try std.testing.expectEqual(
         @as(u32, @intCast(@intFromEnum(c.GlyphFlag.defined))),
         layout.glyph_flag_last,
+    );
+    try std.testing.expectEqual(@as(u32, @sizeOf(c.Metric)), layout.metric_size);
+    // A COUNT, not a last value: these enumerators are OpenType tags, so the
+    // highest of them is an accident of spelling. What a consumer needs to
+    // know is whether the library names as many metrics as it does.
+    try std.testing.expectEqual(
+        @as(u32, @typeInfo(c.Metric).@"enum".fields.len),
+        layout.metric_count,
     );
 
     // The Zig error mapping must cover every C result. `c.Result` is

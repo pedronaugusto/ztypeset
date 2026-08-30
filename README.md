@@ -574,11 +574,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**101 tests**, executed twice. The second pass runs the same binary with
+**109 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **202/202 passed**.
+rather than being believed. So `zig build test` reports **218/218 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -667,7 +667,7 @@ failure injected *below* the C boundary:
   process-wide allocator mid-life and watching where the traffic goes.
 - **500 warm shapes allocate nothing**, which is the claim in Measurements.
 
-And `tests/null_sweep.c` calls **every one of the 68 entry points with
+And `tests/null_sweep.c` calls **every one of the 75 entry points with
 nothing** — NULL handles, with the out-parameter checked for being left alone,
 then real handles with a NULL out-parameter, which is what a host produces when
 an allocation failed two lines up. `ci/api-surface.sh --sweep` fails if the
@@ -792,6 +792,39 @@ the first bump of ztext or of FreeType would turn a formatting test red for a
 reason that had nothing to do with formatting. It now formats a synthetic
 version it owns, and compares the real one against its own fields.
 
+**The same number, from two libraries, meaning two different things.** Adding
+`Face.metric` put `post`'s underline beside the one `FaceMetrics` already
+carried, and they disagreed: HarfBuzz reports `underlinePosition` as the font
+stores it, the TOP edge of the stroke, while FreeType subtracts half the
+thickness to convert the TrueType meaning to its own
+(`libs/freetype/src/sfnt/sfobjs.c`). For Noto Sans that is -100 against -125
+design units. Neither is wrong and a caller drawing a rectangle needs to know
+which edge it was handed, so the difference is now stated in `ffi/ztext.h` and
+pinned by a test that asserts the gap is exactly half the thickness. The first
+draft of that test asserted the two would *agree*, which is what turned an
+assumption into a measurement.
+
+**A documented contract that the source contradicted.** The first draft of
+`ztextFontVariantGlyphIndex` said 0 also meant "this font maps the pair by
+default". FreeType does the opposite: for a sequence recorded as the default it
+resolves the base character through the Unicode cmap and returns that glyph
+(`tt_cmap14_char_var_index`, `libs/freetype/src/sfnt/ttcmap.c`). The corrected
+contract is simpler and more useful — nonzero exactly when this font draws this
+exact pair — and it was corrected by reading upstream, not by testing, because
+no vendored font has a format-14 cmap to test against. `tests/fonts.zig` now
+builds one: `withVariationSequences` rewrites a font's cmap with an extra
+format-14 subtable naming sequences the test states outright, which is what
+makes the two interesting answers reachable at all.
+
+That fixture also produced a finding of its own. Appending the new `(0,5)`
+encoding record at the end of the cmap left the records unsorted, and FreeType
+picks a face's default charmap by walking them **backwards** and taking the
+last Unicode one (`find_unicode_charmap`, `libs/freetype/src/base/ftobjs.c`).
+The format-14 subtable became the default charmap, its `char_index` answers 0
+for everything, and the font's ordinary lookups all returned `.notdef` while
+the variation sequences worked perfectly. Sorted records fix it, and a mutation
+case unsorts them again so the reason is a gate rather than a comment.
+
 ### Continuous integration
 
 CI runs the whole suite on **Linux, macOS and Windows**, in four optimize
@@ -822,7 +855,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **32** deliberate bugs, one at a time, to a copy of the tree, and
+applies **37** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
@@ -830,6 +863,9 @@ asserts a **named** test catches each:
 | ABI | a *middle* enumerator renumbered, an enum tag narrowed, two same-sized struct fields swapped, a field added to the header only, a by-value parameter widened, a parameter dropped, a function the header exports that `c.zig` never declares |
 | Bidi | a line reordered over the paragraph instead of over itself, script pieces emitted forwards inside a right-to-left run, a paragraph's end left as no break at all |
 | Faces | a glyph loaded without activating the face's own `FT_Size`, a covered prefix that splits a base from its marks or breaks at a format character, a pixel size rounded to whole pixels, a bitmap that does not say which format its bytes are in |
+| Metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
+| Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
+| Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
 | Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for |
 | Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, SheenBidi handed memory ztext did not write |
 | Caches | the process-lifetime caches left unwarmed |
@@ -883,7 +919,10 @@ Exposed today:
 - Fonts from memory, with family/style names, glyph count, units per em, and a
   face count for TrueType collections
 - Faces: one font at one pixel size, with scaled metrics
-- Cmap lookup (`Font.glyphIndex`) for checking coverage before falling back
+- Cmap lookup (`Font.glyphIndex`) for checking coverage before falling back,
+  and `Font.variantGlyphIndex` for a base character plus a **variation
+  selector** — cmap format 14, the mechanism behind U+FE0E/U+FE0F and the
+  Ideographic Variation Sequences
 - Shaping a run: direction, script, language, OpenType features, cluster level,
   and a choice of metrics source (HarfBuzz's tables or FreeType's)
 - Cluster maps in byte offsets, shaped-run extents, per-glyph extents
@@ -898,6 +937,16 @@ Exposed today:
 - **Variable-font axes**: what a font declares, and setting them on both
   FreeType and HarfBuzz at once so metrics and rasterisation cannot describe
   different instances
+- **Named instances**: the points in that axis space the font's own designers
+  named, with their coordinates and their subfamily names, and
+  `setNamedInstance` to move every axis to one in a step — data a picker cannot
+  derive from the axes, because they are choices rather than a rule
+- **The OpenType metrics FreeType does not scale onto an `FT_Size`**:
+  `Face.metric` reads any of the 28 `hb_ot_metrics_tag_t` values — x-height,
+  cap-height, strikeout, the caret slope, the sub/superscript boxes — honouring
+  the USE_TYPO_METRICS bit and applying variations, with
+  `metricWithFallback` for HarfBuzz's own synthesised value when a font
+  declares none
 - **Run context**: shaping a range of a longer text, so joining stays correct
   where a host split a word between fonts
 - Rasterisation: A8 coverage and SDF, three hinting modes, configurable spread

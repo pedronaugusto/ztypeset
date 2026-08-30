@@ -67,6 +67,25 @@ move independently of this number.
   SDF are both one byte per pixel, so a consumer that remembered the wrong
   `ZtextRenderMode` previously got a washed-out picture rather than an error.
 - Zig: `ztext.GlyphFlag`, `ztext.BitmapFormat` and `ztext.glyphHas`.
+- `ztextFaceMetric` and `ztextFaceMetricWithFallback`, reading any of the 28
+  OpenType metrics through HarfBuzz: x-height, cap-height, strikeout, the
+  caret slope, the sub/superscript boxes and the rest. The new `ZtextMetric`
+  carries HarfBuzz's own tag VALUES, so the mapping is the identity and
+  `ffi/ztext_abi.c` asserts each against its `HB_OT_METRICS_TAG_`
+  counterpart. `ZtextFaceMetrics` remains FreeType's view, which is `hhea`;
+  these honour the USE_TYPO_METRICS bit and apply MVAR, and the two answer
+  different questions rather than disagreeing.
+- `ztextFontNamedInstanceCount`, `...Coords`, `...Name` and
+  `ztextFontSetNamedInstance`: the points in a variable font's axis space that
+  its designers named. Nothing can derive them from the axes — they are data,
+  not a rule — and the name is decoded out of the font's `name` table, so a
+  caller never meets UTF-16BE.
+- `ztextFontVariantGlyphIndex`: a base character plus a variation selector,
+  through cmap format 14. Nonzero exactly when the font draws that exact pair.
+- Zig: `ztext.Metric`, `Face.metric`, `Face.metricWithFallback`,
+  `Font.variantGlyphIndex`, `Font.namedInstanceCount`,
+  `Font.namedInstanceCoords`, `Font.namedInstanceName`,
+  `Font.namedInstanceNameLen` and `Font.setNamedInstance`.
 
 ### Changed — ABI
 
@@ -76,7 +95,13 @@ Measured on x86_64-windows, both the gnu and the MSVC ABI:
 |---|---|---|---|
 | `ZtextGlyph` | 24 B | 28 B | `flags` at offset 8, after `cluster` |
 | `ZtextGlyphBitmap` | 32 B | 40 B | `format` at offset 8, immediately after `pixels` — it has to be read before they are interpreted |
-| `ZtextAbiLayout` | 192 B | 216 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `glyph_flag_size`, `glyph_flag_last` |
+| `ZtextAbiLayout` | 192 B | 224 B | `glyph_offset_flags`, `glyph_bitmap_offset_format`, `bitmap_format_size`, `bitmap_format_last`, `glyph_flag_size`, `glyph_flag_last`, `metric_size`, `metric_count` |
+
+`ZtextMetric` reports a **count** rather than a last value, alone among the
+enums in the handshake: its enumerators are four-character OpenType tags, so
+"the highest one" is an accident of spelling and says nothing about the range.
+The count is generated from `ZTEXT_METRIC_LIST`, which is also what the enum
+itself is generated from, so it cannot be a number someone forgot to raise.
 
 `ztextAbiProbe` writes a marker into each new field, so a consumer's mirror is
 checked against what the library does rather than against what the header
@@ -88,6 +113,12 @@ says.
   and `"2.14.3"` — a third home for ztext's version and a second for
   FreeType's. It now formats a synthetic version it owns and compares the real
   one against its own fields.
+- `ztextFontSetVariations` held the only copy of the commit-and-notify path —
+  hand the coordinates to FreeType, update the font's own copy, then move
+  every face's HarfBuzz coordinates, generation and MVAR-dependent size with
+  them. `ztextFontSetNamedInstance` needed the same path, so it was extracted
+  into one helper rather than copied; a second copy that forgot one of those
+  four steps produces text that merely spaces wrongly.
 
 ## 0.1.0
 

@@ -306,6 +306,22 @@ uint32_t ztextFontGlyphIndex(const ZtextFont* font, uint32_t codepoint) {
   return (uint32_t)FT_Get_Char_Index(font->ft, (FT_ULong)codepoint);
 }
 
+uint32_t ztextFontVariantGlyphIndex(const ZtextFont* font, uint32_t codepoint,
+                                    uint32_t variation_selector) {
+  if (font == NULL) return 0u;
+  // FreeType rather than HarfBuzz, for the same reason as above: this answers
+  // a question about the FT_Face the caller will rasterise through, and
+  // hb_face_t reads the same cmap through a second parser whose disagreement
+  // would be invisible here.
+  //
+  // A sequence the font records as DEFAULT comes back as the base
+  // character's glyph rather than 0, because FreeType resolves it through the
+  // Unicode cmap itself; ztext.h states the resulting contract, which is that
+  // nonzero means this font draws this pair.
+  return (uint32_t)FT_Face_GetCharVariantIndex(
+      font->ft, (FT_ULong)codepoint, (FT_ULong)variation_selector);
+}
+
 uint32_t ztextFontGlyphCount(const ZtextFont* font) {
   return font == NULL ? 0u : (uint32_t)font->ft->num_glyphs;
 }
@@ -636,6 +652,78 @@ ZtextResult ztextFaceMetrics(const ZtextFace* face, ZtextFaceMetrics* out) {
 }
 
 //===----------------------------------------------------------------------===//
+// OpenType metrics
+//
+// ztextFaceMetrics above is FreeType's view: what FreeType scales onto the
+// FT_Size, which is `hhea` and nothing else. These are the rest of what
+// OpenType defines, read through HarfBuzz, which follows the USE_TYPO_METRICS
+// bit and applies MVAR. The two disagree for some fonts on purpose; ztext.h
+// has the reasoning a caller needs.
+//===----------------------------------------------------------------------===//
+
+/// True for a metric ZTEXT_METRIC_LIST names.
+///
+/// The tags are not an ordinal range -- they are four-character codes -- so
+/// there is no bounds check to do, and a caller casting an integer into
+/// ZtextMetric would otherwise reach HarfBuzz with a tag nothing has vetted.
+/// Generated from the same list as the enum, so the two cannot drift.
+static bool metricIsNamed(ZtextMetric metric) {
+  switch (metric) {
+#define ZTEXT_METRIC_CASE(name, a, b, c, d) \
+  case ZTEXT_METRIC_##name:
+    ZTEXT_METRIC_LIST(ZTEXT_METRIC_CASE)
+#undef ZTEXT_METRIC_CASE
+    return true;
+  default:
+    return false;
+  }
+}
+
+ZtextResult ztextFaceMetric(const ZtextFace* face, ZtextMetric metric,
+                            float* out) {
+  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  *out = 0.0f;
+  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (!metricIsNamed(metric)) {
+    ztextSetErrorDetail("no such metric");
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+
+  // No ztextFaceActivate: this face's hb_font_t carries its own scale and its
+  // own variation coordinates, and hb_ot_font_set_funcs made its glyph
+  // callbacks HarfBuzz's own. Nothing here reaches the FT_Face, so nothing
+  // here depends on which sibling face last used it.
+  hb_position_t position = 0;
+  if (!hb_ot_metrics_get_position(face->hb_font, (hb_ot_metrics_tag_t)metric,
+                                  &position)) {
+    return ZTEXT_RESULT_UNSUPPORTED;
+  }
+
+  // The scale is 26.6 pixels; see setPixelSizeFixed.
+  *out = (float)position / 64.0f;
+  return ZTEXT_RESULT_OK;
+}
+
+ZtextResult ztextFaceMetricWithFallback(const ZtextFace* face,
+                                        ZtextMetric metric, float* out) {
+  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  *out = 0.0f;
+  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (!metricIsNamed(metric)) {
+    ztextSetErrorDetail("no such metric");
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+
+  hb_position_t position = 0;
+  // Returns void: there is always an answer, which is the whole difference
+  // between this and the call above.
+  hb_ot_metrics_get_position_with_fallback(
+      face->hb_font, (hb_ot_metrics_tag_t)metric, &position);
+  *out = (float)position / 64.0f;
+  return ZTEXT_RESULT_OK;
+}
+
+//===----------------------------------------------------------------------===//
 // Variable fonts
 //
 // The setting is per FONT because FreeType makes it so: variation coordinates
@@ -737,6 +825,55 @@ ZtextResult ztextFontVariation(const ZtextFont* font, uint32_t index,
   return ZTEXT_RESULT_OK;
 }
 
+/// Hands `wanted` -- one 16.16 design coordinate per axis -- to FreeType, then
+/// to every face of this font.
+///
+/// The caller owns `wanted`'s storage and keeps it: this reads it and does not
+/// free it.
+///
+/// Extracted because there are two ways to move the axes, by tag and by named
+/// instance, and only one of them may know how the move is committed. The
+/// notification half is the part that would rot if copied -- a face's HarfBuzz
+/// coordinates, its generation and its MVAR-dependent size all have to move
+/// together, and a second copy that forgot one would produce text that merely
+/// spaces wrongly.
+static ZtextResult commitCoordinates(ZtextFont* font, const FT_Fixed* wanted) {
+  const FT_UInt num_axis = font->mm->num_axis;
+
+  // FreeType takes a non-const array although it only reads it; the cast is
+  // the whole of the difference.
+  const FT_Error error =
+      FT_Set_Var_Design_Coordinates(font->ft, num_axis, (FT_Fixed*)wanted);
+  if (error != FT_Err_Ok) return ztextFromFtError(error);
+
+  memcpy(font->coords, wanted, (size_t)num_axis * sizeof(FT_Fixed));
+  for (FT_UInt i = 0; i < num_axis; i++) {
+    font->design[i] = fixedToDesign(font->coords[i]);
+  }
+
+  ZtextResult result = ZTEXT_RESULT_OK;
+  for (ZtextFace* face = font->faces; face != NULL; face = face->next) {
+    ztextFaceApplyVariations(face);
+
+    // Bumped here as well as inside the resize below, so an already-measured
+    // run is refused even in the unreachable case where FreeType declines the
+    // size it accepted a moment ago.
+    face->generation = ztextNextGeneration();
+
+    // MVAR can move the ascender, the descender and the line height, and
+    // FreeType computes those when the size is set -- so the size has to be
+    // set again for this instance. Nothing else recomputes them, and a face
+    // left alone would report the previous instance's leading.
+    const ZtextResult sized =
+        setPixelSizeFixed(face, face->pixel_width, face->pixel_height);
+    // Kept going rather than returned from: the axes are already FreeType's,
+    // so stopping half way would leave the remaining faces describing the
+    // instance the font has left behind.
+    if (sized != ZTEXT_RESULT_OK && result == ZTEXT_RESULT_OK) result = sized;
+  }
+  return result;
+}
+
 ZtextResult ztextFontSetVariations(ZtextFont* font,
                                    const ZtextVariation* values,
                                    size_t count) {
@@ -789,38 +926,109 @@ ZtextResult ztextFontSetVariations(ZtextFont* font,
     wanted[findAxis(font, values[i].tag)] = designToFixed(values[i].value);
   }
 
-  const FT_Error error =
-      FT_Set_Var_Design_Coordinates(font->ft, num_axis, wanted);
-  if (error != FT_Err_Ok) {
-    ztextFreeFrom(library->allocator, wanted);
-    return ztextFromFtError(error);
-  }
-
-  memcpy(font->coords, wanted, (size_t)num_axis * sizeof(FT_Fixed));
+  const ZtextResult result = commitCoordinates(font, wanted);
   ztextFreeFrom(library->allocator, wanted);
-  for (FT_UInt i = 0; i < num_axis; i++) {
-    font->design[i] = fixedToDesign(font->coords[i]);
-  }
-
-  ZtextResult result = ZTEXT_RESULT_OK;
-  for (ZtextFace* face = font->faces; face != NULL; face = face->next) {
-    ztextFaceApplyVariations(face);
-
-    // Bumped here as well as inside the resize below, so an already-measured
-    // run is refused even in the unreachable case where FreeType declines the
-    // size it accepted a moment ago.
-    face->generation = ztextNextGeneration();
-
-    // MVAR can move the ascender, the descender and the line height, and
-    // FreeType computes those when the size is set -- so the size has to be
-    // set again for this instance. Nothing else recomputes them, and a face
-    // left alone would report the previous instance's leading.
-    const ZtextResult sized =
-        setPixelSizeFixed(face, face->pixel_width, face->pixel_height);
-    // Kept going rather than returned from: the axes are already FreeType's,
-    // so stopping half way would leave the remaining faces describing the
-    // instance the font has left behind.
-    if (sized != ZTEXT_RESULT_OK && result == ZTEXT_RESULT_OK) result = sized;
-  }
   return result;
+}
+
+//===----------------------------------------------------------------------===//
+// Named instances
+//
+// A variable font is a continuous space; a named instance is a point in it
+// that the font's own designers chose and gave a name to. They are data, not a
+// rule, so nothing can derive them from the axes -- which is why a picker that
+// wants "Condensed Light" rather than an arbitrary weight has to be handed
+// them.
+//
+// FreeType is the source, for the same reason the axes are: FT_MM_Var carries
+// both, fetched once at font creation. The NAME is HarfBuzz's, because the
+// `name` table stores it in a platform encoding -- usually UTF-16BE -- and
+// hb_ot_name_get_utf8 already decodes it. FreeType exposes only the id.
+//===----------------------------------------------------------------------===//
+
+uint32_t ztextFontNamedInstanceCount(const ZtextFont* font) {
+  if (font == NULL || font->mm == NULL) return 0u;
+  return (uint32_t)font->mm->num_namedstyles;
+}
+
+/// The named style at `index`, or NULL when there is none.
+static const FT_Var_Named_Style* namedStyle(const ZtextFont* font,
+                                            uint32_t index) {
+  if (font == NULL || font->mm == NULL ||
+      index >= font->mm->num_namedstyles) {
+    ztextSetErrorDetail("no such named instance in this font");
+    return NULL;
+  }
+  return &font->mm->namedstyle[index];
+}
+
+ZtextResult ztextFontNamedInstanceCoords(const ZtextFont* font, uint32_t index,
+                                         float* values, size_t* count) {
+  if (count == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  const FT_Var_Named_Style* style = namedStyle(font, index);
+  if (style == NULL) {
+    *count = 0u;
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+
+  const size_t needed = (size_t)font->mm->num_axis;
+  if (values == NULL) {
+    *count = needed;
+    return ZTEXT_RESULT_OK;
+  }
+  if (*count < needed) {
+    *count = needed;
+    return ZTEXT_RESULT_BUFFER_TOO_SMALL;
+  }
+
+  for (size_t i = 0; i < needed; i++) {
+    values[i] = fixedToDesign(style->coords[i]);
+  }
+  *count = needed;
+  return ZTEXT_RESULT_OK;
+}
+
+ZtextResult ztextFontNamedInstanceName(const ZtextFont* font, uint32_t index,
+                                       char* buffer, size_t* size) {
+  if (size == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  const FT_Var_Named_Style* style = namedStyle(font, index);
+  if (style == NULL) {
+    *size = 0u;
+    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  }
+
+  const hb_ot_name_id_t id = (hb_ot_name_id_t)style->strid;
+  // Both out parameters NULL asks for the length alone. HarfBuzz returns the
+  // full length in bytes, excluding the NUL, whatever the buffer could hold.
+  const unsigned int needed =
+      hb_ot_name_get_utf8(font->hb_face, id, HB_LANGUAGE_INVALID, NULL, NULL);
+  if (needed == 0u) {
+    *size = 0u;
+    ztextSetErrorDetail("this font names the instance with an id its name "
+                        "table does not carry");
+    return ZTEXT_RESULT_UNSUPPORTED;
+  }
+
+  // Read before *size is overwritten with the answer.
+  const size_t capacity = *size;
+  *size = (size_t)needed;
+  if (buffer == NULL) return ZTEXT_RESULT_OK;
+  // The caller's buffer holds the name AND its NUL, and HarfBuzz reserves the
+  // last byte of whatever room it is told it has -- so it is told one more
+  // than the name is long, and the caller must have that much.
+  if (capacity < (size_t)needed + 1u) return ZTEXT_RESULT_BUFFER_TOO_SMALL;
+
+  unsigned int room = needed + 1u;
+  hb_ot_name_get_utf8(font->hb_face, id, HB_LANGUAGE_INVALID, &room, buffer);
+  *size = (size_t)room;
+  return ZTEXT_RESULT_OK;
+}
+
+ZtextResult ztextFontSetNamedInstance(ZtextFont* font, uint32_t index) {
+  const FT_Var_Named_Style* style = namedStyle(font, index);
+  if (style == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  // No range check and no scratch allocation: these coordinates are the
+  // font's own, already one per axis and already inside every axis's range,
+  // and commitCoordinates copies them before anything can move them.
+  return commitCoordinates(font, style->coords);
 }

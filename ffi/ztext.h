@@ -393,6 +393,30 @@ ZTEXT_API const char* ztextFontStyleName(const ZtextFont* font);
 ZTEXT_API uint32_t ztextFontGlyphIndex(const ZtextFont* font,
                                        uint32_t codepoint);
 
+/// Glyph index for a base character followed by a VARIATION SELECTOR, or 0 if
+/// the font names no glyph for that exact pair.
+///
+/// This is cmap subtable format 14, the mechanism behind U+FE0E/U+FE0F (text
+/// and emoji presentation) and the Ideographic Variation Sequences that
+/// distinguish two written forms of the same CJK character. Without it a
+/// coverage check has to decide with the base character alone and will report
+/// coverage the font does not actually have for the sequence.
+///
+/// Format 14 has two kinds of entry and this collapses them on purpose. A
+/// sequence the font gives a glyph of its own returns that glyph; a sequence
+/// the font records as its DEFAULT -- "draw this pair with the base
+/// character's own glyph", stored with no glyph of its own -- returns the base
+/// character's glyph, which FreeType looks up through the Unicode cmap for you
+/// (libs/freetype/src/sfnt/ttcmap.c, tt_cmap14_char_var_index).
+///
+/// So the answer is nonzero exactly when this font draws this exact sequence,
+/// and 0 for all three ways it does not: no format-14 subtable, no record for
+/// that selector, and a selector whose tables do not list that base
+/// character.
+ZTEXT_API uint32_t ztextFontVariantGlyphIndex(const ZtextFont* font,
+                                              uint32_t codepoint,
+                                              uint32_t variation_selector);
+
 /// Number of glyphs, and design units per em. The latter is 0 for a font with
 /// no scalable outlines.
 ZTEXT_API uint32_t ztextFontGlyphCount(const ZtextFont* font);
@@ -511,6 +535,58 @@ ZTEXT_API ZtextResult ztextFontSetVariations(ZtextFont* font,
 ZTEXT_API ZtextResult ztextFontVariation(const ZtextFont* font, uint32_t index,
                                          float* out);
 
+/// Number of NAMED INSTANCES the font declares -- the entries a font's own
+/// designers named, "Condensed Light" and the rest, each one a point in the
+/// axis space. 0 for a font with no `fvar`, and 0 for a variable font that
+/// names none.
+///
+/// A variable font is a continuous space and a picker needs the points in it
+/// that someone chose deliberately; deriving them from the axes is not
+/// possible, because they are data rather than a rule.
+ZTEXT_API uint32_t ztextFontNamedInstanceCount(const ZtextFont* font);
+
+/// Design coordinates of one named instance, one per axis, in the order
+/// ztextFontAxis reports them.
+///
+/// `*count` is the capacity of `values` on the way in and the number written
+/// on the way out. Pass `values = NULL` to ask only for the count, which is
+/// always ztextFontAxisCount. A buffer too small is
+/// ZTEXT_RESULT_BUFFER_TOO_SMALL with `*count` set to what is needed, and
+/// nothing written.
+ZTEXT_API ZtextResult ztextFontNamedInstanceCoords(const ZtextFont* font,
+                                                   uint32_t index,
+                                                   float* values,
+                                                   size_t* count);
+
+/// The instance's subfamily name, as UTF-8, NUL-terminated.
+///
+/// `*size` is the capacity of `buffer` in bytes on the way in and the length
+/// written EXCLUDING the NUL on the way out. Pass `buffer = NULL` to ask for
+/// the length first; `*size` then comes back as the length a buffer must hold
+/// beyond its NUL. Too small a buffer is ZTEXT_RESULT_BUFFER_TOO_SMALL with
+/// `*size` set to what is needed, and nothing written.
+///
+/// The name comes from the font's `name` table through HarfBuzz, which
+/// decodes the platform encoding -- usually UTF-16BE -- so a caller never
+/// meets one.
+///
+/// ZTEXT_RESULT_UNSUPPORTED when the lookup yields nothing, which covers two
+/// cases HarfBuzz does not distinguish: an instance whose `name` id the table
+/// does not carry, and one whose name is the empty string. Both are
+/// malformed fonts, and neither gives a picker anything to show.
+ZTEXT_API ZtextResult ztextFontNamedInstanceName(const ZtextFont* font,
+                                                 uint32_t index, char* buffer,
+                                                 size_t* size);
+
+/// Moves every axis to the named instance's coordinates, in one step.
+///
+/// Equivalent to reading the coordinates and passing all of them to
+/// ztextFontSetVariations, and subject to the same rule: it invalidates every
+/// face of this font for measurement, because a run measured before the
+/// change is not one that can be laid out after it.
+ZTEXT_API ZtextResult ztextFontSetNamedInstance(ZtextFont* font,
+                                                uint32_t index);
+
 /// Creates a face: this font, at this size.
 ///
 /// A face is never sizeless -- the size is part of what it is -- so there is
@@ -599,6 +675,108 @@ typedef struct ZtextFaceMetrics {
 
 ZTEXT_API ZtextResult ztextFaceMetrics(const ZtextFace* face,
                                        ZtextFaceMetrics* out);
+
+/// One metric from the font's own tables, named as OpenType names it.
+///
+/// ZtextFaceMetrics above is what a line of text needs and comes from
+/// FreeType, which reads `hhea`. This is the rest of what OpenType defines,
+/// read through HarfBuzz -- and the two do not always agree, which is the
+/// point rather than an inconsistency:
+///
+///   * ZTEXT_METRIC_HORIZONTAL_ASCENDER prefers OS/2's sTypoAscender when the
+///     font sets the USE_TYPO_METRICS bit in fsSelection, and falls back to
+///     `hhea` otherwise (libs/harfbuzz/src/hb-ot-metrics.cc). That is the
+///     rule modern text stacks follow. ZtextFaceMetrics::ascender is `hhea`
+///     unconditionally, because that is what FreeType scales onto the
+///     FT_Size. A font that sets the bit and disagrees between the two tables
+///     will report two different ascenders here, and both are correct answers
+///     to different questions.
+///   * ZTEXT_METRIC_UNDERLINE_OFFSET is `post`'s own number, which is the
+///     TOP edge of the stroke. ZtextFaceMetrics::underline_position is the
+///     CENTRE: FreeType subtracts half the thickness to convert the
+///     TrueType meaning to its own (libs/freetype/src/sfnt/sfobjs.c). The
+///     two differ by half the underline thickness in every TrueType font,
+///     and a caller drawing a rectangle wants to know which edge it has.
+///   * Every value is in pixels at this face's current size, positive upward,
+///     with the font's own sign conventions kept: a descender is negative,
+///     and a strikeout offset is the distance ABOVE the baseline.
+///   * Variations are applied. Moving an axis moves these.
+///
+/// The values are HarfBuzz's own tags, so a reader who knows
+/// hb_ot_metrics_tag_t already knows this enum; ffi/ztext_abi.c asserts each
+/// one equal to its HB_OT_METRICS_TAG_ counterpart, so the two cannot drift.
+/// Every metric ztext names, written once.
+///
+/// This list expands three ways: into ZtextMetric below, into the check
+/// ztextFaceMetric applies to the metric it is handed, and into the static
+/// assertions in ffi/ztext_abi.c that tie each name to HarfBuzz's own
+/// HB_OT_METRICS_TAG_ counterpart. A metric reaches all three or none of
+/// them, so there is no second list to fall behind -- which is also why
+/// ZtextAbiLayout reports metric_count from this list rather than a number
+/// written down beside it.
+#define ZTEXT_METRIC_LIST(X)                                                 \
+  X(HORIZONTAL_ASCENDER, 'h', 'a', 's', 'c')                                  \
+  X(HORIZONTAL_DESCENDER, 'h', 'd', 's', 'c')                                 \
+  X(HORIZONTAL_LINE_GAP, 'h', 'l', 'g', 'p')                                  \
+  X(HORIZONTAL_CLIPPING_ASCENT, 'h', 'c', 'l', 'a')                           \
+  X(HORIZONTAL_CLIPPING_DESCENT, 'h', 'c', 'l', 'd')                          \
+  X(VERTICAL_ASCENDER, 'v', 'a', 's', 'c')                                    \
+  X(VERTICAL_DESCENDER, 'v', 'd', 's', 'c')                                   \
+  X(VERTICAL_LINE_GAP, 'v', 'l', 'g', 'p')                                    \
+  X(HORIZONTAL_CARET_RISE, 'h', 'c', 'r', 's')                                \
+  X(HORIZONTAL_CARET_RUN, 'h', 'c', 'r', 'n')                                 \
+  X(HORIZONTAL_CARET_OFFSET, 'h', 'c', 'o', 'f')                              \
+  X(VERTICAL_CARET_RISE, 'v', 'c', 'r', 's')                                  \
+  X(VERTICAL_CARET_RUN, 'v', 'c', 'r', 'n')                                   \
+  X(VERTICAL_CARET_OFFSET, 'v', 'c', 'o', 'f')                                \
+  X(X_HEIGHT, 'x', 'h', 'g', 't')                                             \
+  X(CAP_HEIGHT, 'c', 'p', 'h', 't')                                           \
+  X(SUBSCRIPT_EM_X_SIZE, 's', 'b', 'x', 's')                                  \
+  X(SUBSCRIPT_EM_Y_SIZE, 's', 'b', 'y', 's')                                  \
+  X(SUBSCRIPT_EM_X_OFFSET, 's', 'b', 'x', 'o')                                \
+  X(SUBSCRIPT_EM_Y_OFFSET, 's', 'b', 'y', 'o')                                \
+  X(SUPERSCRIPT_EM_X_SIZE, 's', 'p', 'x', 's')                                \
+  X(SUPERSCRIPT_EM_Y_SIZE, 's', 'p', 'y', 's')                                \
+  X(SUPERSCRIPT_EM_X_OFFSET, 's', 'p', 'x', 'o')                              \
+  X(SUPERSCRIPT_EM_Y_OFFSET, 's', 'p', 'y', 'o')                              \
+  X(STRIKEOUT_SIZE, 's', 't', 'r', 's')                                       \
+  X(STRIKEOUT_OFFSET, 's', 't', 'r', 'o')                                     \
+  X(UNDERLINE_SIZE, 'u', 'n', 'd', 's')                                       \
+  X(UNDERLINE_OFFSET, 'u', 'n', 'd', 'o')
+
+typedef enum ZtextMetric {
+#define ZTEXT_METRIC_ENUMERATOR(name, a, b, c, d) \
+  ZTEXT_METRIC_##name = ZTEXT_TAG(a, b, c, d),
+  ZTEXT_METRIC_LIST(ZTEXT_METRIC_ENUMERATOR)
+#undef ZTEXT_METRIC_ENUMERATOR
+} ZtextMetric;
+
+/// Reads one metric, and says whether the font declares it.
+///
+/// ZTEXT_RESULT_UNSUPPORTED, with `*out` set to 0, when the font's tables do
+/// not carry it -- which is the common case for x-height and cap-height in
+/// older fonts, and for every vertical metric in a font with no `vhea`. That
+/// is a real answer, not a failure: 0 on its own could not be told from a
+/// font that declares a zero.
+///
+/// A `metric` this header does not name is ZTEXT_RESULT_INVALID_ARGUMENT
+/// rather than an unsupported metric, so a caller casting an integer in finds
+/// out.
+ZTEXT_API ZtextResult ztextFaceMetric(const ZtextFace* face,
+                                      ZtextMetric metric, float* out);
+
+/// The same, with a value synthesised when the font declares none.
+///
+/// HarfBuzz's own fallbacks (hb_ot_metrics_get_position_with_fallback): an
+/// absent x-height or cap-height is estimated from the ink of a
+/// representative glyph, an absent strikeout or underline from the em, and so
+/// on. Never ZTEXT_RESULT_UNSUPPORTED -- there is always an answer, and the
+/// price is that a caller cannot tell a designed value from an estimate. Use
+/// ztextFaceMetric when that distinction matters, this when a number is
+/// needed and any reasonable one will do.
+ZTEXT_API ZtextResult ztextFaceMetricWithFallback(const ZtextFace* face,
+                                                  ZtextMetric metric,
+                                                  float* out);
 
 //===----------------------------------------------------------------------===//
 // Shaping
@@ -1357,6 +1535,12 @@ typedef struct ZtextAbiLayout {
   /// therefore keeps exactly the bits this build can produce.
   uint32_t glyph_flag_size;
   uint32_t glyph_flag_last;
+  /// ZtextMetric's enumerators are OpenType TAGS, not an ordinal sequence, so
+  /// a "last value" would say nothing about the range. The COUNT is what a
+  /// consumer can act on: it says how many metrics this build names, and a
+  /// consumer that iterates its own list can tell that ztext knows more.
+  uint32_t metric_size;
+  uint32_t metric_count;
 } ZtextAbiLayout;
 
 /// Fills `out` with the layout the library was compiled with. Never fails.

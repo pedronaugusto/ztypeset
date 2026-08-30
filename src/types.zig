@@ -60,6 +60,14 @@ pub const GlyphBitmap = c.GlyphBitmap;
 /// differ.
 pub const BitmapFormat = c.BitmapFormat;
 
+/// One OpenType metric, named by its own four-character tag.
+///
+/// These are HarfBuzz's `hb_ot_metrics_tag_t` values unchanged, so a reader
+/// who knows that enum already knows this one, and `ffi/ztext_abi.c` asserts
+/// each against its `HB_OT_METRICS_TAG_` counterpart. See `Face.metric` for
+/// what a metric is worth and where it differs from `FaceMetrics`.
+pub const Metric = c.Metric;
+
 /// Callbacks for `Face.decomposeOutline`: one per outline command, points in
 /// 26.6 fixed point, plus a `user` pointer passed back unmodified.
 pub const OutlineFuncs = c.OutlineFuncs;

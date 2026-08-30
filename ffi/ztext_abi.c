@@ -61,6 +61,20 @@ _Static_assert((int)ZTEXT_GLYPH_FLAG_DEFINED == (int)HB_GLYPH_FLAG_DEFINED,
                "HarfBuzz defines a glyph flag ztext does not republish; add it "
                "to ZtextGlyphFlag rather than widening the mask");
 
+// ZtextMetric's enumerators ARE hb_ot_metrics_tag_t's values -- ztextFaceMetric
+// casts one to the other and passes it straight to HarfBuzz -- so the mapping
+// is the identity and the only thing that can go wrong is the two lists
+// drifting apart. One assertion per tag, generated from the same
+// ZTEXT_METRIC_LIST the enum is, so adding a metric to the header adds its
+// assertion with it and a metric HarfBuzz renames stops the build here rather
+// than reading as an unsupported metric at runtime.
+#define ZTEXT_METRIC_ASSERT(name, a, b, c, d)             \
+  _Static_assert((int)ZTEXT_METRIC_##name ==              \
+                     (int)HB_OT_METRICS_TAG_##name,       \
+                 "HB_OT_METRICS_TAG_" #name " moved");
+ZTEXT_METRIC_LIST(ZTEXT_METRIC_ASSERT)
+#undef ZTEXT_METRIC_ASSERT
+
 // hb_glyph_extents_t is read directly in ztextShaperExtents, including the
 // documented convention that height is negative when y grows up.
 _Static_assert(sizeof(((hb_glyph_extents_t*)0)->height) ==
@@ -176,6 +190,15 @@ void ztextAbiLayout(ZtextAbiLayout* out) {
   out->glyph_flag_size = (uint32_t)sizeof(ZtextGlyphFlag);
   // The OR of every flag, not the highest one -- see ztext.h.
   out->glyph_flag_last = (uint32_t)ZTEXT_GLYPH_FLAG_DEFINED;
+  out->metric_size = (uint32_t)sizeof(ZtextMetric);
+  // A count rather than a last value: the enumerators are four-character
+  // OpenType tags, so "the highest one" is an accident of spelling and says
+  // nothing about how many there are. Counted from ZTEXT_METRIC_LIST, which
+  // is also what the enum is generated from, so this cannot be a number
+  // someone forgot to raise.
+#define ZTEXT_METRIC_ONE(name, a, b, c, d) +1
+  out->metric_count = (uint32_t)(0 ZTEXT_METRIC_LIST(ZTEXT_METRIC_ONE));
+#undef ZTEXT_METRIC_ONE
 }
 
 //===----------------------------------------------------------------------===//
