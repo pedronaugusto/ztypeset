@@ -726,6 +726,35 @@ int main(int argc, char** argv) {
         "a NULL array with a non-zero count should be refused");
   CHECK(ztextFontAxisCount(NULL) == 0, "a NULL font should report 0 axes");
 
+  // Named instances, on the same static font: none, and every call that takes
+  // an index says so rather than describing an instance that is not there.
+  float instance_coords[4];
+  size_t instance_count = 4u;
+  char instance_name[32];
+  size_t instance_size = sizeof(instance_name);
+  CHECK(ztextFontNamedInstanceCount(the_font) == 0,
+        "a static font should report 0 named instances, got %u",
+        ztextFontNamedInstanceCount(the_font));
+  CHECK(ztextFontNamedInstanceCoords(the_font, 0, instance_coords,
+                                     &instance_count) ==
+            ZTEXT_RESULT_INVALID_ARGUMENT,
+        "asking a static font for instance 0 should be refused");
+  CHECK(instance_count == 0u, "a refused instance query should clear its count");
+  CHECK(ztextFontNamedInstanceName(the_font, 0, instance_name,
+                                   &instance_size) ==
+            ZTEXT_RESULT_INVALID_ARGUMENT,
+        "asking a static font for an instance name should be refused");
+  CHECK(ztextFontSetNamedInstance(the_font, 0) ==
+            ZTEXT_RESULT_INVALID_ARGUMENT,
+        "setting an instance on a static font should be refused, not ignored");
+
+  // Variation sequences: this font has no cmap format 14, so every pair is 0
+  // while the base character on its own is not.
+  CHECK(ztextFontGlyphIndex(the_font, 0x05D0u) != 0u,
+        "the font should map ALEF");
+  CHECK(ztextFontVariantGlyphIndex(the_font, 0x05D0u, 0xFE00u) == 0u,
+        "a font with no format-14 cmap should name no variation sequence");
+
   // A fractional size through the C boundary, where the 26.6 conversion is.
   phase("faces");
   ZtextFace* fractional_face = NULL;
@@ -764,6 +793,31 @@ int main(int argc, char** argv) {
   printf("  face: %s %s, %u glyphs, %u upem\n", ztextFontFamilyName(the_font),
          ztextFontStyleName(the_font), metrics.num_glyphs,
          metrics.units_per_em);
+
+  // OpenType metrics. The interesting check is the one Zig cannot write: a
+  // ZtextMetric this build does not name, which only C can construct, has to
+  // be refused rather than handed to HarfBuzz as a tag.
+  float metric = -1.0f;
+  CHECK_OK(ztextFaceMetric(face, ZTEXT_METRIC_X_HEIGHT, &metric));
+  CHECK(metric > 0.0f, "this font declares an x-height; it should be positive");
+  metric = -1.0f;
+  CHECK(ztextFaceMetric(face, ZTEXT_METRIC_VERTICAL_ASCENDER, &metric) ==
+            ZTEXT_RESULT_UNSUPPORTED,
+        "a font with no vhea should report its vertical ascender unsupported");
+  CHECK(metric == 0.0f, "an unsupported metric should clear its output");
+  CHECK_OK(ztextFaceMetricWithFallback(face, ZTEXT_METRIC_VERTICAL_ASCENDER,
+                                       &metric));
+  CHECK(metric != 0.0f, "the fallback should always produce a value");
+  metric = -1.0f;
+  CHECK(ztextFaceMetric(face, (ZtextMetric)ZTEXT_TAG('n', 'o', 'p', 'e'),
+                        &metric) == ZTEXT_RESULT_INVALID_ARGUMENT,
+        "a tag this build does not name should be refused, not forwarded");
+  CHECK(metric == 0.0f, "a refused metric should clear its output");
+  CHECK(ztextFaceMetricWithFallback(face,
+                                    (ZtextMetric)ZTEXT_TAG('n', 'o', 'p', 'e'),
+                                    &metric) ==
+            ZTEXT_RESULT_INVALID_ARGUMENT,
+        "the fallback should refuse an unnamed tag too");
 
   // Shape a right-to-left run: the font passed in is Hebrew.
   phase("shape");

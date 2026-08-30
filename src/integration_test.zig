@@ -3051,3 +3051,327 @@ test "the documented pipeline shapes every run of a mixed paragraph" {
     }
     try std.testing.expect(total >= 17);
 }
+
+//=============================================================================
+// OpenType metrics, named instances, variation sequences
+//=============================================================================
+
+// The design values below are the fonts' own, read out of their OS/2, post and
+// hhea tables; the expected pixel value is the design value scaled by
+// ppem/upem, and both fonts here are 1000 upem. Written that way rather than
+// as bare numbers so a reader can check the arithmetic against the font.
+const design_to_px = @as(f32, @floatFromInt(ppem)) / 1000.0;
+
+test "the OpenType metrics a font declares" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    // The same `post` table through two libraries, and they do NOT agree --
+    // which is the thing worth pinning. HarfBuzz reports underlinePosition as
+    // the font stores it, the TOP edge of the stroke; FreeType subtracts half
+    // the thickness to get the CENTRE. Noto Sans stores -100 and 50, so the
+    // two answers are -100 and -125 design units, and a caller drawing a
+    // rectangle needs to know which edge it was handed.
+    const metrics = try face.metrics();
+    const top_edge = try face.metric(.underline_offset);
+    try std.testing.expectApproxEqAbs(@as(f32, -100) * design_to_px, top_edge, 0.05);
+    try std.testing.expectApproxEqAbs(
+        @as(f32, -125) * design_to_px,
+        metrics.underline_position,
+        0.05,
+    );
+    try std.testing.expectApproxEqAbs(
+        top_edge - metrics.underline_thickness / 2.0,
+        metrics.underline_position,
+        0.05,
+    );
+    // The thickness itself is the one number both read the same way.
+    try std.testing.expectApproxEqAbs(
+        metrics.underline_thickness,
+        try face.metric(.underline_size),
+        0.05,
+    );
+
+    // OS/2 values FreeType never puts on the FT_Size, which is the reason this
+    // entry point exists at all.
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 536) * design_to_px,
+        try face.metric(.x_height),
+        0.05,
+    );
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 714) * design_to_px,
+        try face.metric(.cap_height),
+        0.05,
+    );
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 50) * design_to_px,
+        try face.metric(.strikeout_size),
+        0.05,
+    );
+    // Positive: the offset is measured UP from the baseline, which is the
+    // font's own convention and is kept rather than flipped.
+    try std.testing.expectApproxEqAbs(
+        @as(f32, 322) * design_to_px,
+        try face.metric(.strikeout_offset),
+        0.05,
+    );
+    try std.testing.expect(try face.metric(.strikeout_offset) > 0);
+    try std.testing.expect(try face.metric(.horizontal_descender) < 0);
+
+    // Noto Sans sets USE_TYPO_METRICS and its sTypoAscender equals its `hhea`
+    // ascender, so the two tables agree here and this pair does NOT exercise
+    // the disagreement the header describes -- no vendored font does. What it
+    // does show is the other difference: FreeType rounds the ascender onto a
+    // whole pixel when it scales it onto the FT_Size and HarfBuzz does not, so
+    // the two answers differ by less than one pixel and neither is wrong.
+    const hb_ascender = try face.metric(.horizontal_ascender);
+    try std.testing.expectApproxEqAbs(@as(f32, 1069) * design_to_px, hb_ascender, 0.05);
+    try std.testing.expect(@abs(metrics.ascender - hb_ascender) < 1.0);
+}
+
+test "a metric the font does not declare is an answer, not a failure" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    // No vendored font has a `vhea`, so every vertical metric is genuinely
+    // absent -- and a 0 could not be told from a font that declares zero.
+    const latin = try fixture.face(fonts.latin);
+    defer latin.deinit();
+    try std.testing.expectError(ztext.Error.Unsupported, latin.metric(.vertical_ascender));
+    try std.testing.expectError(ztext.Error.Unsupported, latin.metric(.vertical_descender));
+    try std.testing.expectError(ztext.Error.Unsupported, latin.metric(.vertical_caret_rise));
+
+    // Noto Naskh Arabic carries OS/2 version 4 with sxHeight and sCapHeight
+    // both 0, which HarfBuzz reads as "not declared" rather than as zero
+    // heights -- an Arabic font has no x-height to declare.
+    const arabic = try fixture.face(fonts.arabic);
+    defer arabic.deinit();
+    try std.testing.expectError(ztext.Error.Unsupported, arabic.metric(.x_height));
+    try std.testing.expectError(ztext.Error.Unsupported, arabic.metric(.cap_height));
+
+    // The same font still declares everything else.
+    try std.testing.expect(try arabic.metric(.strikeout_size) > 0);
+
+    // With the fallback there is always an answer, and it is a plausible one:
+    // an x-height is a positive fraction of the em, not zero and not the em.
+    const fallback = try arabic.metricWithFallback(.x_height);
+    try std.testing.expect(fallback > 0);
+    try std.testing.expect(fallback < @as(f32, @floatFromInt(ppem)));
+    // And a vertical ascender exists even for a font with no `vhea`.
+    const vertical = try latin.metricWithFallback(.vertical_ascender);
+    try std.testing.expect(vertical != 0);
+}
+
+test "metrics follow the axes" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const font = try fixture.library.createFont(fonts.variable, 0);
+    defer font.deinit();
+    const face = try font.face(0, ppem);
+    defer face.deinit();
+
+    // This font has no MVAR, so its x-height does not move -- which is the
+    // point of asserting it rather than a change: what must hold is that the
+    // value stays a real reading of the font at the current instance, and a
+    // reader who expected movement can see here that MVAR is what provides it.
+    try font.setNamedInstance(0);
+    const thin = try face.metric(.x_height);
+    try font.setNamedInstance(8);
+    const black = try face.metric(.x_height);
+    try std.testing.expectApproxEqAbs(@as(f32, 536) * design_to_px, thin, 0.05);
+    try std.testing.expectApproxEqAbs(thin, black, 0.001);
+}
+
+test "a metric this build does not name is rejected rather than passed through" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const face = try fixture.face(fonts.latin);
+    defer face.deinit();
+
+    // Zig cannot build a `Metric` this build has no name for, so the check
+    // that matters is exercised from C; see tests/c_smoke.c. What can be shown
+    // here is that every name this build does have reaches HarfBuzz, which is
+    // the other half of the same guarantee: nothing in the enum is a tag
+    // ztextFaceMetric refuses.
+    var named: usize = 0;
+    inline for (@typeInfo(ztext.Metric).@"enum".fields) |field| {
+        const metric: ztext.Metric = @enumFromInt(field.value);
+        // Never InvalidArgument: that is reserved for a tag this build does
+        // not name, and every one of these is named by definition. Unsupported
+        // is a real answer and says the font is quiet about this metric.
+        if (face.metric(metric)) |_| {} else |e| {
+            if (e != ztext.Error.Unsupported) return e;
+        }
+        named += 1;
+    }
+    try std.testing.expectEqual(@as(usize, 28), named);
+}
+
+test "named instances are the points in the axis space the designers chose" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const font = try fixture.library.createFont(fonts.variable, 0);
+    defer font.deinit();
+
+    try std.testing.expectEqual(@as(u32, 9), font.namedInstanceCount());
+
+    // Coordinates come back in axis order: wght first, wdth second.
+    var coords: [2]f32 = undefined;
+    const regular = try font.namedInstanceCoords(3, &coords);
+    try std.testing.expectEqual(@as(usize, 2), regular.len);
+    try std.testing.expectApproxEqAbs(@as(f32, 400), regular[0], 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), regular[1], 0.01);
+
+    // The name is decoded out of the font's UTF-16BE `name` table, so a
+    // caller never meets one.
+    var buffer: [32]u8 = undefined;
+    try std.testing.expectEqualStrings("Regular", try font.namedInstanceName(3, &buffer));
+    try std.testing.expectEqualStrings("Thin", try font.namedInstanceName(0, &buffer));
+    try std.testing.expectEqualStrings("Black", try font.namedInstanceName(8, &buffer));
+
+    // Asking for the length first, then a buffer that is exactly one byte
+    // short of the name plus its NUL.
+    try std.testing.expectEqual(@as(usize, 7), try font.namedInstanceNameLen(3));
+    var exact: [8]u8 = undefined;
+    try std.testing.expectEqualStrings("Regular", try font.namedInstanceName(3, &exact));
+    var tight: [7]u8 = undefined;
+    try std.testing.expectError(
+        ztext.Error.BufferTooSmall,
+        font.namedInstanceName(3, &tight),
+    );
+
+    // A buffer shorter than the axis count is refused rather than half filled.
+    var one: [1]f32 = undefined;
+    try std.testing.expectError(
+        ztext.Error.BufferTooSmall,
+        font.namedInstanceCoords(3, &one),
+    );
+
+    // One past the end, on every entry point that takes an index.
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceCoords(9, &coords));
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceName(9, &buffer));
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceNameLen(9));
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.setNamedInstance(9));
+}
+
+test "a static font names no instances and refuses to pretend otherwise" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const font = try fixture.library.createFont(fonts.hebrew, 0);
+    defer font.deinit();
+
+    try std.testing.expectEqual(@as(u32, 0), font.namedInstanceCount());
+    var coords: [2]f32 = undefined;
+    var buffer: [32]u8 = undefined;
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceCoords(0, &coords));
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceName(0, &buffer));
+    try std.testing.expectError(ztext.Error.InvalidArgument, font.setNamedInstance(0));
+}
+
+test "choosing a named instance moves the axes and every face with them" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const font = try fixture.library.createFont(fonts.variable, 0);
+    defer font.deinit();
+    const face = try font.face(0, ppem);
+    defer face.deinit();
+
+    try font.setNamedInstance(0); // Thin
+    try std.testing.expectApproxEqAbs(@as(f32, 100), try font.variation(0), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), try font.variation(1), 0.01);
+    var thin: f32 = 0;
+    for (try fixture.shaper.shape(face, variable_word, variable_params)) |glyph| {
+        thin += glyph.x_advance;
+    }
+
+    try font.setNamedInstance(8); // Black
+    try std.testing.expectApproxEqAbs(@as(f32, 900), try font.variation(0), 0.01);
+    try std.testing.expectApproxEqAbs(@as(f32, 100), try font.variation(1), 0.01);
+    var black: f32 = 0;
+    for (try fixture.shaper.shape(face, variable_word, variable_params)) |glyph| {
+        black += glyph.x_advance;
+    }
+
+    // Heavier is wider, through HVAR, on a face that already existed when the
+    // instance changed.
+    try std.testing.expect(black > thin);
+
+    // And it is the same commit path as setVariations: naming the instance's
+    // coordinates by tag lands in the same place.
+    try font.setVariations(&.{
+        .{ .tag = ztext.tag("wght"), .value = 900 },
+        .{ .tag = ztext.tag("wdth"), .value = 100 },
+    });
+    var by_tag: f32 = 0;
+    for (try fixture.shaper.shape(face, variable_word, variable_params)) |glyph| {
+        by_tag += glyph.x_advance;
+    }
+    try std.testing.expectApproxEqAbs(black, by_tag, 0.001);
+}
+
+test "a variation sequence names its own glyph, the base glyph, or none" {
+    const fixture = try Fixture.init();
+    defer fixture.deinit();
+
+    const gpa = std.testing.allocator;
+
+    const alef: u21 = '\u{5D0}';
+    const bet: u21 = '\u{5D1}';
+    const gimel: u21 = '\u{5D2}';
+
+    // The plain font first: it has no format-14 subtable, so every sequence
+    // is 0. Asserted rather than assumed -- it is what makes the fixture below
+    // the thing that changes the answers.
+    const plain = try fixture.library.createFont(fonts.hebrew, 0);
+    defer plain.deinit();
+    try std.testing.expectEqual(@as(u32, 0), plain.variantGlyphIndex(alef, 0xFE00));
+
+    const bet_glyph: u16 = @intCast(plain.glyphIndex(bet));
+    try std.testing.expect(bet_glyph != 0);
+
+    const bytes = try fonts.withVariationSequences(gpa, fonts.hebrew, &.{
+        // U+05D0 U+FE00 gets a glyph of its own -- bet's, so the test can tell
+        // it apart from alef's.
+        .{ .base = alef, .selector = 0xFE00, .glyph = bet_glyph },
+        // U+05D1 U+FE01 is recorded as the DEFAULT: the font draws it, with
+        // bet's own glyph, and stores no glyph for it.
+        .{ .base = bet, .selector = 0xFE01, .glyph = 0 },
+    });
+    defer gpa.free(bytes);
+
+    const font = try fixture.library.createFont(bytes, 0);
+    defer font.deinit();
+
+    // The rebuilt cmap must still be the cmap: every letter this font maps has
+    // to map to the same glyph it did before.
+    var codepoint: u21 = 0x5D0;
+    while (codepoint <= 0x5EA) : (codepoint += 1) {
+        try std.testing.expectEqual(plain.glyphIndex(codepoint), font.glyphIndex(codepoint));
+    }
+
+    // A sequence with a glyph of its own.
+    try std.testing.expectEqual(@as(u32, bet_glyph), font.variantGlyphIndex(alef, 0xFE00));
+    try std.testing.expect(font.variantGlyphIndex(alef, 0xFE00) != font.glyphIndex(alef));
+
+    // A sequence recorded as the default: the base character's own glyph,
+    // resolved through the Unicode cmap, NOT 0.
+    try std.testing.expectEqual(font.glyphIndex(bet), font.variantGlyphIndex(bet, 0xFE01));
+
+    // The three ways to get 0, all of which mean "this font does not draw this
+    // pair": a selector the font never mentions, a base character the selector
+    // does not list, and the plain font above with no subtable at all.
+    try std.testing.expectEqual(@as(u32, 0), font.variantGlyphIndex(alef, 0xFE02));
+    try std.testing.expectEqual(@as(u32, 0), font.variantGlyphIndex(gimel, 0xFE00));
+
+    // The base character on its own is unaffected by any of it.
+    try std.testing.expectEqual(plain.glyphIndex(alef), font.glyphIndex(alef));
+}

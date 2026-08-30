@@ -123,6 +123,18 @@ pub const Font = struct {
         return c.ztextFontGlyphIndex(self.handle, codepoint);
     }
 
+    /// Glyph index for a base character followed by a VARIATION SELECTOR --
+    /// cmap format 14, which is what U+FE0E/U+FE0F and the Ideographic
+    /// Variation Sequences use.
+    ///
+    /// Nonzero exactly when this font draws this exact pair -- including the
+    /// case where the font records the pair as its default and the answer is
+    /// the base character's own glyph. 0 for every way it does not; see
+    /// `ffi/ztext.h` for the three of them.
+    pub fn variantGlyphIndex(self: Font, codepoint: u21, selector: u21) u32 {
+        return c.ztextFontVariantGlyphIndex(self.handle, codepoint, selector);
+    }
+
     pub fn glyphCount(self: Font) u32 {
         return c.ztextFontGlyphCount(self.handle);
     }
@@ -179,6 +191,76 @@ pub const Font = struct {
         return out;
     }
 
+    /// Number of NAMED INSTANCES this font declares -- the points in its axis
+    /// space that its own designers named. 0 for a static font, and 0 for a
+    /// variable font that names none.
+    pub fn namedInstanceCount(self: Font) u32 {
+        return c.ztextFontNamedInstanceCount(self.handle);
+    }
+
+    /// Design coordinates of one named instance, one per axis, in `axis`
+    /// order, written into `values` and returned as the prefix that was used.
+    ///
+    /// `error.BufferTooSmall` when `values` is shorter than `axisCount`, with
+    /// nothing written.
+    pub fn namedInstanceCoords(
+        self: Font,
+        index: u32,
+        values: []f32,
+    ) err.Error![]const f32 {
+        // `values.ptr` even for an empty slice: passing null would ask for the
+        // count instead, which would come back as success having written
+        // nothing -- a caller that ignored the returned slice would then be
+        // reading whatever was already in its buffer.
+        var count: usize = values.len;
+        try err.check(c.ztextFontNamedInstanceCoords(
+            self.handle,
+            index,
+            values.ptr,
+            &count,
+        ));
+        return values[0..count];
+    }
+
+    /// Bytes the instance's subfamily name occupies as UTF-8, excluding the
+    /// NUL that `namedInstanceName` also writes.
+    pub fn namedInstanceNameLen(self: Font, index: u32) err.Error!usize {
+        var size: usize = 0;
+        try err.check(c.ztextFontNamedInstanceName(self.handle, index, null, &size));
+        return size;
+    }
+
+    /// Writes the instance's subfamily name into `buffer` as UTF-8 and returns
+    /// the part of it that was written, not counting the NUL.
+    ///
+    /// `buffer` must hold the name AND its NUL, so it needs
+    /// `namedInstanceNameLen` + 1 bytes; anything less is
+    /// `error.BufferTooSmall`. `error.Unsupported` when the lookup yields
+    /// nothing at all -- see `ffi/ztext.h` for the two ways that happens.
+    pub fn namedInstanceName(
+        self: Font,
+        index: u32,
+        buffer: []u8,
+    ) err.Error![]const u8 {
+        var size: usize = buffer.len;
+        try err.check(c.ztextFontNamedInstanceName(
+            self.handle,
+            index,
+            buffer.ptr,
+            &size,
+        ));
+        return buffer[0..size];
+    }
+
+    /// Moves every axis to a named instance's coordinates in one step.
+    ///
+    /// The same bargain as `setVariations`, because it is the same commit
+    /// path: every face of this font moves with it, and every run already
+    /// measured against one of them is refused afterwards.
+    pub fn setNamedInstance(self: Font, index: u32) err.Error!void {
+        try err.check(c.ztextFontSetNamedInstance(self.handle, index));
+    }
+
     /// How many leading bytes of `utf8` this font can draw, for a host walking
     /// its own fallback list.
     ///
@@ -226,6 +308,35 @@ pub const Face = struct {
     pub fn metrics(self: Face) err.Error!types.FaceMetrics {
         var out: types.FaceMetrics = undefined;
         try err.check(c.ztextFaceMetrics(self.handle, &out));
+        return out;
+    }
+
+    /// One OpenType metric in pixels at this face's current size.
+    ///
+    /// `metrics` above is FreeType's view: `hhea`, plus `post`'s underline
+    /// converted to FreeType's own convention. This is the rest of what
+    /// OpenType defines, read through HarfBuzz, which honours the
+    /// USE_TYPO_METRICS bit and applies variations. The two disagree in two
+    /// places on purpose -- the ascender for a font that sets that bit, and
+    /// the underline offset, which is the stroke's top edge here and its
+    /// centre there -- and `ffi/ztext.h` says which question each answers.
+    ///
+    /// `error.Unsupported` when the font's tables do not declare it -- which
+    /// is common for x-height and cap-height in older fonts, and for every
+    /// vertical metric in a font with no `vhea`. That is an answer: a 0 on its
+    /// own could not be told from a font that declares zero.
+    pub fn metric(self: Face, which: types.Metric) err.Error!f32 {
+        var out: f32 = 0;
+        try err.check(c.ztextFaceMetric(self.handle, which, &out));
+        return out;
+    }
+
+    /// The same, with HarfBuzz's own value synthesised when the font declares
+    /// none. Never `error.Unsupported`; the price is that a caller cannot tell
+    /// a designed value from an estimate.
+    pub fn metricWithFallback(self: Face, which: types.Metric) err.Error!f32 {
+        var out: f32 = 0;
+        try err.check(c.ztextFaceMetricWithFallback(self.handle, which, &out));
         return out;
     }
 

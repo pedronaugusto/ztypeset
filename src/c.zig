@@ -121,6 +121,43 @@ pub const Hinting = enum(c_int) {
     none = 2,
 };
 
+/// One OpenType metric, named by its own four-character tag.
+///
+/// The values are HarfBuzz's `hb_ot_metrics_tag_t` values unchanged, which is
+/// what lets `ztextFaceMetric` pass one straight through; `ffi/ztext_abi.c`
+/// asserts each against its `HB_OT_METRICS_TAG_` counterpart, so the two
+/// cannot drift apart.
+pub const Metric = enum(c_int) {
+    horizontal_ascender = 0x68617363, // 'hasc'
+    horizontal_descender = 0x68647363, // 'hdsc'
+    horizontal_line_gap = 0x686C6770, // 'hlgp'
+    horizontal_clipping_ascent = 0x68636C61, // 'hcla'
+    horizontal_clipping_descent = 0x68636C64, // 'hcld'
+    vertical_ascender = 0x76617363, // 'vasc'
+    vertical_descender = 0x76647363, // 'vdsc'
+    vertical_line_gap = 0x766C6770, // 'vlgp'
+    horizontal_caret_rise = 0x68637273, // 'hcrs'
+    horizontal_caret_run = 0x6863726E, // 'hcrn'
+    horizontal_caret_offset = 0x68636F66, // 'hcof'
+    vertical_caret_rise = 0x76637273, // 'vcrs'
+    vertical_caret_run = 0x7663726E, // 'vcrn'
+    vertical_caret_offset = 0x76636F66, // 'vcof'
+    x_height = 0x78686774, // 'xhgt'
+    cap_height = 0x63706874, // 'cpht'
+    subscript_em_x_size = 0x73627873, // 'sbxs'
+    subscript_em_y_size = 0x73627973, // 'sbys'
+    subscript_em_x_offset = 0x7362786F, // 'sbxo'
+    subscript_em_y_offset = 0x7362796F, // 'sbyo'
+    superscript_em_x_size = 0x73707873, // 'spxs'
+    superscript_em_y_size = 0x73707973, // 'spys'
+    superscript_em_x_offset = 0x7370786F, // 'spxo'
+    superscript_em_y_offset = 0x7370796F, // 'spyo'
+    strikeout_size = 0x73747273, // 'strs'
+    strikeout_offset = 0x7374726F, // 'stro'
+    underline_size = 0x756E6473, // 'unds'
+    underline_offset = 0x756E646F, // 'undo'
+};
+
 pub const Feature = extern struct {
     tag: u32,
     value: u32,
@@ -305,6 +342,8 @@ pub const AbiLayout = extern struct {
     bitmap_format_last: u32,
     glyph_flag_size: u32,
     glyph_flag_last: u32,
+    metric_size: u32,
+    metric_count: u32,
 };
 
 pub const AbiProbe = extern struct {
@@ -363,6 +402,11 @@ pub extern fn ztextFontDestroy(font: ?*Font) void;
 pub extern fn ztextFontFamilyName(font: *const Font) [*:0]const u8;
 pub extern fn ztextFontStyleName(font: *const Font) [*:0]const u8;
 pub extern fn ztextFontGlyphIndex(font: *const Font, codepoint: u32) u32;
+pub extern fn ztextFontVariantGlyphIndex(
+    font: *const Font,
+    codepoint: u32,
+    variation_selector: u32,
+) u32;
 pub extern fn ztextFontGlyphCount(font: *const Font) u32;
 pub extern fn ztextFontUnitsPerEm(font: *const Font) u32;
 pub extern fn ztextFontCoveredPrefix(
@@ -379,6 +423,20 @@ pub extern fn ztextFontSetVariations(
     count: usize,
 ) Result;
 pub extern fn ztextFontVariation(font: *const Font, index: u32, out: *f32) Result;
+pub extern fn ztextFontNamedInstanceCount(font: *const Font) u32;
+pub extern fn ztextFontNamedInstanceCoords(
+    font: *const Font,
+    index: u32,
+    values: ?[*]f32,
+    count: *usize,
+) Result;
+pub extern fn ztextFontNamedInstanceName(
+    font: *const Font,
+    index: u32,
+    buffer: ?[*]u8,
+    size: *usize,
+) Result;
+pub extern fn ztextFontSetNamedInstance(font: *Font, index: u32) Result;
 
 pub extern fn ztextFaceCreate(
     font: *Font,
@@ -390,6 +448,16 @@ pub extern fn ztextFaceDestroy(face: ?*Face) void;
 pub extern fn ztextFaceFont(face: *const Face) ?*Font;
 pub extern fn ztextFaceSetPixelSize(face: *Face, width: f32, height: f32) Result;
 pub extern fn ztextFaceMetrics(face: *const Face, out: *FaceMetrics) Result;
+pub extern fn ztextFaceMetric(
+    face: *const Face,
+    metric: Metric,
+    out: *f32,
+) Result;
+pub extern fn ztextFaceMetricWithFallback(
+    face: *const Face,
+    metric: Metric,
+    out: *f32,
+) Result;
 pub extern fn ztextFaceSetSyntheticBold(face: *Face, enabled: c_int) Result;
 pub extern fn ztextFaceSetSyntheticOblique(face: *Face, enabled: c_int) Result;
 pub extern fn ztextFaceRenderGlyph(

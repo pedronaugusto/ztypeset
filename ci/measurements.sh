@@ -41,6 +41,12 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - sizeof(ZtextAbiLayout) is arithmetic over the header's field list, not a
+#     compiler's answer. It is right because every field is a uint32_t and the
+#     check refuses to compute anything when that stops holding, but it would
+#     not notice a pragma pack or an attribute that changed the layout without
+#     changing a field type. The null sweep compares the two for real:
+#     ztextAbiLayout's own layout_size against the consumer's sizeof.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -130,6 +136,31 @@ hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
 changelog_version=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md |
                     grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 
+# sizeof(ZtextAbiLayout), recomputed from the header rather than believed from
+# CHANGELOG.md's ABI table. That table tells a consumer how much the runtime
+# handshake grew, which is exactly the number nobody re-derives when a field is
+# appended -- so it is a documented number with a source, and this is the
+# source.
+#
+# Every field of that struct is a uint32_t by construction: it is a handshake,
+# not a payload, so the size is the field count times four and there is no
+# padding to reason about. The "by construction" is the part that needs
+# checking rather than assuming. A line of any other type makes the arithmetic
+# invalid, so it produces an empty size, which --check reports as a failure
+# instead of a plausible wrong number. An empty struct body does the same, so
+# a grep that silently stops matching goes red too.
+abi_layout_body=$(awk '/^typedef struct ZtextAbiLayout \{/,/^\} ZtextAbiLayout;/' \
+                    ffi/ztext.h | grep -E '^  [A-Za-z_].*;$')
+abi_layout_size=
+if [ -n "$abi_layout_body" ] &&
+   ! printf '%s\n' "$abi_layout_body" | grep -qv '^  uint32_t '; then
+  abi_layout_size=$(($(printf '%s\n' "$abi_layout_body" | wc -l | tr -d ' ') * 4))
+fi
+# The size the newest ABI table says ZtextAbiLayout grew TO -- the third
+# column of its row, the second being what it grew from.
+changelog_layout_size=$(grep -m1 -E '^\| `ZtextAbiLayout` \|' CHANGELOG.md |
+                        awk -F'|' '{ gsub(/[^0-9]/, "", $4); print $4 }')
+
 if [ $CHECK -eq 0 ]; then
   printf '%sSources%s\n' "$BOLD" "$OFF"
   row 'C entry points in ffi/ztext.h' "$entry_points"
@@ -141,6 +172,8 @@ if [ $CHECK -eq 0 ]; then
   row 'ffi/ztext.h version macros' "$hdr_version"
   row 'CHANGELOG.md newest entry' "$changelog_version"
   note 'the three are compared by --check, not merely printed here'
+  row 'sizeof(ZtextAbiLayout) from ffi/ztext.h' "${abi_layout_size:-<not all uint32_t: unrecomputable>}"
+  row "CHANGELOG.md's ABI table says" "${changelog_layout_size:-<none>}"
 fi
 
 #-----------------------------------------------------------------------------
@@ -284,6 +317,22 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  # The handshake struct's size, as the newest CHANGELOG entry states it. A
+  # consumer that compiled against the old header is told to compare
+  # layout_size at run time; the table is what tells a reader which value that
+  # is, and an appended field that nobody added four bytes for here makes the
+  # entry describe a struct that no longer exists.
+  if [ -n "$abi_layout_size" ] && [ "$abi_layout_size" = "$changelog_layout_size" ]; then
+    printf '  %-42s %s%s B%s\n' 'sizeof(ZtextAbiLayout) = CHANGELOG' \
+      "$GREEN" "$abi_layout_size" "$OFF"
+  else
+    printf '  %-42s %sffi/ztext.h %s, CHANGELOG.md %s%s\n' \
+      'sizeof(ZtextAbiLayout)' "$RED" \
+      "${abi_layout_size:-<not all uint32_t: unrecomputable>}" \
+      "${changelog_layout_size:-<none>}" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

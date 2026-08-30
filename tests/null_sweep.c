@@ -119,6 +119,8 @@ int main(int argc, char** argv) {
   CHECK(strcmp(ztextFontFamilyName(NULL), "") == 0, "family name of NULL");
   CHECK(strcmp(ztextFontStyleName(NULL), "") == 0, "style name of NULL");
   CHECK(ztextFontGlyphIndex(NULL, 'a') == 0u, "glyph index of NULL");
+  CHECK(ztextFontVariantGlyphIndex(NULL, 'a', 0xFE00u) == 0u,
+        "variant glyph index of NULL");
   CHECK(ztextFontGlyphCount(NULL) == 0u, "glyph count of NULL");
   CHECK(ztextFontUnitsPerEm(NULL) == 0u, "units per em of NULL");
   CHECK(ztextFontAxisCount(NULL) == 0u, "axis count of NULL");
@@ -137,6 +139,24 @@ int main(int argc, char** argv) {
   REFUSES_OUT(ztextFontVariation(NULL, 0, NULL));
   REFUSES(ztextFontSetVariations(NULL, NULL, 0));
 
+  CHECK(ztextFontNamedInstanceCount(NULL) == 0u, "named instance count of NULL");
+  float instance_coords[4];
+  memset(instance_coords, 0, sizeof(instance_coords));
+  size_t instance_count = 4u;
+  REFUSES(ztextFontNamedInstanceCoords(NULL, 0, instance_coords,
+                                       &instance_count));
+  CHECK(instance_count == 0u,
+        "a refused instance-coords call wrote its out-parameter");
+  REFUSES_OUT(ztextFontNamedInstanceCoords(NULL, 0, instance_coords, NULL));
+  char instance_name[32];
+  memset(instance_name, 0, sizeof(instance_name));
+  size_t instance_size = sizeof(instance_name);
+  REFUSES(ztextFontNamedInstanceName(NULL, 0, instance_name, &instance_size));
+  CHECK(instance_size == 0u,
+        "a refused instance-name call wrote its out-parameter");
+  REFUSES_OUT(ztextFontNamedInstanceName(NULL, 0, instance_name, NULL));
+  REFUSES(ztextFontSetNamedInstance(NULL, 0));
+
   //--------------------------------------------------------------------------
   // Faces.
   //--------------------------------------------------------------------------
@@ -151,6 +171,15 @@ int main(int argc, char** argv) {
   memset(&metrics, 0, sizeof(metrics));
   REFUSES(ztextFaceMetrics(NULL, &metrics));
   REFUSES_OUT(ztextFaceMetrics(NULL, NULL));
+
+  float metric = 1.0f;
+  REFUSES(ztextFaceMetric(NULL, ZTEXT_METRIC_X_HEIGHT, &metric));
+  CHECK(metric == 0.0f, "a refused metric read wrote its out-parameter");
+  REFUSES_OUT(ztextFaceMetric(NULL, ZTEXT_METRIC_X_HEIGHT, NULL));
+  metric = 1.0f;
+  REFUSES(ztextFaceMetricWithFallback(NULL, ZTEXT_METRIC_X_HEIGHT, &metric));
+  CHECK(metric == 0.0f, "a refused fallback metric wrote its out-parameter");
+  REFUSES_OUT(ztextFaceMetricWithFallback(NULL, ZTEXT_METRIC_X_HEIGHT, NULL));
 
   ZtextGlyphBitmap bitmap;
   memset(&bitmap, 0, sizeof(bitmap));
@@ -262,12 +291,16 @@ int main(int argc, char** argv) {
   REFUSES_OUT(ztextFontAxis(font, 0, NULL));
   REFUSES_OUT(ztextFontVariation(font, 0, NULL));
   REFUSES(ztextFontSetVariations(font, NULL, 3));
+  REFUSES_OUT(ztextFontNamedInstanceCoords(font, 0, instance_coords, NULL));
+  REFUSES_OUT(ztextFontNamedInstanceName(font, 0, instance_name, NULL));
 
   if (ztextFaceCreate(font, 0, 16, &face) != ZTEXT_RESULT_OK) {
     printf("  FAIL could not create a face\n");
     return 1;
   }
   REFUSES_OUT(ztextFaceMetrics(face, NULL));
+  REFUSES_OUT(ztextFaceMetric(face, ZTEXT_METRIC_X_HEIGHT, NULL));
+  REFUSES_OUT(ztextFaceMetricWithFallback(face, ZTEXT_METRIC_X_HEIGHT, NULL));
   REFUSES_OUT(ztextFaceRenderGlyph(face, 1, ZTEXT_RENDER_MODE_A8,
                                    ZTEXT_HINTING_NORMAL, 0, 0, NULL));
   REFUSES_OUT(ztextFaceGlyphExtents(face, 1, ZTEXT_HINTING_NORMAL, NULL));
