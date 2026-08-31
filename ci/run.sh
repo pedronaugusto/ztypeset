@@ -78,12 +78,18 @@ section 'Hygiene'
 
 # Only our own Zig sources: libs/ is vendored verbatim and must not be
 # reformatted, or the next re-vendor becomes an unreadable diff.
-run 'zig fmt (src, tests, build.zig)' zig fmt --check src tests/fonts.zig build.zig
+# Every Zig file in the repository, which is not the same as every Zig file
+# under src/. tests/consumer/build.zig is a build graph a human edits by hand
+# and the only place the dependency-consumer path is written down; it was
+# outside the formatting gate, so the one Zig file most likely to be edited by
+# someone unfamiliar with the repository was the one file nothing formatted.
+run 'zig fmt (every .zig in the repo)' \
+  zig fmt --check src tests/fonts.zig build.zig tests/consumer
 
 # The C sources have no formatter, so the one rule that is actually enforced is
 # enforced here -- in ci/check-columns.sh, which the hosted workflow runs too,
 # because a rule with two implementations can disagree with itself.
-run 'C sources within 80 columns' ci/check-columns.sh
+run "ztext's C is ASCII, within 80 columns" ci/check-columns.sh
 
 # The null sweep is only worth having if it still covers everything. This
 # fails when the header grows an entry point the sweep never learned about.

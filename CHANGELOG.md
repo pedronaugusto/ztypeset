@@ -217,6 +217,22 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **Both source-hygiene gates now cover the files they were about.**
+  `zig fmt --check` read `src`, `tests/fonts.zig` and `build.zig` and not
+  `tests/consumer` -- the one Zig file a newcomer is most likely to open,
+  since it is where the dependency-consumer path is written down, and the
+  only one nothing formatted. `ci/check-columns.sh` read `ffi/` and not
+  `tests/`, which is the rest of ztext's own C, built with the same warnings
+  and held to the same standard; twelve lines there had drifted past eighty
+  columns while ffi/ could not hold one. Both are wrapped, and both
+  directories are checked.
+
+  The same script also claimed that counting bytes per line "is what keeps
+  ffi/ ASCII". It never did: a short line of UTF-8 passes a byte count. ASCII
+  is the property that makes a byte count a column count, so it is now
+  checked on its own -- which found the one non-ASCII byte in ztext's C, an
+  em dash in the bench banner.
+
 - **Two mutation cases expected a count the gate had stopped printing.**
   Adding README.md as the fourth version home changed the failure line from
   "the three version homes disagree" to "the four", and the two cases that

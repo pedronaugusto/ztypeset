@@ -58,7 +58,8 @@ static void decodeStopsAtTheBound(void) {
     // "AB" plus a lead byte claiming one continuation.
     const char utf8[] = {'A', 'B', (char)0xC3, (char)0xA9};
     uint32_t out = 0u;
-    const size_t step = ztextTextDecode(utf8, 2u, ZTEXT_ENCODING_UTF8, 2u, &out);
+    const size_t step =
+        ztextTextDecode(utf8, 2u, ZTEXT_ENCODING_UTF8, 2u, &out);
     check(step == 1u, "utf-8: decode at index == length returns 1, not 0");
     check(out == 0xFFFDu, "utf-8: decode at index == length yields U+FFFD");
   }
@@ -83,7 +84,8 @@ static void decodeStopsAtTheBound(void) {
     // A length of zero is the same bound with nothing before it.
     const char utf8[] = {(char)0xE2, (char)0x82, (char)0xAC};
     uint32_t out = 0u;
-    const size_t step = ztextTextDecode(utf8, 0u, ZTEXT_ENCODING_UTF8, 0u, &out);
+    const size_t step =
+        ztextTextDecode(utf8, 0u, ZTEXT_ENCODING_UTF8, 0u, &out);
     check(step == 1u, "utf-8: decode of an empty buffer returns 1, not 0");
     check(out == 0xFFFDu, "utf-8: decode of an empty buffer yields U+FFFD");
   }
@@ -97,7 +99,8 @@ static void decodeNeverReturnsZero(void) {
   size_t characters = 0u;
   while (i < length) {
     uint32_t cp = 0u;
-    const size_t step = ztextTextDecode(text, length, ZTEXT_ENCODING_UTF8, i, &cp);
+    const size_t step =
+        ztextTextDecode(text, length, ZTEXT_ENCODING_UTF8, i, &cp);
     if (step == 0u) {
       check(false, "utf-8: a step of 0 would not terminate");
       return;
@@ -133,7 +136,8 @@ static void splitsCharacterIsBounded(void) {
   // The end of a half-open range, which is what lets a caller test both ends.
   check(!ztextTextSplitsCharacter(text, length, ZTEXT_ENCODING_UTF8, length),
         "utf-8: index == length is not a split");
-  check(!ztextTextSplitsCharacter(text, length, ZTEXT_ENCODING_UTF8, length + 9u),
+  check(!ztextTextSplitsCharacter(text, length, ZTEXT_ENCODING_UTF8,
+                                  length + 9u),
         "utf-8: an index past the end is not a split");
 }
 
@@ -149,11 +153,13 @@ static void toFixed266Domain(void) {
   check(ztextToFixed266(1.0f) == 64, "26.6: one pixel is 64");
   check(ztextToFixed266(0.5f) == 32, "26.6: half a pixel is 32");
   check(ztextToFixed266(12.0f) == 768, "26.6: twelve pixels are 768");
-  check(ztextToFixed266(16384.0f) == 1048576, "26.6: the largest size converts");
+  check(ztextToFixed266(16384.0f) == 1048576,
+        "26.6: the largest size converts");
 
   check(ztextToFixed266(0.0f) == 0, "26.6: zero is refused");
   check(ztextToFixed266(-1.0f) == 0, "26.6: a negative size is refused");
-  check(ztextToFixed266(16384.5f) == 0, "26.6: past the largest size is refused");
+  check(ztextToFixed266(16384.5f) == 0,
+        "26.6: past the largest size is refused");
 
   // A NaN fails every comparison, which is why the guard is written as two
   // negations rather than as a range test: `pixels <= 0 || pixels > 16384`
