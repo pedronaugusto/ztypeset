@@ -217,6 +217,17 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **`-Dshared` was a build option nobody could find.** `build.zig` declares
+  two options; README documented one of them by name and referred to the other
+  only as "a shared build", so a caller wanting a `.dll` or a `.so` had to read
+  `build.zig` to learn what to type. README now carries the whole set as a
+  table -- flag, default, and what it changes -- and `ci/measurements.sh
+  --check` extracts every `b.option` name from `build.zig` and fails if one of
+  them is not named in README.md. A guard case renames the option on the
+  command line only, which is the shape of the bug that has no other detector:
+  the flag becomes inert, `ci/run.sh` still passes it, and every test still
+  passes -- with the sanitizer silently off.
+
 - **A process-wide allocator installed for a test and taken out only if the
   test passed.** Two tests in `src/integration_test.zig` install a ztext
   allocator backed by a `DebugAllocator` living in the test's own frame, and

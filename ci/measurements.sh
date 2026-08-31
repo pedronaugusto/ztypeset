@@ -95,6 +95,10 @@
 #     unlikely rather than unchecked is that the suite has one place where an
 #     allocator is installed for a whole test and one Fixture that does it for
 #     the rest.
+#   - The build-option check asks that the flag's NAME appear in README.md,
+#     not that what README says about it is true. A row that names -Dshared
+#     and then describes the wrong effect passes. It also cannot see an option
+#     declared anywhere but build.zig, and there is nowhere else.
 #   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
@@ -318,6 +322,29 @@ guard_section_diff=$(diff <(printf '%s\n' "$guard_rows") \
 # only worth as much as the guarantee that nothing runs the command anywhere
 # else, because a second call site would be unbounded again and would read
 # exactly like the first.
+# Every build option `build.zig` declares is named in README.md.
+#
+# An option nobody can find is an option that does not exist: `-Dshared` was
+# declared, tested by ci/run.sh, and mentioned in README only as the phrase "a
+# shared build" -- with no way to learn what to type. The name is the part
+# that has to be written down, so the name is what this matches on.
+#
+# The first string literal after `b.option(` is the option's name; the line
+# between them is its type.
+build_options=$(awk '
+  index($0, "b.option(") { pending = 1; next }
+  pending && match($0, /"[^"]+"/) {
+    print substr($0, RSTART + 1, RLENGTH - 2)
+    pending = 0
+  }
+' build.zig)
+options_total=$(printf '%s
+' "$build_options" | grep -c .)
+options_undocumented=""
+for opt in $build_options; do
+  grep -qF -- "-D$opt" README.md || options_undocumented="$options_undocumented $opt"
+done
+
 # A test that installs a process-wide allocator has to take it out again on
 # EVERY path, and only `defer` is every path.
 #
@@ -719,6 +746,15 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe guard command is run outside the bounded runner%s\n' \
       'check-guards.sh runs a case in one place' "$RED" "$OFF"
     printf '%s\n' "$guard_run_loose" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$options_undocumented" ]; then
+    printf '  %-42s %s%s, each named in README.md%s
+'       'build options' "$GREEN" "$options_total" "$OFF"
+  else
+    printf '  %-42s %sbuild.zig declares%s, and README.md names no such flag%s
+'       'build options' "$RED" "$options_undocumented" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

@@ -569,8 +569,18 @@ those macros into the `@cImport`; ztext's does not.
   rather than quoted here on purpose: a macOS `.dylib`, a Linux `.so` and a
   Windows `.dll` do not export the same set, so any single number in this
   sentence would be wrong on two platforms out of three.
-- Build options are declared once and mirrored into a Zig `options` module, so
-  the wrapper cannot disagree with how the C was compiled.
+- Two build options, and they are the whole set. Each is declared once in
+  `build.zig` and mirrored into a Zig `options` module, so the wrapper cannot
+  disagree with how the C it links was compiled:
+
+  | option | default | what it changes |
+  |---|---|---|
+  | `-Dshared` | `false` | builds the C library as a shared object, with `-fvisibility=hidden` |
+  | `-Dsanitize_c` | `false` | compiles ztext's own C with Zig's undefined-behaviour sanitizer |
+
+  A third option added to `build.zig` and not to that table fails
+  `ci/measurements.sh --check`: an option a caller cannot find is an option
+  that does not exist for them.
 - `-fno-exceptions`/`-fno-rtti` are off under the MSVC ABI, where disabling
   them through Clang flags is a known source of header errors.
 
@@ -975,7 +985,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **94** deliberate bugs, one at a time, to a copy of the tree, and
+applies **95** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each.
 
 The right column below is the harness's own case names, in its own order, and
@@ -1007,7 +1017,7 @@ they described, and a reader had no way to tell which rows those were.
 | OpenType metrics | a metric tag nobody vetted, forwarded to HarfBuzz |
 | Variable fonts | named instance coordinates that are not the font's; an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored, the base answered; the fixture's cmap records left unsorted |
-| Versioning and licences | a version bump that reached three of its four homes; the changelog heading the gate reads by shape; a gated number restated in another document; a directory build.zig compiles, dropped from the package; a licence text changed under the page that summarises it; a licence row deleted rather than rechecked; a licence row that no longer matches the build; a test allocator taken out only on the happy path; a guard case run unbounded again |
+| Versioning and licences | a version bump that reached three of its four homes; the changelog heading the gate reads by shape; a gated number restated in another document; a directory build.zig compiles, dropped from the package; a licence text changed under the page that summarises it; a licence row deleted rather than rechecked; a licence row that no longer matches the build; a build option README cannot name; a test allocator taken out only on the happy path; a guard case run unbounded again |
 | Installed headers | an installed header no compiled code stands behind; a declared entry point with no implementation |
 
 The left column is not a summary of that script's sections; it **is** them.
