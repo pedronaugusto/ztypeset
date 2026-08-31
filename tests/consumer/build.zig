@@ -46,10 +46,25 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/main.c"),
         .flags = &.{"-std=c11"},
     });
+    //    Every artifact ztext installs is named here, and that is the point
+    //    of the step: `dependency.artifact(name)` PANICS on a name the
+    //    dependency does not register, so this is the only thing in the repo
+    //    that can prove all five spellings resolve. libunibreak was missing
+    //    from this list for as long as it has been vendored -- the same hole
+    //    the doc comment above describes, one library over.
+    //
+    //    Its artifact is "unibreak", not "libunibreak": Zig prefixes `lib` on
+    //    the platforms that use one, so `.name = "libunibreak"` would install
+    //    liblibunibreak.a. The name here is upstream's own library name, and
+    //    `src/pins.zig` calls the PROJECT libunibreak, which is also
+    //    upstream's. `ci/measurements.sh --check` compares this list against
+    //    build.zig's rather than against the pins, so the two namespaces
+    //    cannot be confused for one.
     c_consumer.root_module.linkLibrary(ztext.artifact("ztext"));
     c_consumer.root_module.linkLibrary(ztext.artifact("harfbuzz"));
     c_consumer.root_module.linkLibrary(ztext.artifact("freetype"));
     c_consumer.root_module.linkLibrary(ztext.artifact("sheenbidi"));
+    c_consumer.root_module.linkLibrary(ztext.artifact("unibreak"));
 
     const step = b.step("run", "Build and run both consumers");
     step.dependOn(&b.addRunArtifact(zig_consumer).step);
