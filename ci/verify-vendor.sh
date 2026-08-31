@@ -2,7 +2,7 @@
 #
 # ztext -- prove the vendored trees really are unmodified upstream.
 #
-# UPSTREAM.md says libs/ holds pristine copies of three specific commits. On
+# UPSTREAM.md says libs/ holds pristine copies of four specific commits. On
 # its own that is a claim in a markdown file: nothing stops an edit to libs/
 # from landing while the documentation still says otherwise. This script turns
 # the claim into a check by fetching those exact commits and diffing.
@@ -108,7 +108,8 @@ verify() {
   done
 }
 
-# Exclusions are documented in UPSTREAM.md under "What was excluded, and why".
+# Exclusions are documented in UPSTREAM.md under "What was taken, and what
+# was left".
 verify freetype libs/freetype \
   -x tools -- include src LICENSE.TXT README docs/FTL.TXT docs/GPLv2.TXT
 

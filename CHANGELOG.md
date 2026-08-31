@@ -160,6 +160,39 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The documentation says what is true, and two more of its claims are
+  gated.** Five separate statements had drifted from the tree, and they had
+  drifted the same way: each was a fact written out in prose, beside a file
+  that already held it.
+
+  * Six places said ztext vendors **three** upstreams. It has vendored four
+    since libunibreak arrived. `ffi/ztext.h`'s banner line is the one that
+    matters -- it is the first line a consumer reads, and it is a LIST rather
+    than a count -- so `ci/measurements.sh --check` now requires every name in
+    `src/pins.zig` to appear in it.
+  * The README said all of FreeType, HarfBuzz and SheenBidi are continuously
+    fuzzed by OSS-Fuzz. FreeType and HarfBuzz are; **SheenBidi and libunibreak
+    have no OSS-Fuzz project at all**, and both parse the same untrusted text.
+    Stated with its source and the date it was checked.
+  * The platform section carried a hand-written list of which suites had been
+    run, on which machine. It was true when written and had no way to stay
+    true. The badge is the authority; the paragraph now says so and nothing
+    more. It also said two of the eight cross targets duplicate an executed
+    configuration -- there are three, and they are named.
+  * **Thirty public functions of the Zig wrapper were named nowhere in the
+    README.** They are now, and `ci/api-surface.sh` fails if a public function
+    is named nowhere in it -- the same shape as the entry-point table, with
+    the same declared-exception list.
+  * `ffi/ztext_shape.c` said deleting the warm-up call leaks "4 blocks and 500
+    bytes". Measured after the HarfBuzz re-vendor it is 6 and 550. The count is
+    HarfBuzz's and moves with its version, nothing recomputes it, so the
+    comment no longer asserts one; the guard case matches on the invariant it
+    always should have.
+
+  `ci/api-surface.sh` also stopped printing a DECLARED gap in red. A decision
+  and an oversight looked identical, and the one declared gap in the table was
+  read as an unfilled column by someone doing what the colour told them.
+
 - **FreeType's build switches are what `ffi/ztext_ftoption.h` says they are.**
   That file is a page of prose about macros, and one paragraph of it was
   false: undefining `FT_CONFIG_OPTION_MAC_FONTS` was said to drop

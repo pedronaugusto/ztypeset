@@ -41,6 +41,11 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
+#     there. It cannot prove the sentence around those names is true, and it
+#     says nothing about the counts written in prose elsewhere -- a count with
+#     no list beside it is not checkable, which is the argument for not
+#     writing one.
 #   - The LICENSES.md check covers the ONE row whose answer a build macro
 #     decides. The other rows are settled by whether a file is in build.zig's
 #     source list, which nothing here reads; they are prose with a citation,
@@ -134,6 +139,17 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# The upstreams ffi/ztext.h's banner names, against src/pins.zig. Six places
+# said "three" when the package had vendored four for months, and the one that
+# matters is this one: it is the first line a consumer reads and it is a LIST,
+# so it can be checked rather than proof-read. A count in prose elsewhere is
+# still prose; this is the enumeration.
+banner=$(sed -n '2p' ffi/ztext.h)
+missing_upstreams=
+for name in $(pin_names); do
+  printf '%s' "$banner" | grep -qi -- "$name" || missing_upstreams="$missing_upstreams $name"
+done
+
 # LICENSES.md's "Reaches your binary?" cell for the FreeType autofit files
 # that call HarfBuzz, and the macro that decides it. Those five files compile
 # to a dummy typedef without FT_CONFIG_OPTION_USE_HARFBUZZ and to real code
@@ -337,6 +353,15 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$missing_upstreams" ]; then
+    printf '  %-42s %s%s%s\n' 'ffi/ztext.h names every pinned upstream' \
+      "$GREEN" "$(pin_names | tr '\n' ' ')" "$OFF"
+  else
+    printf '  %-42s %sffi/ztext.h line 2 names no%s%s\n' \
+      'ffi/ztext.h upstreams' "$RED" "$missing_upstreams" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

@@ -7,10 +7,23 @@
 //! behaving.
 //!
 //! The cost of hand-writing is drift: nothing in either compiler checks that
-//! this file still agrees with the header. That gap is closed by
-//! `ztextAbiLayout`, asserted in the test at the bottom of `ztext.zig` -- if a
-//! field moves on either side, the test fails loudly instead of corrupting
-//! memory quietly.
+//! this file still agrees with the header. Three things close that gap, and it
+//! takes all three -- naming only the middle one, as this comment used to,
+//! describes a check over struct layouts as though it covered the surface:
+//!
+//!   * `src/abi_check.zig` pairs every public declaration here with the one a
+//!     `@cImport` of ztext.h produces, by naming convention, and sweeps in
+//!     both directions -- so a declaration on either side alone fails.
+//!   * `ztextAbiLayout` reports the size, alignment and field offsets the C
+//!     compiler chose, each checked against what this file computes, and each
+//!     expectation derived from the field's own name rather than from a list.
+//!   * `ztextAbiProbe` writes a distinct marker into every field of every
+//!     shared struct. It is the only one of the three that can see two
+//!     same-typed fields transposed, which changes no size, no alignment and
+//!     no offset.
+//!
+//! All three run as tests in `src/ztext.zig`, and a field that moves on either
+//! side fails loudly instead of corrupting memory quietly.
 
 const std = @import("std");
 

@@ -1,9 +1,9 @@
 //===----------------------------------------------------------------------===//
-// ztext -- a C ABI over FreeType, HarfBuzz and SheenBidi.
+// ztext -- a C ABI over FreeType, HarfBuzz, SheenBidi and libunibreak.
 //
 // This header is the contract between the C implementation and the Zig wrapper
 // in ../src. Unlike a binding over a C++ library, it is not here because Zig
-// cannot call the upstreams -- all three expose C APIs, and build.zig installs
+// cannot call the upstreams -- all four expose C APIs, and build.zig installs
 // their headers so a C or C++ host can use them directly, which for anything
 // beyond ztext's scope is the better choice.
 //
@@ -225,8 +225,9 @@ typedef enum ZtextEncoding {
 //===----------------------------------------------------------------------===//
 // Allocator seam
 //
-// The three upstreams that allocate all allow it to be redirected, and all
-// do it differently:
+// Three of the four upstreams allocate; all three allow it to be redirected,
+// and all three do it differently. (libunibreak allocates nothing, so it has
+// no seam and needs none.)
 //
 //   FreeType   an FT_MemoryRec per FT_Library. ztext captures the installed
 //              allocator when a ZtextLibrary is created, so FreeType memory is
