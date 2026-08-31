@@ -414,6 +414,47 @@ fn sweepTheirs() usize {
 }
 
 //=============================================================================
+// ZtextAbiProbe covers every plain-data type
+//=============================================================================
+
+/// Every extern struct `c.zig` declares must have a field in `AbiProbe`.
+///
+/// `ztextAbiProbe`'s whole claim is "every plain-data type ztext hands across
+/// the boundary, in one struct", and nothing checked it: it covered ten of
+/// sixteen. `ZtextCharmap`, `ZtextVariationAxis`, `ZtextVariation`,
+/// `ZtextMatrix`, `ZtextStroke` and `ZtextOutlineFuncs` all crossed the
+/// boundary unprobed, so two same-typed fields of any of them could have been
+/// transposed with nothing able to say so.
+///
+/// The two ABI structs are excluded: `ZtextAbiLayout` is what describes the
+/// others, and `ZtextAbiProbe` cannot contain itself.
+fn sweepProbeCoverage() usize {
+    comptime {
+        var covered: usize = 0;
+        for (@typeInfo(c).@"struct".decls) |d| {
+            const Decl = @field(c, d.name);
+            if (@TypeOf(Decl) != type) continue;
+            const info = @typeInfo(Decl);
+            if (info != .@"struct") continue;
+            if (info.@"struct".layout != .@"extern") continue;
+            if (Decl == c.AbiLayout or Decl == c.AbiProbe) continue;
+
+            var found = false;
+            for (@typeInfo(c.AbiProbe).@"struct".fields) |f| {
+                if (f.type == Decl) found = true;
+            }
+            if (!found) {
+                fail("`" ++ typeCName(d.name) ++ "` crosses the ABI boundary but " ++
+                    "ZtextAbiProbe has no field of that type, so nothing proves " ++
+                    "its fields land where src/c.zig believes they do");
+            }
+            covered += 1;
+        }
+        return covered;
+    }
+}
+
+//=============================================================================
 // The test
 //
 // The comparisons above are compile errors, so reaching this body at all means
@@ -436,4 +477,9 @@ test "ABI: src/c.zig agrees with ffi/ztext.h" {
     try std.testing.expect(ours.fields >= 60);
     try std.testing.expect(ours.enumerators >= 25);
     try std.testing.expectEqual(ours.functions, theirs);
+
+    // And every plain-data type is in the probe. A floor for the same reason
+    // as the others: a sweep that matched nothing must fail.
+    const probed = comptime sweepProbeCoverage();
+    try std.testing.expect(probed >= 16);
 }

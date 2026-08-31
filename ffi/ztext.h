@@ -2087,6 +2087,12 @@ typedef struct ZtextAbiProbe {
   ZtextScriptRun script_run;
   ZtextShapingRun shaping_run;
   ZtextGlyphBitmap glyph_bitmap;
+  ZtextCharmap charmap;
+  ZtextVariationAxis variation_axis;
+  ZtextVariation variation;
+  ZtextMatrix matrix;
+  ZtextStroke stroke;
+  ZtextOutlineFuncs outline_funcs;
 } ZtextAbiProbe;
 
 /// Fills every field of every plain-data type with a distinct marker. Never

@@ -160,6 +160,28 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The ABI handshake now proves itself.** `ZtextAbiProbe` gained
+  `ZtextCharmap`, `ZtextVariationAxis`, `ZtextVariation`, `ZtextMatrix`,
+  `ZtextStroke` and `ZtextOutlineFuncs`, and `ZtextAbiLayout` gained
+  `stroke_size`/`stroke_align` and the three stroke enums' sizes and last
+  enumerators.
+
+  Both structs said something they did not do. `ztextAbiProbe` documents
+  itself as "every plain-data type ztext hands across the boundary, in one
+  struct" and covered ten of sixteen. `ZtextAbiLayout` was checked against a
+  hand-written list of expectations, and four of its fields -- `charmap_size`,
+  `charmap_align`, `matrix_size`, `matrix_align` -- were checked by nothing at
+  all, having been added to the struct without being added to the list.
+
+  Both are now checked by construction rather than by a list. Every
+  `ZtextAbiLayout` field's expectation is derived from its own NAME
+  (`<type>_size`, `<type>_align`, `<type>_offset_<field>`, `<enum>_last`,
+  `<enum>_count`), so a field added without a rule is a compile error and a
+  field added with one is checked the moment it exists. Every extern struct in
+  `src/c.zig` must appear in `ZtextAbiProbe`, checked at comptime. And every
+  probed field must carry a marker the library actually wrote, with no two
+  fields of one type sharing one -- which is the property that makes a
+  transposition detectable at all.
 - **A pen traced round every glyph.** `ztextFaceSetStroke(face, const
   ZtextStroke*)` and `ztextFaceStroke`, with `ZtextStroke` carrying a `radius`
   in pixels, a `miter_limit`, and a `ZtextLineCap`, `ZtextLineJoin` and
