@@ -27,7 +27,20 @@ wired together, with no renderer, no atlas and no layout engine attached.
   the check itself is [broken on purpose in CI](#do-the-guards-actually-fail)
   to prove it can fail.
 
-Status: **v0.1**. See [Scope](#scope) for what is deliberately absent.
+Status: **v0.2**. See [Scope](#scope) for what is deliberately absent.
+
+## Contents
+
+[Usage](#usage) · [Design](#design) · [Measurements](#measurements) ·
+[Testing](#testing) · [Scope](#scope) · [Licence](#licence) ·
+[Contributing](#contributing)
+
+Beside this file: [CHANGELOG.md](CHANGELOG.md) for what changed and what a
+version bump means, [UPSTREAM.md](UPSTREAM.md) for the pinned upstream commits
+and how to re-vendor them, [LICENSES.md](LICENSES.md) for which licence reaches
+your binary, [CONTRIBUTING.md](CONTRIBUTING.md) for where each rule is written
+down, and [SECURITY.md](SECURITY.md) for the threat model and how to report a
+vulnerability.
 
 ## Usage
 
@@ -846,11 +859,17 @@ HarfBuzz's own with a static assertion per flag; `ZtextGlyphBitmap` carries
 NULL check. Both structs changed size, so the ABI went 0.1 to 0.2 in one
 change: the header's version macros, `build.zig.zon`, the `ZtextAbiLayout`
 handshake, the `ztextAbiProbe` markers and the Zig mirror move together, and
-`ci/measurements.sh --check` fails if the two version homes disagree.
+`ci/measurements.sh --check` fails if the version homes disagree. There are
+four: `ffi/ztext.h`'s macros, `build.zig.zon`, the newest heading in
+`CHANGELOG.md`, and the status line at the top of this file. The last of those
+was not checked until it was caught reading **v0.1** through the whole of 0.2's
+development — three homes gated and a fourth in prose beside them, which is
+worse than gating none, because a green row for "the version homes agree" reads
+as though it covered every one of them.
 
-The bump found a third home for the version while it was at it: a test whose
-subject was `Version.format` asserted the literals `"0.1.0"` and `"2.14.3"`, so
-the first bump of ztext or of FreeType would turn a formatting test red for a
+A fifth was found and removed rather than gated: a test whose subject was
+`Version.format` asserted the literals `"0.1.0"` and `"2.14.3"`, so the first
+bump of ztext or of FreeType would have turned a formatting test red for a
 reason that had nothing to do with formatting. It now formats a synthetic
 version it owns, and compares the real one against its own fields.
 
@@ -982,7 +1001,7 @@ asserts a **named** test catches each:
 | OpenType metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
 | Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored and the base character answered instead, the test fixture's own cmap records left in the order they were appended |
-| Versioning and licences | a bump that reached two of the version's three homes, a changelog heading reworded out from under the gate that reads it, a licence text changed under the page that summarises it, a row deleted rather than rechecked, a row whose answer the build configuration decides left behind when that configuration changed |
+| Versioning and licences | a bump that reached three of the version's four homes, a changelog heading reworded out from under the gate that reads it, a licence text changed under the page that summarises it, a row deleted rather than rechecked, a row whose answer the build configuration decides left behind when that configuration changed |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
 
 The left column is not a summary of that script's sections; it **is** them.
