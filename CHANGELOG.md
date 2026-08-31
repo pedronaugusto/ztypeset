@@ -217,6 +217,16 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **The guard table is the harness's case names, not a paraphrase of them.**
+  README's table of what `ci/check-guards.sh` breaks had a hand-written
+  sentence per section, and a gate that compared only the section names --
+  so the sentences could and did fall behind: two sections listed five cases
+  each while the harness ran seven. The right column is now generated from
+  the case names, in the harness's order, and the gate diffs the whole row.
+  A renamed case, a new case, a deleted row and a reordered table are all
+  caught; the rows that were behind are correct by construction rather than
+  by proof-reading.
+
 - **And README.md was doing it to itself.** The check above looked at the
   other documents; README carried two second copies of its own. Its
   quick-reference list said the anchor pass proves "all 90" cases still apply

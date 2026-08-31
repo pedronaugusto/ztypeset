@@ -76,10 +76,11 @@
 #   - The consumer-artifact check proves each name is PASSED to
 #     ztext.artifact(); only running tests/consumer proves it resolves, which
 #     CI does on all three hosts and both Windows ABIs.
-#   - The guard-section check compares two lists of NAMES. It cannot tell
-#     whether the sentence beside a name describes the cases in that section,
-#     and it does not count the cases per section -- only that neither list
-#     holds a name the other does not.
+#   - The guard-table check compares whole rows: the section name, then the
+#     harness's case names in its order. It cannot tell whether a case name
+#     describes what that case actually mutates -- only that the table and the
+#     harness say the same thing, which is the promise a paraphrase could not
+#     make.
 #   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
@@ -259,22 +260,40 @@ for artifact in $installed_artifacts; do
     unlinked_artifacts="$unlinked_artifacts $artifact"
 done
 
-# ci/check-guards.sh's sections against the table in README.md that lists
-# them. The table was a hand-kept mirror, which is the defect this file exists
-# to catch everywhere else: four sections were added to the harness and none
-# of them reached the README. The left column is now the section name itself,
-# so the two lists can be compared rather than proof-read.
-guard_sections=$(sed -n "s/^printf '\\\\n%s\([^%]*\)%s.*/\1/p" ci/check-guards.sh |
-                 sort)
-readme_sections=$(awk '/^### Do the guards actually fail/ { f = 1; next }
-                       /^### / { f = 0 }
-                       f && /^\| / { print }' README.md |
-                  sed -n 's/^| \([^|]*\) | .*/\1/p' |
-                  sed 's/ *$//' |
-                  grep -v '^section$' |
-                  sort)
-guard_section_diff=$(diff <(printf '%s\n' "$guard_sections") \
-                          <(printf '%s\n' "$readme_sections") 2>&1 || true)
+# ci/check-guards.sh's sections AND case names, against the table in
+# README.md that lists them. The table was a hand-kept mirror, which is the
+# defect this file exists to catch everywhere else: four sections were added
+# to the harness and none of them reached the README, and later two rows went
+# on describing five cases in a section that had grown to seven.
+#
+# So the table is no longer a paraphrase of the cases. It IS the case names,
+# in the harness's own order, and this compares the whole row rather than the
+# section name alone. Order included: a table listing the same sections in a
+# different order from the file no longer reads as a map of it.
+guard_rows=$(awk '
+  /^printf .\\n%s/ {
+    s = $0
+    sub(/^[^%]*%s/, "", s)
+    sub(/%s.*$/, "", s)
+    sec = s
+    order[++n] = sec
+    next
+  }
+  /^case_ "/ {
+    s = $0
+    sub(/^case_ "/, "", s)
+    sub(/".*$/, "", s)
+    names[sec] = (names[sec] == "" ? s : names[sec] "; " s)
+  }
+  END { for (i = 1; i <= n; i++)
+          print "| " order[i] " | " names[order[i]] " |" }
+' ci/check-guards.sh)
+readme_rows=$(awk '/^\| section \| what is broken/ { f = 1; next }
+                   /^\|---\|---\|$/ { next }
+                   f && !/^\| / { exit }
+                   f { print }' README.md)
+guard_section_diff=$(diff <(printf '%s\n' "$guard_rows") \
+                          <(printf '%s\n' "$readme_rows") 2>&1 || true)
 
 # The upstreams ffi/ztext.h's banner names, against src/pins.zig. Six places
 # said "three" when the package had vendored four for months, and the one that
@@ -608,8 +627,8 @@ if [ $CHECK -eq 1 ]; then
   fi
 
   if [ -z "$guard_section_diff" ]; then
-    printf '  %-42s %s%s sections%s\n' 'check-guards.sh = README guard table' \
-      "$GREEN" "$(printf '%s\n' "$guard_sections" | wc -l | tr -d ' ')" "$OFF"
+    printf '  %-42s %s%s rows%s\n' 'check-guards.sh = README guard table' \
+      "$GREEN" "$(printf '%s\n' "$guard_rows" | wc -l | tr -d ' ')" "$OFF"
   else
     printf '  %-42s %sthe two lists differ%s\n' \
       'check-guards.sh = README guard table' "$RED" "$OFF"
