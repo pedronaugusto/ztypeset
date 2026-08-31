@@ -222,6 +222,22 @@ run_guarded() {
   RUN_OUTPUT=$(tr -d '\000' < "$outfile")
 }
 
+# Both python blocks below name their encoding and turn newline translation
+# off, and both halves of that are load-bearing on a source tree that is not
+# pure ASCII with the platform's own line endings:
+#
+#   `open(path).read()` decodes with the LOCALE's codec. On a Windows console
+#   that is cp1252, which cannot decode a UTF-8 continuation byte -- so a case
+#   whose file holds any non-ASCII text died with a UnicodeDecodeError and was
+#   reported NO ANCHOR, which reads as "the code moved, update the case". It
+#   had not moved. Measured on src/integration_test.zig, whose fixtures carry
+#   Hebrew and Arabic.
+#
+#   And text mode rewrites every '\n' as the platform's line ending, so
+#   applying a one-line mutation on Windows rewrote all 724 lines of the file
+#   as CRLF. The build did not care; a reader diffing the working copy against
+#   the repo to see what a case actually changed very much did.
+#
 # case <name> <file> <expect-substring> <old> <new>
 #
 # `expect-substring` is matched against the build output. It must name the
@@ -236,9 +252,9 @@ case_() {
 
   if [ "$ANCHORS_ONLY" -eq 1 ]; then
     if MUT_FILE="$file" MUT_OLD="$old" python3 - "$ANCHOR_TREE" <<'PY'
-import os, sys
+import io, os, sys
 path = os.path.join(sys.argv[1], os.environ["MUT_FILE"])
-n = open(path).read().count(os.environ["MUT_OLD"])
+n = io.open(path, encoding="utf-8", newline="").read().count(os.environ["MUT_OLD"])
 sys.exit(0 if n == 1 else 1)
 PY
     then
@@ -253,15 +269,15 @@ PY
   fi
 
   if ! MUT_FILE="$file" MUT_OLD="$old" MUT_NEW="$new" python3 - "$WORK/tree" <<'PY'
-import os, sys
+import io, os, sys
 tree = sys.argv[1]
 path = os.path.join(tree, os.environ["MUT_FILE"])
 old, new = os.environ["MUT_OLD"], os.environ["MUT_NEW"]
-s = open(path).read()
+s = io.open(path, encoding="utf-8", newline="").read()
 if s.count(old) != 1:
     sys.stderr.write(f"anchor appears {s.count(old)} times in {os.environ['MUT_FILE']}\n")
     sys.exit(1)
-open(path, "w").write(s.replace(old, new, 1))
+io.open(path, "w", encoding="utf-8", newline="").write(s.replace(old, new, 1))
 PY
   then
     printf '%sNO ANCHOR%s  the mutation no longer applies; update it\n' "$RED" "$OFF"
