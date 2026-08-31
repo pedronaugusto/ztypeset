@@ -616,11 +616,11 @@ ci/measurements.sh          # every number this file claims, recomputed
 ci/measurements.sh --check  # ... and compared against what it says
 ```
 
-**146 tests**, executed twice. The second pass runs the same binary with
+**147 tests**, executed twice. The second pass runs the same binary with
 HarfBuzz's three environment variables — `HB_SHAPER_LIST`, `HB_FONT_FUNCS`,
 `HB_FACE_LOADER` — set to values that change what it does, and every assertion
 has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
-rather than being believed. So `zig build test` reports **292/292 passed**.
+rather than being believed. So `zig build test` reports **294/294 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztext or an upstream fails to return
@@ -944,7 +944,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **87** deliberate bugs, one at a time, to a copy of the tree, and
+applies **89** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | | |
