@@ -190,6 +190,11 @@ bool ztextTextIsWellFormed(const void* text, size_t length,
 /// Decodes the character starting at code unit `index` of already-VALIDATED
 /// text, and returns how many units it spans. Never returns 0, so a loop over
 /// it always terminates.
+///
+/// `index >= length` is answered, not undefined: U+FFFD and a step of 1, the
+/// same for all three encodings. One comparison here rather than a
+/// precondition every caller has to repeat and every future caller has to
+/// remember. tests/c_internal.c holds it.
 size_t ztextTextDecode(const void* text, size_t length, ZtextEncoding encoding,
                        size_t index, uint32_t* out);
 

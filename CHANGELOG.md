@@ -160,6 +160,25 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The internal contracts have a test that can reach them.**
+  `ztextTextDecode` read the code unit at `index` before comparing `index` to
+  `length`, so an index at the end read one past the buffer -- and in the
+  UTF-8 case up to four past it, because `length - index` underflows to
+  SIZE_MAX there and the continuation bound could never fire. The bound is now
+  one comparison before the switch, covering all three encodings, answering
+  `index >= length` with U+FFFD and a step of one rather than leaving it
+  undefined.
+
+  The structural cause was not the missing comparison. `ffi/ztext_internal.h`
+  declares helpers `ztext.h` never exposes, and nothing could reach them: the
+  Zig suite enters through the public header and the two C tests link the
+  installed library, which exports only `ZTEXT_API`. An internal precondition
+  was checkable in exactly one way -- by reading every caller and finding none
+  that violates it -- and "no caller does that today" is not a property a
+  header can promise about tomorrow. `tests/c_internal.c` is the caller that
+  can: it compiles the `ffi/*.c` units into itself rather than linking
+  libztext, so it runs on the shared and MSVC arms too.
+
 - **The ABI handshake now proves itself.** `ZtextAbiProbe` gained
   `ZtextCharmap`, `ZtextVariationAxis`, `ZtextVariation`, `ZtextMatrix`,
   `ZtextStroke` and `ZtextOutlineFuncs`, and `ZtextAbiLayout` gained

@@ -838,6 +838,11 @@ static size_t decodeUtf8(const char* text, size_t length, uint32_t* out) {
   // The caller validated the buffer, so the continuations are known to be
   // there. The bound is kept anyway: this decodes from the same pointer the
   // validator walked, and a future caller that forgets is a read past the end.
+  //
+  // `length - 1u` cannot underflow here: ztextTextDecode refuses an index at
+  // or past the end, so this is never entered with a length of zero. That
+  // was not true before -- and an underflow turns this bound into one that
+  // can never fire, which is worse than not having it.
   if (extra > length - 1u) {
     *out = 0xFFFDu;
     return length;
@@ -850,6 +855,23 @@ static size_t decodeUtf8(const char* text, size_t length, uint32_t* out) {
 
 size_t ztextTextDecode(const void* text, size_t length,
                        ZtextEncoding encoding, size_t index, uint32_t* out) {
+  // The one bound, for all three encodings, before the switch.
+  //
+  // Every branch below reads the unit at `index` before it can know anything
+  // about the character there, so the check cannot live inside the switch;
+  // and it cannot live in the callers, because "no caller passes the end" is
+  // a property of today's callers rather than of this function. The UTF-8
+  // path was the sharp edge: it computed `length - index`, which underflows
+  // to SIZE_MAX at the end, so its own continuation bound could never fire
+  // and it read the lead byte plus up to three more past the buffer.
+  //
+  // U+FFFD and a step of ONE, never zero: the contract this function is
+  // written around is that a loop over it terminates.
+  if (index >= length) {
+    *out = 0xFFFDu;
+    return 1u;
+  }
+
   switch (encoding) {
     case ZTEXT_ENCODING_UTF16: {
       const uint16_t* units = (const uint16_t*)text;
