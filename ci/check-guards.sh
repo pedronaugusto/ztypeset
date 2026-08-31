@@ -316,6 +316,20 @@ PY
   elif [[ "$output" == *"$expect"* ]]; then
     printf '%scaught%s %s(%s)%s\n' "$GREEN" "$OFF" "$DIM" "$expect" "$OFF"
     PASSED=$((PASSED + 1))
+  # A mutation that does not COMPILE tested nothing. Cases here were in that
+  # state and read as wrong failures: each deleted the only use of a variable
+  # or the only call to a function, and -Werror stopped the build on the
+  # unused one before a test could run. The verdict said "expected to see:
+  # <test name>", which is true and useless -- the fix is not the expect
+  # string, it is to write a mutation that compiles and then misbehaves.
+  #
+  # A case whose expect string names a compile error is matched above and
+  # never reaches this: the ABI cross-check and the FreeType options file are
+  # both guarded at compile time by design, and for them "did not compile" IS
+  # the catch.
+  elif [[ "$output" == *"compilation errors"* ]]; then
+    report "$name" 'DID NOT COMPILE' \
+      'the mutation broke the build, so no test ran; make it compile' "$output"
   # zig cuts its build output short when a test fails with a long trace: the
   # tail is replaced by "unable to read results of configure phase", and a
   # later failing test's diagnostics never appear. Measured: ONE failing test
@@ -325,18 +339,6 @@ PY
   # means nothing at all -- the same class of bug as the matcher that silently
   # failed to match. Name the state instead of calling it a wrong failure. The
   # fix is to expect the test that fails FIRST.
-  # A mutation that does not COMPILE tested nothing. Four cases here were in
-  # that state and read as wrong failures: each deleted the only use of a
-  # variable or the only call to a function, and -Werror stopped the build on
-  # the unused one before a test could run. The verdict said "expected to see:
-  # <test name>", which is true and useless -- the fix is not the expect
-  # string, it is to write a mutation that compiles and then misbehaves.
-  #
-  # A case whose expect string names a compile error is matched above and
-  # never reaches this: the ABI cross-check is caught at comptime by design.
-  elif [[ "$output" == *"compilation errors"* ]]; then
-    report "$name" 'DID NOT COMPILE' \
-      'the mutation broke the build, so no test ran; make it compile' "$output"
   elif [[ "$output" == *"unable to read results of configure phase"* ]]; then
     report "$name" 'TRUNCATED' \
       "the build output was cut short, so \"$expect\" could not be looked for" \
@@ -542,9 +544,15 @@ printf '\n%sHinting%s %s(ffi/ztext_ftoption.h, and the warm-up it needs)%s\n' \
 # glyph shaping produces loses its script and is hinted against no blue zones
 # at all. Nothing fails to compile, nothing errors, and the picture changes --
 # which is why a golden is the only thing that can hold it.
+# Caught at COMPILE time, like the ABI cross-check cases above: ffi/ztext_abi.c
+# turns every switch this options file claims into an #error, so a build
+# without FT_CONFIG_OPTION_USE_HARFBUZZ cannot be produced at all. The case
+# used to expect a test name, which is a weaker guard than the one that
+# actually holds -- and the verdict said DID NOT COMPILE, correctly, because
+# not compiling is what this guard does.
 case_ "the autohinter's coverage taken from the cmap alone" \
   ffi/ztext_ftoption.h \
-  "the autohinter's coverage comes from GSUB" \
+  "ztext builds WITH FT_CONFIG_OPTION_USE_HARFBUZZ" \
   "#ifndef FT_CONFIG_OPTION_USE_HARFBUZZ
 #define FT_CONFIG_OPTION_USE_HARFBUZZ
 #endif
@@ -789,7 +797,7 @@ case_ "a pen naming a cap this build does not have, accepted" \
   ffi/ztext_raster.c \
   "does not name should be refused" \
   "    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE ||" \
-  "    if (0 ||"
+  "    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE + 3 ||"
 
 # A radius too large for 26.6 converts to zero, which draws no pen at all.
 case_ "a radius too large for the fixed point it is converted to" \
@@ -1020,7 +1028,7 @@ case_ "a UTF-16 surrogate pair treated as two characters" \
   ffi/ztext_core.c \
   "a range that would split a character is refused" \
   "      return unit >= 0xDC00u && unit <= 0xDFFFu;" \
-  "      return false;"
+  "      return unit >= 0xDC00u && unit <= 0xDC7Fu;"
 
 printf '\n%sShaping%s %s(ffi/ztext_shape.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 

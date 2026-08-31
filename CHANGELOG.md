@@ -217,6 +217,17 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **Three more cases that tested nothing, found by the verdict that names
+  them.** The first full sweep after **DID NOT COMPILE** was added reported it
+  three times. Two were the same `-Werror` mechanism as before -- a mutation
+  that returned a constant left a local unused -- and are now written to narrow
+  a range and to widen a bound, so the code still reads the value and then gets
+  it wrong. The third was not that at all: turning
+  `FT_CONFIG_OPTION_USE_HARFBUZZ` off is caught by an `#error` in
+  `ffi/ztext_abi.c`, so the build cannot be produced, and the case had simply
+  been expecting a weaker guard than the one that holds. It now expects the
+  compile error, which is what the ABI cross-check cases have always done.
+
 - **Nine modules compile C; the sanitizer setting reaches all nine, and now
   has to.** The three C test executables were built without
   `sanitize_c` while every library had it, so one link could hold an

@@ -1049,8 +1049,12 @@ a case that lands there is to make the mutation fail one test, not two.
 A fourth, **DID NOT COMPILE**, says the mutation broke the build rather than a
 test -- it deleted the last use of a variable or the last call to a function,
 and `-Werror` stopped the build before anything ran. Such a case tested
-nothing, and the fix is the mutation rather than the expectation. Four cases
-were in that state, each reading as a wrong failure that named a real test.
+nothing, and the fix is the mutation rather than the expectation. Cases here
+were in that state, each reading as a wrong failure that named a real test,
+and the verdict is what let them be found instead of argued with. Two guards
+are compile-time by design -- the ABI cross-check and the FreeType options
+file -- and for those the expected string names the compile error, so they
+are caught before this verdict is reached.
 
 And a fifth, **TIMED OUT**, because a mutation is a deliberate bug and a bug
 is not obliged to terminate. Each case's command is run with its output going
