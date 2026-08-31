@@ -593,7 +593,7 @@ would expect of an allocation total and is worth checking rather than assuming.
 
 | | Cost | Read this as |
 |---|---|---|
-| Shape a 43-character run | **~2.5 µs** | 2.25-2.70 µs. Reusing one `Shaper`. A separate test proves 500 warm shapes allocate **nothing**. |
+| Shape a 43-character run | **~2.5 µs** | 2.25-2.70 µs. Reusing one `Shaper`. A separate test proves warm shapes allocate **nothing**; the count is under [What the tests actually do](#what-the-tests-actually-do). |
 | The same run, 4300 characters around it, through `shape` | **~3.3 µs** | HarfBuzz decodes the run and at most five characters either side, so its cost does not move. The extra **~1.05 µs** is ztext validating the whole borrowed buffer — about 0.25 ns per code unit, paid on every call. |
 | Analyse a 4300-character paragraph, all three segmentation passes | **~265 µs** | 26 898 B live. Bidi, itemisation, the copy of the text, UAX #14 and both of #29. |
 | The same paragraph, no segmentation | **~115 µs** | 13 982 B live. One variable between the two arms: **the three passes are 56.6% of the time and 12 916 B of the memory**, which is why they are a choice and not a policy. |
@@ -965,7 +965,7 @@ The same matrix runs locally:
 ci/run.sh              # the full matrix
 ci/run.sh --quick      # native Debug only, for the inner loop
 ci/run.sh --full       # + the mutation harness below
-ci/check-guards.sh --anchors  # do all 90 still apply to the tree? seconds
+ci/check-guards.sh --anchors  # does every case still apply? seconds
 ci/check-guards.sh     # break each guard on purpose; minutes, not seconds
 ci/header-link.sh      # every installed header compiles, is reachable, links
 ci/verify-vendor.sh    # diff libs/ against pinned upstream (needs network)

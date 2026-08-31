@@ -217,6 +217,21 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **And README.md was doing it to itself.** The check above looked at the
+  other documents; README carried two second copies of its own. Its
+  quick-reference list said the anchor pass proves "all 90" cases still apply
+  while the sentence the script reads said 92 -- the stale copy was the one a
+  reader meets first. A measurement table restated the warm-shape count that
+  the testing section states and the script checks. Neither carries a number
+  now. The check reads README for a SECOND LINE holding a value it
+  recomputes, counting lines rather than matches, because `294/294 passed` is
+  one number written once.
+
+  What it cannot do is written beside it: a copy that has already gone stale
+  holds the old value, and the check searches for the current one. Nothing
+  detects that. What prevents it is there being one place to write the
+  number, which is the rule this enforces rather than the symptom it finds.
+
 - **A number the documentation states has one home, and a script says so.**
   `ci/measurements.sh --check` recomputes every number README.md states, and
   nothing stopped another document from writing one down as well. Two had:

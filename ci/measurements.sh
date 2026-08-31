@@ -49,11 +49,17 @@
 #     spelled some other way -- `* 0.015625f`, or a shift on the fixed value
 #     before the cast -- and it deliberately does not look outside ffi/*.c,
 #     since the Zig side never sees fixed point.
-#   - The restated-number check searches two documents for the VALUES the
-#     claims above recompute. It cannot see a number written as a word, it
-#     cannot see one in a document nobody added to its list, and a value that
-#     happens to be right for two unrelated things reads as a restatement --
-#     which is a false positive an author resolves by rewording, not a hole.
+#   - The restated-number check searches for the VALUES the claims above
+#     recompute: anywhere in SECURITY.md or CONTRIBUTING.md, and on a second
+#     line of README.md. It cannot see a number written as a word, it cannot
+#     see one in a document nobody added to its list, and a value that happens
+#     to be right for two unrelated things reads as a restatement -- a false
+#     positive an author resolves by rewording, not a hole.
+#   - It cannot see a copy that has ALREADY gone stale, because a stale copy
+#     holds the old value and the check searches for the current one. Nothing
+#     can: what prevents that defect is there being one place to write the
+#     number, which is the rule this check enforces rather than the symptom it
+#     detects.
 #   - The `paths` check compares TOP-LEVEL names only. It proves nothing
 #     about what is inside a listed directory, and it cannot tell a file that
 #     should ship from one that should not -- only that every entry the
@@ -397,12 +403,23 @@ gated_numbers="$entry_points $swept $guard_cases $suite_test_decls"
 if [ -n "$suite_tests" ]; then
   gated_numbers="$gated_numbers $suite_tests $c_injection $c_warm"
 fi
+#
+# README.md is searched too, for a SECOND line carrying the same value. One
+# line is the home; a second is a copy, and it was one of these that went
+# stale first -- the quick-reference list said "do all 90 still apply" while
+# the sentence the check reads said 92. Lines rather than matches, because
+# "294/294 passed" is one number written once.
 restated=
 for gated in $gated_numbers; do
   hit=$(grep -nE "(^|[^0-9.])${gated}([^0-9.]|\$)" \
           SECURITY.md CONTRIBUTING.md 2> /dev/null || true)
   [ -n "$hit" ] && restated="${restated}${hit}
 "
+  twice=$(grep -nE "(^|[^0-9.])${gated}([^0-9.]|\$)" README.md || true)
+  if [ "$(printf '%s' "$twice" | grep -c .)" -gt 1 ]; then
+    restated="${restated}${twice}
+"
+  fi
 done
 
 #-----------------------------------------------------------------------------
@@ -543,11 +560,11 @@ if [ $CHECK -eq 1 ]; then
 
   if [ -z "$restated" ]; then
     printf '  %-42s %s%s numbers, one home each%s\n' \
-      'no other document restates a gated number' \
+      'each gated number is written in one place' \
       "$GREEN" "$(printf '%s' "$gated_numbers" | wc -w | tr -d ' ')" "$OFF"
   else
     printf '  %-42s %sstated a second time%s\n' \
-      'no other document restates a gated number' "$RED" "$OFF"
+      'each gated number is written in one place' "$RED" "$OFF"
     printf '%s' "$restated" | sort -u | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
