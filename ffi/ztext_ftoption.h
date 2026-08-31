@@ -41,10 +41,27 @@
 /*
  * Classic Mac resource-fork fonts (LWFN, .dfont, FOND). Reachable only through
  * path-based entry points on macOS, and ztext has no path-based entry point at
- * all: faces come from memory. Dropping it also drops src/base/ftrfork.c's
- * guessing logic, which is a pile of heuristics over attacker-visible bytes.
+ * all: faces come from memory.
  */
 #undef FT_CONFIG_OPTION_MAC_FONTS
+
+/*
+ * And the resource-fork GUESSING heuristics, which are a SEPARATE switch.
+ *
+ * The paragraph above used to end by saying that undefining MAC_FONTS dropped
+ * src/base/ftrfork.c's guessing logic as well. It does not, and the file was
+ * in every binary ztext has ever produced with a comment saying it was not.
+ * ftrfork.c is compiled -- src/base/ftbase.c #includes it and ftbase.c is in
+ * build.zig's list -- and its lines 319-893, the whole table of heuristics
+ * over attacker-visible bytes, sit under this macro alone. MAC_FONTS gates
+ * only FT_Raccess_Guess's outer entry point at :468.
+ *
+ * Undefining it selects ftrfork.c's other branch (:894-925), the stub that
+ * reports the format is unsupported. ffi/ztext_abi.c refuses to compile if any
+ * of these switches comes back, because every claim in this file is about a
+ * macro, and a macro is exactly the kind of claim a build can check.
+ */
+#undef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
 
 /*
  * Report FreeType's own error strings. ztext maps FT errors onto its flat

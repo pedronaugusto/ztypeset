@@ -21,6 +21,40 @@
 // HarfBuzz reports positions in 26.6 fixed point through hb_position_t, and
 // ztext divides them by 64 into float. A wider or narrower type, or a change
 // of fixed-point scale, would silently rescale every advance in the package.
+//===----------------------------------------------------------------------===//
+// ffi/ztext_ftoption.h's claims, in a form the build refuses
+//
+// Every switch that file turns off or on is a claim about the binary, and a
+// claim in a comment is a comment. One of them was false for the life of the
+// package: the resource-fork guessing heuristics were described as dropped
+// and were compiled into every build, because the paragraph that dropped
+// FT_CONFIG_OPTION_MAC_FONTS assumed a second switch went with it.
+//
+// These are here rather than in ztext_ftoption.h because that file IS the
+// definition -- a file cannot check itself -- and this translation unit is
+// where ztext already asserts what its upstreams compiled to.
+//===----------------------------------------------------------------------===//
+
+#ifdef FT_CONFIG_OPTION_USE_ZLIB
+#error "ztext builds without FT_CONFIG_OPTION_USE_ZLIB; see ffi/ztext_ftoption.h"
+#endif
+#ifdef FT_CONFIG_OPTION_SVG
+#error "ztext builds without FT_CONFIG_OPTION_SVG; see ffi/ztext_ftoption.h"
+#endif
+#ifdef FT_CONFIG_OPTION_MAC_FONTS
+#error "ztext builds without FT_CONFIG_OPTION_MAC_FONTS; see ffi/ztext_ftoption.h"
+#endif
+#ifdef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
+#error \
+    "ztext builds without FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK; see ffi/ztext_ftoption.h"
+#endif
+#ifndef FT_CONFIG_OPTION_ERROR_STRINGS
+#error "ztext builds WITH FT_CONFIG_OPTION_ERROR_STRINGS; see ffi/ztext_ftoption.h"
+#endif
+#ifndef FT_CONFIG_OPTION_USE_HARFBUZZ
+#error "ztext builds WITH FT_CONFIG_OPTION_USE_HARFBUZZ; see ffi/ztext_ftoption.h"
+#endif
+
 _Static_assert(sizeof(hb_position_t) == 4,
                "hb_position_t is no longer 32-bit; check the 26.6 conversions "
                "in ztext_shape.c");

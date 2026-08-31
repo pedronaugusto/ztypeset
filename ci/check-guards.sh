@@ -371,6 +371,21 @@ case_ "the language the autohinter interns, left cold" \
   "  (void)hb_language_get_default();" \
   ""
 
+printf '\n%sFreeType build switches%s %s(what the options file claims)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# ffi/ztext_ftoption.h is a page of prose about macros, and every paragraph of
+# it is a claim about what is in the binary. One was false for the life of the
+# package: the resource-fork guessing heuristics were described as dropped and
+# were compiled into every build. ffi/ztext_abi.c now turns each of the six
+# switches into a #error, so the claim and the binary cannot part again --
+# which makes a COMPILE failure the verdict here, not a failing test.
+case_ "a FreeType switch the options file says is off" \
+  ffi/ztext_ftoption.h \
+  "without FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK" \
+  "#undef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK" \
+  ""
+
 printf '\n%sSubpixel rasterisation%s %s(pixels, samples and rows)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
