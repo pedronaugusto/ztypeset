@@ -1327,6 +1327,23 @@ case_ "a licence row that no longer matches the build" \
   '| "Old MIT", taken from HarfBuzz | **Yes.**' \
   '| "Old MIT", taken from HarfBuzz | No.'
 
+# A process-wide allocator installed for a test and taken out only on the
+# happy path. Nothing the suite runs can see this either -- the failure it
+# creates is in the FAILING run of some other test, which is not a state the
+# suite reaches when it passes -- so a source gate is the only thing that can.
+case_ "a test allocator taken out only on the happy path" \
+  src/integration_test.zig \
+  "without deferring the reset" \
+  "        try ztext.setAllocator(first);
+        defer ztext.resetAllocator();
+
+        const library = try ztext.Library.init();
+        const font = try library.createFont(fonts.hebrew, 0);" \
+  "        try ztext.setAllocator(first);
+
+        const library = try ztext.Library.init();
+        const font = try library.createFont(fonts.hebrew, 0);"
+
 # The call site put back the way it was: straight into a command
 # substitution, unbounded, and joined to the harness by a pipe. Nothing the
 # suite runs can see this -- the harness is read, not built -- so the gate

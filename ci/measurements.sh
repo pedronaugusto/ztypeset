@@ -88,6 +88,13 @@
 #     the first is the guard case that mutates the call site; the deadline
 #     itself is held by nothing but that function being the one place to
 #     look.
+#   - The installed-allocator check reads src/integration_test.zig only, and
+#     asks only that the words appear in the same test block. It cannot see a
+#     defer that resets the wrong thing, a helper called by a test that
+#     installs one, or the same defect in another file. What makes those
+#     unlikely rather than unchecked is that the suite has one place where an
+#     allocator is installed for a whole test and one Fixture that does it for
+#     the rest.
 #   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
@@ -311,6 +318,42 @@ guard_section_diff=$(diff <(printf '%s\n' "$guard_rows") \
 # only worth as much as the guarantee that nothing runs the command anywhere
 # else, because a second call site would be unbounded again and would read
 # exactly like the first.
+# A test that installs a process-wide allocator has to take it out again on
+# EVERY path, and only `defer` is every path.
+#
+# The allocator ztext installs is process-wide and these tests back it with a
+# DebugAllocator living in the test's own frame. A bare reset at the end of the
+# body is not reached when an assertion above it fails, so a FAILING test used
+# to leave ztext allocating through a frame that had ended -- for every test
+# after it, in the same process. It is the defect the C smoke test was already
+# fixed for, in the language the wrapper is written in, and it does not
+# announce itself: what it did here was hang a mutation sweep with no verdict,
+# no output and nothing to read but the process table.
+#
+# So: any `test` block that installs one must also defer the reset. The
+# Fixture's own deinit is not a test block and is not asked to.
+alloc_tests_total=$(awk '
+  /^test "/ { inside = 1; has_set = 0; next }
+  inside && /^\}/ { if (has_set) n++; inside = 0; next }
+  inside && index($0, "ztext.setAllocator(") { has_set = 1 }
+  END { print n + 0 }
+' src/integration_test.zig)
+alloc_tests_loose=$(awk '
+  /^test "/ {
+    name = $0
+    sub(/^test "/, "", name)
+    sub(/".*$/, "", name)
+    inside = 1; has_set = 0; has_defer = 0
+    next
+  }
+  inside && /^\}/ {
+    if (has_set && !has_defer) print name
+    inside = 0
+    next
+  }
+  inside && index($0, "ztext.setAllocator(") { has_set = 1 }
+  inside && index($0, "defer ztext.resetAllocator()") { has_defer = 1 }
+' src/integration_test.zig)
 guard_run_sites=$(grep -cF '"${GUARD_CMD[@]}"' ci/check-guards.sh)
 guard_run_loose=$(awk '
   index($0, "run_guarded() {") == 1 { inside = 1; next }
@@ -656,6 +699,16 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe two lists differ%s\n' \
       'check-guards.sh = README guard table' "$RED" "$OFF"
     printf '%s\n' "$guard_section_diff" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$alloc_tests_loose" ]; then
+    printf '  %-42s %s%s defer the reset%s\n' \
+      'tests that install an allocator' "$GREEN" "$alloc_tests_total" "$OFF"
+  else
+    printf '  %-42s %sinstalls an allocator without deferring the reset%s\n' \
+      'tests that install an allocator' "$RED" "$OFF"
+    printf '%s\n' "$alloc_tests_loose" | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

@@ -975,7 +975,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **93** deliberate bugs, one at a time, to a copy of the tree, and
+applies **94** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each.
 
 The right column below is the harness's own case names, in its own order, and
@@ -1007,7 +1007,7 @@ they described, and a reader had no way to tell which rows those were.
 | OpenType metrics | a metric tag nobody vetted, forwarded to HarfBuzz |
 | Variable fonts | named instance coordinates that are not the font's; an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored, the base answered; the fixture's cmap records left unsorted |
-| Versioning and licences | a version bump that reached three of its four homes; the changelog heading the gate reads by shape; a gated number restated in another document; a directory build.zig compiles, dropped from the package; a licence text changed under the page that summarises it; a licence row deleted rather than rechecked; a licence row that no longer matches the build; a guard case run unbounded again |
+| Versioning and licences | a version bump that reached three of its four homes; the changelog heading the gate reads by shape; a gated number restated in another document; a directory build.zig compiles, dropped from the package; a licence text changed under the page that summarises it; a licence row deleted rather than rechecked; a licence row that no longer matches the build; a test allocator taken out only on the happy path; a guard case run unbounded again |
 | Installed headers | an installed header no compiled code stands behind; a declared entry point with no implementation |
 
 The left column is not a summary of that script's sections; it **is** them.

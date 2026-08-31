@@ -217,6 +217,32 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **A process-wide allocator installed for a test and taken out only if the
+  test passed.** Two tests in `src/integration_test.zig` install a ztext
+  allocator backed by a `DebugAllocator` living in the test's own frame, and
+  called `ztext.resetAllocator()` as the last statement of the body. An
+  assertion above it returns early, so a FAILING run of either left ztext
+  allocating and freeing through a frame that had ended -- for every test after
+  it, in the same process. It is the defect the C smoke test was already fixed
+  for, in the language the wrapper is written in.
+
+  It does not announce itself, and the way it surfaced says why that matters:
+  the mutation harness ran for 55 minutes on a single case with no output and
+  no verdict, and every process in the chain was idle. What the mutation broke
+  was the assertion in one of these two tests. The reset was never reached, and
+  the next allocation went through the dead frame.
+
+  Both now scope the install to a block and `defer ztext.resetAllocator()`,
+  which is the only construct that covers every path out.
+
+  Held by a gate and a guard case, because neither the suite nor the sweep can
+  see this on its own -- the damage is in the FAILING run of a test, which is
+  not a state a passing suite reaches. `ci/measurements.sh --check` reads every
+  `test` block in the file and requires the deferred reset in any that installs
+  an allocator (measured: 3 install one, 3 defer the reset); the guard case *a
+  test allocator taken out only on the happy path* deletes one of the defers
+  and requires the gate to say so.
+
 - **The mutation applier read source with the locale's codec.** `open(path)`
   decodes using whatever the platform's locale says, so on a Windows console --
   cp1252 -- reading a file that holds any non-ASCII text raised
