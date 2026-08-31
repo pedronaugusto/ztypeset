@@ -945,6 +945,7 @@ The same matrix runs locally:
 ci/run.sh              # the full matrix
 ci/run.sh --quick      # native Debug only, for the inner loop
 ci/run.sh --full       # + the mutation harness below
+ci/check-guards.sh --anchors  # do all 90 still apply to the tree? seconds
 ci/check-guards.sh     # break each guard on purpose; minutes, not seconds
 ci/header-link.sh      # every installed header compiles, is reachable, links
 ci/verify-vendor.sh    # diff libs/ against pinned upstream (needs network)
@@ -957,37 +958,58 @@ A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
 applies **90** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
-| | |
+| section | what is broken, one at a time |
 |---|---|
-| ABI | a *middle* enumerator renumbered, an enum tag narrowed, two same-sized struct fields swapped, a field added to the header only, a by-value parameter widened, a parameter dropped, a function the header exports that `c.zig` never declares |
-| Bidi | a line reordered over the paragraph instead of over itself, script pieces emitted forwards inside a right-to-left run, a paragraph's end left as no break at all |
-| Faces | a glyph loaded without activating the face's own `FT_Size`, a covered prefix that splits a base from its marks or breaks at a format character, a pixel size rounded to whole pixels, a bitmap that does not say which format its bytes are in |
-| Metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
-| Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
-| Variation sequences | a variation selector ignored and the base character answered instead, and the test fixture's own cmap records left in the order they were appended |
-| The stroker | the pen traced before the synthetic styles or after the matrix, a stroked glyph that reaches the pixels but not the measurements, an export buffer never grown after the first glyph, the inside and outside borders swapped, every style exporting the whole pen, and a cap or radius this build cannot draw accepted |
-| Subpixel rasterisation | an LCD bitmap's width reported in samples, an LCD_V bitmap's height reported in sub-rows, an LCD_V pitch that counts one of its three sub-rows, a subpixel mode rendered as plain greyscale, and three bytes per pixel counted as one |
-| The face transform | the caller's matrix applied before the font's own styles, the two off-diagonal terms swapped, the advance transformed the way FT_Set_Transform does, a face whose matrix starts at the memset's zero, and a matrix that is not made of numbers taken at face value |
-| Character maps | every map reported as the first one, whichever is selected reported as the first, an encoding the font has no map for accepted, and an index past the end clamped instead of refused |
-| Synthetic styles | a style applied to the ink and not to the shaping, emboldening asked for in place so the advance never moves, the lazily built font never told what style it was born into, a restyled face that still passes for the one a run was shaped against, a strength quantised back to the one weight upstream ships, and a strength that is not a number taken at face value |
-| Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
+| ABI cross-check | a *middle* enumerator renumbered, an enum tag narrowed on the Zig side, two same-sized struct fields swapped, a field added to the header only, a by-value parameter widened, a parameter dropped, a function the header exports that `c.zig` never declares |
+| Bidi | a line derived from the paragraph so rule L1 is skipped, script pieces emitted forwards inside a right-to-left run, a paragraph's end left as no break at all |
 | Segmentation | every pass run whatever was asked for, an unnamed segmentation bit accepted and ignored, the word array laid over the line array |
-| Shaping | extents taken from the wrong face, a rejected shape that leaves the previous run queryable, the optional glyph flags never asked for, a paragraph run shaped left to right whatever its level, a direction the run and the caller both set, a hand-built run trusted about its own bounds |
-| Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, an allocator slot taken per install rather than per allocator, SheenBidi handed memory ztext did not write |
-| Caches | the process-lifetime caches left unwarmed — planted where `ztextSetAllocator` warms them, since nothing warms up by hand any more |
-| Handle lifetimes | a font released without telling the library that owns it, a face's glyph buffer charged to whatever allocator is installed when it is first drawn |
-| Reproducibility | the environment allowed to reach HarfBuzz |
+| Faces and fonts | a face loaded without activating its own `FT_Size`, a covered prefix that splits a base from its marks or breaks at a format character, a bitmap that does not say which format its bytes are in, a pixel size rounded to whole pixels, a font released without telling the library that owns it, a glyph buffer charged to whatever allocator is installed when it is first drawn |
 | Hinting | the autohinter's glyph coverage taken from the character map alone, and the language its coverage pass interns left cold |
+| FreeType build switches | a switch `ffi/ztext_ftoption.h` says is off, put back — the case whose verdict is a compile error rather than a failing test |
+| Subpixel rasterisation | an LCD bitmap's width reported in samples, an LCD_V bitmap's height reported in sub-rows, an LCD_V pitch that counts one of its three sub-rows, a subpixel mode rendered as plain greyscale, three bytes per pixel counted as one |
+| Process-wide state | the generation counter made non-atomic, the one-time allocator-install flag made non-atomic — both caught by the compiler, which is the only gate a data race admits |
+| The internal contracts | the decoder reading the unit at the end of the buffer, the 26.6 domain check written as a range test that a NaN passes |
+| The ABI handshake | a layout field measuring the wrong type, a probed field the library never writes, two probed fields of one type expecting one marker, a probed field expecting a marker of zero |
+| The stroker | the pen traced before the synthetic styles or after the matrix, a stroked glyph that reaches the pixels but not the measurements, an export buffer never grown after the first glyph, the inside and outside borders swapped, every style exporting both of the stroker's contours, a cap this build does not have accepted, a radius too large for the fixed point it converts to |
+| The face transform | the caller's matrix applied before the font's own styles, the two off-diagonal terms swapped, the advance transformed the way `FT_Set_Transform` does, a face whose matrix starts at the memset's zero, a matrix that is not made of numbers taken at face value |
+| Character maps | every map reported as the first one, whichever is selected reported as the first, an encoding the font has no map for accepted, an index past the end quietly clamped |
+| Synthetic styles | a style applied to the ink and not to the shaping, emboldening asked for in place so the advance never moves, the lazily built font never told what style it was born into, a restyled face that still passes for the one a run was shaped against, a strength quantised back to the one weight upstream ships, a strength that is not a number taken at face value |
+| Encodings | SheenBidi told the text is UTF-8 whatever it was, libunibreak handed UTF-16 through its UTF-8 entry point, HarfBuzz the same, a UTF-16 surrogate pair treated as two characters |
+| Shaping | a run shaped without the text around it, the optional glyph flags never asked for, extents taken from a face the run was not shaped against, a rejected shape that leaves the previous run queryable, a paragraph run shaped left to right whatever its level, a direction the run and the caller both set, a hand-built run trusted about its own bounds |
+| Allocator | a declined `reallocate` reported as out of memory, a block freed through whatever allocator is installed now, a library-owned block released by the wrong one, the process-lifetime caches left unwarmed, an allocator slot taken per install rather than per allocator, SheenBidi handed memory ztext did not write |
 | Documentation | a documented example edited away from the program it quotes |
+| Reproducibility | the environment allowed to reach HarfBuzz |
+| OpenType metrics | a metric tag nobody vetted, forwarded to HarfBuzz as if it were one this build names |
+| Variable fonts | named-instance coordinates that are not the font's, an instance name reported one byte longer than it is |
+| Variation sequences | a variation selector ignored and the base character answered instead, the test fixture's own cmap records left in the order they were appended |
+| Versioning and licences | a bump that reached two of the version's three homes, a changelog heading reworded out from under the gate that reads it, a licence text changed under the page that summarises it, a row deleted rather than rechecked, a row whose answer the build configuration decides left behind when that configuration changed |
 | Installed headers | a header put back in the install list with nothing compiled behind it, an implementation removed from under a header that still declares it |
-| Versioning | a bump that reached two of the version's three homes, and a changelog heading reworded out from under the gate that reads it |
-| Licences | a licence text changed under the page that summarises it, the row deleted rather than rechecked, and a row whose answer the build configuration decides left behind when that configuration changed |
+
+The left column is not a summary of that script's sections; it **is** them.
+`ci/measurements.sh --check` compares the two sets and fails if either holds a
+name the other does not, because a table like this is otherwise a second home
+for a list — four sections were added to the harness and none of them reached
+this table.
 
 A mutation the suite survives is reported as a hole in the *suite*; one whose
 anchor no longer applies is reported too, so the script rots loudly rather than
 quietly passing. Writing it caught three expectation strings naming the wrong
 test — which is precisely the failure mode the hand-run version had and could
 not detect.
+
+`--anchors` asks only the second of those two questions: does every case still
+quote a piece of the tree, exactly once? It mutates nothing and builds nothing,
+so it answers in seconds rather than minutes, and it is the question a refactor
+breaks. Reaching a stranded anchor the slow way costs a full sweep, which is
+long enough that nobody runs it before pushing, which is how a case comes to be
+stranded in the first place.
+
+A third verdict exists and is worth knowing about: **TRUNCATED**. When two
+tests fail at once, `zig build` replaces the tail of its own output with
+`unable to read results of configure phase`, and the second failure's
+diagnostics never appear — so a *caught* mutation can read as a hole. The
+script names that state rather than calling it a wrong failure, and the fix for
+a case that lands there is to make the mutation fail one test, not two.
 
 Each case is a rebuild, and the last two are a rebuild plus an install, a
 translate and a link — minutes rather than seconds for the set, which is why

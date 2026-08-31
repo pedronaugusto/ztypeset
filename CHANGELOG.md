@@ -160,6 +160,27 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The mutation harness can be asked the cheap question, and it stopped
+  keeping its own section list in two places.** `ci/check-guards.sh --anchors`
+  checks that all 90 cases still quote the tree exactly once, mutating nothing
+  and building nothing: fifteen seconds against the minutes a full sweep
+  costs. A refactor strands an anchor, and reaching that verdict the slow way
+  is long enough that nobody runs it before pushing -- which is how a case
+  comes to be stranded. It runs in the static job, on all three hosts.
+
+  The harness also gained a third verdict, **TRUNCATED**. When two tests fail
+  at once `zig build` replaces the tail of its own output with `unable to read
+  results of configure phase`, so the second failure's diagnostics never
+  appear and a CAUGHT mutation reads as a hole -- which happened twice while
+  the ABI probe cases were being written. The state is now named rather than
+  reported as a wrong failure.
+
+  And the README table listing the harness's sections was a hand-kept mirror:
+  four sections had been added and none of them reached it. Its left column is
+  now the section name itself, and `ci/measurements.sh --check` fails if
+  either list holds a name the other does not. The section holding the five
+  licence cases is now called "Versioning and licences", which is what it is.
+
 - **The documentation says what is true, and two more of its claims are
   gated.** Five separate statements had drifted from the tree, and they had
   drifted the same way: each was a fact written out in prose, beside a file
