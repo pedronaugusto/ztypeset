@@ -217,6 +217,28 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **A guard case can no longer hang the sweep.** `ci/check-guards.sh` ran
+  each case's command straight into a command substitution, unbounded: the
+  output went down a pipe the harness only drained at the end, and nothing put
+  a limit on how long a case could take. A mutation is a deliberate bug and a
+  bug is not obliged to terminate, so a case that hung took the sweep with it
+  -- measured here as a run stalled for nearly an hour on one case, with no
+  verdict, no further output, and nothing in the harness able to say so.
+
+  Both halves are fixed in `run_guarded`, now the only place a case's command
+  is run: the output goes to a file, so there is no pipe for a build and its
+  reader to deadlock across, and the command is given a deadline of twenty
+  times the baseline build measured at the start of that same sweep -- a bound
+  that scales with the machine instead of expiring on a slow one. A case that
+  reaches it is killed and reported **TIMED OUT**, and the sweep stops rather
+  than continuing: the command is dead but a build it started may not be, so
+  the working copy is kept and named instead of deleted under a live process.
+
+  The gate: `ci/measurements.sh --check` holds the guard command to one call
+  site, inside `run_guarded`; a second site would be unbounded again and would
+  read exactly like the first. Guard case: "a guard case run unbounded again",
+  which is the one case that mutates the file it lives in.
+
 - **The guard table is the harness's case names, not a paraphrase of them.**
   README's table of what `ci/check-guards.sh` breaks had a hand-written
   sentence per section, and a gate that compared only the section names --

@@ -81,6 +81,13 @@
 #     describes what that case actually mutates -- only that the table and the
 #     harness say the same thing, which is the promise a paraphrase could not
 #     make.
+#   - The call-site check counts a TOKEN. It holds the guard command to one
+#     call site inside run_guarded; it does not read what run_guarded does, so
+#     a deadline deleted from inside that function, or a case that shells out
+#     to the build by some other spelling, is invisible to it. What catches
+#     the first is the guard case that mutates the call site; the deadline
+#     itself is held by nothing but that function being the one place to
+#     look.
 #   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
@@ -294,6 +301,22 @@ readme_rows=$(awk '/^\| section \| what is broken/ { f = 1; next }
                    f { print }' README.md)
 guard_section_diff=$(diff <(printf '%s\n' "$guard_rows") \
                           <(printf '%s\n' "$readme_rows") 2>&1 || true)
+
+# And that the harness runs those cases in exactly one place, the bounded one.
+#
+# ci/check-guards.sh used to run each case's command straight into a command
+# substitution, with no deadline: a case that hung took the whole sweep with
+# it, silently, for as long as anyone let it. The fix is run_guarded, which
+# writes to a file and gives the command a deadline -- and a fix like that is
+# only worth as much as the guarantee that nothing runs the command anywhere
+# else, because a second call site would be unbounded again and would read
+# exactly like the first.
+guard_run_sites=$(grep -cF '"${GUARD_CMD[@]}"' ci/check-guards.sh)
+guard_run_loose=$(awk '
+  index($0, "run_guarded() {") == 1 { inside = 1; next }
+  inside && $0 == "}" { inside = 0; next }
+  !inside && index($0, "\"${GUARD_CMD[@]}\"") { print FNR ": " $0 }
+' ci/check-guards.sh)
 
 # The upstreams ffi/ztext.h's banner names, against src/pins.zig. Six places
 # said "three" when the package had vendored four for months, and the one that
@@ -633,6 +656,16 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe two lists differ%s\n' \
       'check-guards.sh = README guard table' "$RED" "$OFF"
     printf '%s\n' "$guard_section_diff" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ "$guard_run_sites" -eq 1 ] && [ -z "$guard_run_loose" ]; then
+    printf '  %-42s %sone bounded call site%s\n' \
+      'check-guards.sh runs a case in one place' "$GREEN" "$OFF"
+  else
+    printf '  %-42s %sthe guard command is run outside the bounded runner%s\n' \
+      'check-guards.sh runs a case in one place' "$RED" "$OFF"
+    printf '%s\n' "$guard_run_loose" | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

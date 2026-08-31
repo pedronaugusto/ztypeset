@@ -975,7 +975,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **92** deliberate bugs, one at a time, to a copy of the tree, and
+applies **93** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each.
 
 The right column below is the harness's own case names, in its own order, and
@@ -1007,7 +1007,7 @@ they described, and a reader had no way to tell which rows those were.
 | OpenType metrics | a metric tag nobody vetted, forwarded to HarfBuzz |
 | Variable fonts | named instance coordinates that are not the font's; an instance name reported one byte longer than it is |
 | Variation sequences | a variation selector ignored, the base answered; the fixture's cmap records left unsorted |
-| Versioning and licences | a version bump that reached three of its four homes; the changelog heading the gate reads by shape; a gated number restated in another document; a directory build.zig compiles, dropped from the package; a licence text changed under the page that summarises it; a licence row deleted rather than rechecked; a licence row that no longer matches the build |
+| Versioning and licences | a version bump that reached three of its four homes; the changelog heading the gate reads by shape; a gated number restated in another document; a directory build.zig compiles, dropped from the package; a licence text changed under the page that summarises it; a licence row deleted rather than rechecked; a licence row that no longer matches the build; a guard case run unbounded again |
 | Installed headers | an installed header no compiled code stands behind; a declared entry point with no implementation |
 
 The left column is not a summary of that script's sections; it **is** them.
@@ -1035,6 +1035,16 @@ tests fail at once, `zig build` replaces the tail of its own output with
 diagnostics never appear — so a *caught* mutation can read as a hole. The
 script names that state rather than calling it a wrong failure, and the fix for
 a case that lands there is to make the mutation fail one test, not two.
+
+And a fourth, **TIMED OUT**, because a mutation is a deliberate bug and a bug
+is not obliged to terminate. Each case's command is run with its output going
+to a file rather than down a pipe the harness has to drain, and with a
+deadline of twenty times the baseline build measured at the start of the same
+sweep. A case that reaches the deadline is killed, reported, and *stops the
+sweep*: the command is dead but a build it started may not be, so no later
+verdict would be judged on a tree nothing else is writing to. The working copy
+is kept and named for the same reason. Before this, a case that hung took the
+whole sweep with it for as long as anyone let it, and said nothing at all.
 
 Each case is a rebuild, and the last two are a rebuild plus an install, a
 translate and a link — minutes rather than seconds for the set, which is why

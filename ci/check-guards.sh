@@ -15,6 +15,10 @@
 # Mutations are applied to a copy of the tree so an interrupted run cannot
 # leave a patched source behind.
 #
+# A mutation is a deliberate bug, so a case can hang rather than fail. Each is
+# given a deadline derived from the baseline build, and a case that reaches it
+# is reported TIMED OUT and stops the sweep -- see run_guarded.
+#
 # Usage:
 #   ci/check-guards.sh              # every case
 #   ci/check-guards.sh <regex>      # only cases whose name matches, e.g.
@@ -61,6 +65,12 @@ FAILED_NAMES=()
 # makes the cost visible: each of these is a build of its own.
 GUARD_CMD=(zig build test)
 
+# How long one case may run before it is called hung rather than slow, and
+# whether the working copy outlives the run. The deadline is measured from the
+# baseline build below; it stays 0 for --anchors, which runs nothing.
+GUARD_DEADLINE=0
+KEEP_WORK=0
+
 WORK=$(mktemp -d)
 ANCHOR_TREE=.
 
@@ -72,6 +82,14 @@ cleanup() {
     if mkdir -p "$keep" && cp "$WORK/failures/"*.log "$keep/" 2>/dev/null; then
       printf '\nfailure logs kept in %s\n' "$keep" >&2
     fi
+  fi
+  # A timed-out case had its command killed, but a build that command started
+  # may not have been. Deleting the tree out from under a process still
+  # writing to it ends the run with a half-removed directory and an error
+  # that describes neither problem. Keep it, and say where it is.
+  if [ "${KEEP_WORK:-0}" -eq 1 ]; then
+    printf 'working copy kept at %s\n' "$WORK" >&2
+    return
   fi
   rm -rf "$WORK"
 }
@@ -116,11 +134,25 @@ selftest_matcher
 # every assertion below is "this test fails", which means nothing if some test
 # fails already.
 printf '%schecking the unmutated tree is green%s\n' "$DIM" "$OFF"
+baseline_started=$SECONDS
 if ! (cd "$WORK/tree" && zig build test > "$WORK/baseline.log" 2>&1); then
   printf '%sthe tree fails its own suite before any mutation.%s\n' "$RED" "$OFF" >&2
   sed 's/^/  | /' "$WORK/baseline.log" | head -30 >&2
   exit 1
 fi
+
+# The bound every case gets, measured on this host rather than guessed. The
+# baseline just run is the one COLD build of the sweep -- it compiles
+# HarfBuzz, which dominates it, and every case after it is incremental.
+# Twenty times that is far outside anything a mutation can legitimately cost
+# and still be a build, and it scales with a slow machine instead of expiring
+# on one. The floor is the other direction: a warm baseline can measure a
+# couple of seconds, and twenty times almost nothing is almost nothing.
+baseline_secs=$((SECONDS - baseline_started))
+GUARD_DEADLINE=$((baseline_secs * 20))
+if [ "$GUARD_DEADLINE" -lt 300 ]; then GUARD_DEADLINE=300; fi
+printf '%sbaseline %ss; a case has %ss before it is called hung%s\n' \
+  "$DIM" "$baseline_secs" "$GUARD_DEADLINE" "$OFF"
 else
   printf '%schecking every anchor still applies%s\n' "$DIM" "$OFF"
 fi
@@ -146,6 +178,48 @@ report() {
     sed 's/^/      | /' | head -8
   printf '      %sfull output: %s%s\n' "$DIM" "$LOGDIR/$slug.log" "$OFF"
   FAILED=$((FAILED + 1)); FAILED_NAMES+=("$name")
+}
+
+# The one place a case's command is run, and the two properties that make it
+# safe to wait for. This harness had neither, and the cost was a sweep that
+# ran for nearly an hour on one mutated tree, produced no verdict, printed no
+# further line, and could only be found in the process table.
+#
+#   The output goes to a FILE. It used to go down a pipe into a command
+#   substitution, which couples the harness to the build: whoever is not
+#   reading blocks whoever is writing, so a build the harness is not draining
+#   can stop on a full pipe while the harness waits for output it is not
+#   taking. A file has no back-pressure and no reader to deadlock against.
+#
+#   And the command has a DEADLINE. A mutation can make the suite hang rather
+#   than fail -- it is a deliberate bug, and a bug is not obliged to terminate
+#   -- and an unbounded wait is not a verdict. It is a run that never ends, on
+#   a laptop or in a hosted CI job that will spend its whole budget before
+#   anyone is told anything.
+#
+# `exec` in the subshell is load-bearing: without it the pid is the
+# subshell's, and killing that leaves the build running with nothing pointing
+# at it. With it the pid IS the command. The command's own children can still
+# outlive it, which is why a timeout stops the sweep and keeps the working
+# copy instead of pressing on.
+run_guarded() {
+  local outfile="$WORK/case.out" waited=0 pid
+  : > "$outfile"
+  ( cd "$WORK/tree" && exec "${GUARD_CMD[@]}" ) > "$outfile" 2>&1 &
+  pid=$!
+  RUN_TIMED_OUT=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [ "$waited" -ge "$GUARD_DEADLINE" ]; then
+      RUN_TIMED_OUT=1
+      kill -9 "$pid" 2>/dev/null
+      break
+    fi
+    sleep 5
+    waited=$((waited + 5))
+  done
+  wait "$pid" 2>/dev/null
+  RUN_STATUS=$?
+  RUN_OUTPUT=$(tr -d '\000' < "$outfile")
 }
 
 # case <name> <file> <expect-substring> <old> <new>
@@ -196,10 +270,25 @@ PY
   fi
 
   local output status
-  output=$(cd "$WORK/tree" && "${GUARD_CMD[@]}" 2>&1 | tr -d '\000')
-  status=$?
+  run_guarded
+  output="$RUN_OUTPUT"
+  status="$RUN_STATUS"
 
   cp "$file" "$WORK/tree/$file"
+
+  # A hang is not a verdict. The sweep stops here rather than going on: the
+  # killed command may have left a build of its own alive in the working copy,
+  # and every case after this one would be judged on a tree that something
+  # else is still writing to.
+  if [ "$RUN_TIMED_OUT" -eq 1 ]; then
+    KEEP_WORK=1
+    report "$name" 'TIMED OUT' \
+      "no verdict after ${GUARD_DEADLINE}s, so the command was killed" "$output"
+    printf '\n%sthe sweep stops here.%s The command was killed; a build it\n' \
+      "$RED" "$OFF" >&2
+    printf 'started may not have been, so no later verdict would be sound.\n' >&2
+    exit 1
+  fi
 
   if [ $status -eq 0 ]; then
     report "$name" 'NOT CAUGHT' 'the suite passes with this bug in it' "$output"
@@ -1190,6 +1279,29 @@ case_ "a licence row that no longer matches the build" \
   "LICENSES.md ft-hb row" \
   '| "Old MIT", taken from HarfBuzz | **Yes.**' \
   '| "Old MIT", taken from HarfBuzz | No.'
+
+# The call site put back the way it was: straight into a command
+# substitution, unbounded, and joined to the harness by a pipe. Nothing the
+# suite runs can see this -- the harness is read, not built -- so the gate
+# that reads it is the only thing that can.
+#
+# Both strings are assembled rather than written out, and that is not style.
+# This is the one case that mutates the file it lives in: an anchor spelled
+# literally would appear twice, once in the code and once here, and a case
+# whose anchor is not unique cannot run at all. The replacement is split for
+# the same reason pointed the other way -- ci/measurements.sh counts the
+# call-site token, and a literal copy of it here would be a second site the
+# gate would have to be taught to forgive.
+bounded_call='  run_'"guarded"
+unbounded_call='  RUN_OUTPUT=$(cd "$WORK/tree" && "${GUARD_'"CMD[@]"'}" 2>&1)
+  RUN_STATUS=$?
+  RUN_TIMED_OUT=0'
+
+case_ "a guard case run unbounded again" \
+  ci/check-guards.sh \
+  "outside the bounded runner" \
+  "$bounded_call" \
+  "$unbounded_call"
 
 printf '\n%sInstalled headers%s %s(ci/header-link.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
