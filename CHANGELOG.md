@@ -160,6 +160,26 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **Every handle goes to its `*Destroy` exactly once, and the header no
+  longer suggests two of them are exempt.** `ztextLibraryDestroy` and
+  `ztextFontDestroy` open with `if (h == NULL || h->destroy_requested)
+  return;`, which reads like a repeat guard. It is not one. The flag exists so
+  that whichever of a library and its fonts is released SECOND performs the
+  teardown -- and by the time a caller could repeat the call, that teardown
+  has already freed the handle, so the flag test is itself the use-after-free.
+  A test written to pin the supposed tolerance segfaulted on that line.
+
+  All six `*Destroy` entry points now document the same rule, in their own
+  documentation rather than only in the ownership preamble, and
+  `ci/measurements.sh --check` fails if one of them stops saying it. Each Zig
+  `deinit` says it too, with the reason a copyable handle cannot be protected
+  from it.
+
+  No runtime check is possible and the header says why: a poison word read
+  back on the second call would be the use-after-free doing the reporting, and
+  ztext's own sanitiser build would be right to flag it. What is checked stays
+  checked -- every `*Destroy` accepts NULL, swept over all 88 entry points.
+
 - **The downstream consumer links every artifact ztext installs.** It linked
   four of five and had never linked libunibreak. `dependency.artifact(name)`
   panics on a name the dependency does not register, and no in-repo test goes

@@ -41,6 +41,10 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The *Destroy check looks for the words "exactly once" in the doc
+#     comment attached to each declaration. It cannot tell a correct
+#     explanation from an incorrect one -- only that the rule is stated where
+#     a reader of that function will see it.
 #   - The consumer-artifact check proves each name is PASSED to
 #     ztext.artifact(); only running tests/consumer proves it resolves, which
 #     CI does on all three hosts and both Windows ABIs.
@@ -146,6 +150,27 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# Every *Destroy in ffi/ztext.h must state the exactly-once rule in its own
+# documentation. Two of the six used to be documented as tolerating a repeat,
+# on the strength of a flag test that reads like a repeat guard and is not one
+# -- by the time a caller could repeat the call the handle is freed, so the
+# flag test is the use-after-free. That claim was written from reading the
+# source and a test crashed on it. Prose is where this rule lives, because no
+# runtime check for it can exist, so the gate is on the prose.
+undocumented_destroy=$(awk '
+  /^\/\/\// { block = block $0 "\n"; next }
+  /^ZTEXT_API void ztext[A-Za-z]*Destroy\(/ {
+    name = $0
+    sub(/.*void /, "", name)
+    sub(/\(.*/, "", name)
+    if (block !~ /exactly once/) print name
+    block = ""
+    next
+  }
+  { block = "" }
+' ffi/ztext.h)
+destroy_count=$(grep -c '^ZTEXT_API void ztext[A-Za-z]*Destroy(' ffi/ztext.h)
+
 # Every library ztext installs, against the consumer that is supposed to link
 # each of them. tests/consumer exists because `dependency.artifact(name)`
 # panics on a name the dependency does not register and nothing in the in-repo
@@ -391,6 +416,15 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$undocumented_destroy" ]; then
+    printf '  %-42s %s%s state it%s\n' 'every *Destroy documents exactly-once' \
+      "$GREEN" "$destroy_count" "$OFF"
+  else
+    printf '  %-42s %sno rule on%s%s\n' 'every *Destroy documents exactly-once' \
+      "$RED" "$(printf ' %s' $undocumented_destroy)" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

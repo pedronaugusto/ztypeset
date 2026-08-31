@@ -64,6 +64,7 @@ pub const Shaper = struct {
         return .{ .handle = handle };
     }
 
+    /// Destroys this shaper and the buffers it grew. Call it exactly once.
     pub fn deinit(self: Shaper) void {
         c.ztextShaperDestroy(self.handle);
     }

@@ -76,6 +76,8 @@ pub const Paragraph = struct {
         return c.ztextParagraphSegmentation(self.handle);
     }
 
+    /// Destroys this paragraph. Call it exactly once. `Line`s taken from it
+    /// may outlive it and are destroyed separately.
     pub fn deinit(self: Paragraph) void {
         c.ztextParagraphDestroy(self.handle);
     }
@@ -225,6 +227,7 @@ pub const Paragraph = struct {
 pub const Line = struct {
     handle: *c.Line,
 
+    /// Destroys this line. Call it exactly once.
     pub fn deinit(self: Line) void {
         c.ztextLineDestroy(self.handle);
     }
