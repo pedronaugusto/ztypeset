@@ -217,6 +217,22 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **The package ships the files its own build graph reads.** `build.zig`
+  compiles `examples/quickstart.zig` -- twice, once as a program and once as
+  the bytes the documentation is diffed against -- and `examples` was not in
+  `build.zig.zon`'s `paths`. A consumer fetching ztext received a build graph
+  naming a directory its package did not contain. CONTRIBUTING.md and
+  SECURITY.md were absent the same way, having been added without the list
+  being revisited.
+
+  Nothing in the repository could have noticed: every file is present in a
+  checkout, and `tests/consumer` resolves ztext by local path rather than by
+  fetch, so `paths` is invisible to the one test written to stand where a
+  consumer stands. `ci/measurements.sh --check` now compares the repository's
+  top-level entries against `paths`, with a short exclusion list beside it --
+  `.git`, `.zig-cache`, `zig-out`, `.gitignore` -- where adding an entry is a
+  visible edit rather than a silent omission.
+
 - **Both source-hygiene gates now cover the files they were about.**
   `zig fmt --check` read `src`, `tests/fonts.zig` and `build.zig` and not
   `tests/consumer` -- the one Zig file a newcomer is most likely to open,

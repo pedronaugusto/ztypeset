@@ -1142,6 +1142,15 @@ case_ "the changelog heading the gate reads by shape" \
   '## 0.2.0' \
   '## v0.2.0'
 
+# What a consumer receives, as opposed to what the checkout contains. Nothing
+# in the repository can notice a missing `paths` entry: every file is present
+# locally, and tests/consumer resolves ztext by path rather than by fetch.
+case_ "a directory build.zig compiles, dropped from the package" \
+  build.zig.zon \
+  "not in paths" \
+  '        "examples",' \
+  '        "exampels",'
+
 # LICENSES.md's legal statements were written against specific bytes under
 # libs/. A re-vendor that changes a licence leaves ci/verify-vendor.sh green --
 # the tree still matches its new pinned upstream -- and the document goes on
