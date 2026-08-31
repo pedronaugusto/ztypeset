@@ -49,6 +49,10 @@
 #     spelled some other way -- `* 0.015625f`, or a shift on the fixed value
 #     before the cast -- and it deliberately does not look outside ffi/*.c,
 #     since the Zig side never sees fixed point.
+#   - The fopen check proves the C tests do not open files themselves. It
+#     does not prove they USE the helper -- a test that never reads a font
+#     passes it trivially -- and it says nothing about ffi/, which opens no
+#     file at all and is not searched.
 #   - The *Destroy check looks for the words "exactly once" in the doc
 #     comment attached to each declaration. It cannot tell a correct
 #     explanation from an incorrect one -- only that the rule is stated where
@@ -179,6 +183,13 @@ readme_version=$(sed -n 's/^Status: \*\*v\([0-9]*\.[0-9]*\)\*\*.*/\1/p' README.m
 # everywhere. ztextFrom266 is that home, and a grep is the gate: an
 # open-coded one is visible in the source, so nothing subtler is needed.
 open_coded_266=$(grep -n '/ 64\.0f' ffi/*.c || true)
+
+# The C tests open a file in exactly one place. Three copies of "read this
+# font into memory" is what the helper replaced, and a fourth would be written
+# the moment someone needs one, so the gate is that no test .c calls fopen at
+# all -- the helper header is the only file allowed to.
+test_fopen=$(grep -n 'fopen' tests/*.c || true)
+helper_fopen=$(grep -c 'fopen(' tests/ztext_test_io.h || true)
 
 # Every *Destroy in ffi/ztext.h must state the exactly-once rule in its own
 # documentation. Two of the six used to be documented as tolerating a repeat,
@@ -474,6 +485,16 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sopen-coded%s\n' '26.6 to pixels has one home' \
       "$RED" "$OFF"
     printf '%s\n' "$open_coded_266" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$test_fopen" ] && [ "$helper_fopen" = 1 ]; then
+    printf '  %-42s %sztextTestReadFile%s\n' 'the C tests open a file in one place' \
+      "$GREEN" "$OFF"
+  else
+    printf '  %-42s %sopen-coded%s\n' 'the C tests open a file in one place' \
+      "$RED" "$OFF"
+    printf '%s\n' "$test_fopen" | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

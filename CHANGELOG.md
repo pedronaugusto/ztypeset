@@ -213,8 +213,22 @@ says.
   turning ztext's standards into build failures for four upstream projects
   would mean patching them locally, which the vendor rules forbid. The C test
   translation units get the same treatment. Clean at zero warnings on
-  x86_64-windows-gnu the first time it was run, which is a statement about how
-  much this found, not about how little it is worth having.
+  x86_64-windows-gnu the first time it was run -- and not on
+  x86_64-windows-msvc, where it named a real portability fault in the test
+  drivers the same day. See the `fopen` entry below.
+
+- **The C tests read a font in one place, and the msvc ABI builds again.**
+  `-Wall -Wextra -Werror` on ztext's own C is correct on the gnu ABI and was
+  a build failure on the msvc one: Microsoft's UCRT marks ISO C's `fopen`
+  deprecated in favour of Annex K's `fopen_s`, which neither glibc nor musl
+  implements. The three test drivers had each written out their own
+  read-a-file-into-memory routine -- and they were three qualities of it, two
+  leaking the `FILE*` on a short read and checking neither `fseek` nor
+  `ftell`. `tests/ztext_test_io.h` is the one home; the deprecation is
+  suppressed around that single call rather than by defining
+  `_CRT_SECURE_NO_WARNINGS`, so every other deprecation the CRT reports still
+  fails the build. `ci/measurements.sh --check` refuses any `fopen` in a test
+  translation unit.
 
 - **Every handle goes to its `*Destroy` exactly once, and the header no
   longer suggests two of them are exempt.** `ztextLibraryDestroy` and
