@@ -160,6 +160,28 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **FreeType's build switches are what `ffi/ztext_ftoption.h` says they are.**
+  That file is a page of prose about macros, and one paragraph of it was
+  false: undefining `FT_CONFIG_OPTION_MAC_FONTS` was said to drop
+  `src/base/ftrfork.c`'s resource-fork guessing heuristics with it. It does
+  not. `ftbase.c` includes `ftrfork.c`, and the heuristics -- a table of
+  guesses over attacker-visible bytes -- sit under
+  `FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK` alone; `MAC_FONTS` gates only
+  `FT_Raccess_Guess`'s outer entry point. The heuristics were in every binary
+  ztext has ever produced, with a comment saying they were not.
+
+  They are now undefined, which selects `ftrfork.c`'s other branch: a stub
+  that reports the format unsupported. Nothing ztext exposes could reach
+  either branch -- faces come from memory, and there is no path-based entry
+  point -- so this removes parser surface rather than behaviour.
+
+  The structural fix is the second half. Each of the six switches that file
+  turns off or on is now an `#error` in `ffi/ztext_abi.c`, so a claim about a
+  macro and the macro cannot part again, and `ci/check-guards.sh` deletes the
+  `#undef` to prove the refusal fires. A claim about a macro is exactly the
+  kind a build can check, and this one went unchecked for the life of the
+  package.
+
 - **The two pieces of process-wide state written after start-up are atomic.**
   The face generation counter was a plain `++` on a shared `static`, and
   SheenBidi's one-time allocator install was a plain check-then-set. `ztext.h`
