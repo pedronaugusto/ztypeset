@@ -49,6 +49,11 @@
 #     spelled some other way -- `* 0.015625f`, or a shift on the fixed value
 #     before the cast -- and it deliberately does not look outside ffi/*.c,
 #     since the Zig side never sees fixed point.
+#   - The `paths` check compares TOP-LEVEL names only. It proves nothing
+#     about what is inside a listed directory, and it cannot tell a file that
+#     should ship from one that should not -- only that every entry the
+#     repository has is either shipped or on the short exclusion list beside
+#     the check, where adding one is a visible edit.
 #   - The fopen check proves the C tests do not open files themselves. It
 #     does not prove they USE the helper -- a test that never reads a font
 #     passes it trivially -- and it says nothing about ffi/, which opens no
@@ -190,6 +195,25 @@ open_coded_266=$(grep -n '/ 64\.0f' ffi/*.c || true)
 # all -- the helper header is the only file allowed to.
 test_fopen=$(grep -n 'fopen' tests/*.c || true)
 helper_fopen=$(grep -c 'fopen(' tests/ztext_test_io.h || true)
+
+# Every top-level entry of the repository against build.zig.zon's `paths`.
+# `paths` is what a consumer receives: anything missing from it is absent from
+# the fetched package while still present in the checkout, so the in-repo
+# suite cannot see the difference and tests/consumer -- which resolves the
+# dependency by local path -- cannot either. build.zig compiles
+# examples/quickstart.zig, and `examples` was not in `paths`, so a consumer
+# fetching ztext got a build graph naming a file its package did not contain.
+# CONTRIBUTING.md and SECURITY.md were missing the same way.
+zon_paths=$(sed -n '/\.paths = \.{/,/}/p' build.zig.zon |
+            sed -n 's/.*"\([^"]*\)".*/\1/p' | sort)
+# The exclusions, each for a reason. .git, .zig-cache and zig-out are not
+# source. .gitignore describes a working copy rather than a package, and Zig
+# does not read it.
+top_level=$(ls -A . |
+            grep -vxE '\.git|\.gitignore|\.zig-cache|zig-out' | sort)
+unshipped=$(comm -23 <(printf '%s
+' "$top_level") <(printf '%s
+' "$zon_paths"))
 
 # Every *Destroy in ffi/ztext.h must state the exactly-once rule in its own
 # documentation. Two of the six used to be documented as tolerating a repeat,
@@ -485,6 +509,16 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sopen-coded%s\n' '26.6 to pixels has one home' \
       "$RED" "$OFF"
     printf '%s\n' "$open_coded_266" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$unshipped" ]; then
+    printf '  %-42s %s%s entries%s\n' 'build.zig.zon ships every top-level entry' \
+      "$GREEN" "$(printf '%s\n' "$top_level" | wc -l | tr -d ' ')" "$OFF"
+  else
+    printf '  %-42s %snot in paths:%s%s\n' \
+      'build.zig.zon ships every top-level entry' "$RED" \
+      "$(printf ' %s' $unshipped)" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 
