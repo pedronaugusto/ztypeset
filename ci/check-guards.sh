@@ -302,12 +302,25 @@ PY
     PASSED=$((PASSED + 1))
   # zig cuts its build output short when a test fails with a long trace: the
   # tail is replaced by "unable to read results of configure phase", and a
-  # second failing test's diagnostics never appear. A case judged on a
-  # truncated log is judged on evidence that is not there, and "the expect
-  # string is absent" then means nothing at all -- which is the same class of
-  # bug as the matcher that silently failed to match. Name the state instead
-  # of calling it a wrong failure. The fix for a case that lands here is to
-  # make the mutation fail ONE test, not two.
+  # later failing test's diagnostics never appear. Measured: ONE failing test
+  # with a long enough trace is sufficient, so this is not only the two-test
+  # case it was first written for. A case judged on a truncated log is judged
+  # on evidence that is not there, and "the expect string is absent" then
+  # means nothing at all -- the same class of bug as the matcher that silently
+  # failed to match. Name the state instead of calling it a wrong failure. The
+  # fix is to expect the test that fails FIRST.
+  # A mutation that does not COMPILE tested nothing. Four cases here were in
+  # that state and read as wrong failures: each deleted the only use of a
+  # variable or the only call to a function, and -Werror stopped the build on
+  # the unused one before a test could run. The verdict said "expected to see:
+  # <test name>", which is true and useless -- the fix is not the expect
+  # string, it is to write a mutation that compiles and then misbehaves.
+  #
+  # A case whose expect string names a compile error is matched above and
+  # never reaches this: the ABI cross-check is caught at comptime by design.
+  elif [[ "$output" == *"compilation errors"* ]]; then
+    report "$name" 'DID NOT COMPILE' \
+      'the mutation broke the build, so no test ran; make it compile' "$output"
   elif [[ "$output" == *"unable to read results of configure phase"* ]]; then
     report "$name" 'TRUNCATED' \
       "the build output was cut short, so \"$expect\" could not be looked for" \
@@ -376,23 +389,30 @@ case_ "function: exported by the header, undeclared in c.zig" \
 
 printf '\n%sBidi%s %s(ffi/ztext_bidi.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 
+# Named for the test that fails FIRST, which is not the test named after the
+# property. zig replaces the tail of its own output once a failure carries a
+# long trace, so a later test's name may never be printed at all -- an expect
+# string that waits for it reads as TRUNCATED, which says only that the
+# evidence is missing.
 case_ "a line derived from the paragraph, skipping rule L1" \
   ffi/ztext_bidi.c \
-  "a line applies rule L1" \
+  "the documented wrap loop covers a paragraph exactly once" \
   "  SBLineRef line = SBParagraphCreateLine(sb_paragraph, (SBUInteger)offset,
                                          (SBUInteger)length);" \
   "  SBLineRef line = SBParagraphCreateLine(sb_paragraph, 0u,
                                          SBParagraphGetLength(sb_paragraph));"
 
+# The flag is never SET, rather than never consulted: dropping it from the
+# expression left it unused and -Werror failed the build before a test ran.
 case_ "script pieces emitted forwards inside an RTL run" \
   ffi/ztext_bidi.c \
   "shaping runs" \
-  "      const size_t s = rtl ? (last - 1u - n) : (first + n);" \
-  "      const size_t s = first + n;"
+  "    const bool rtl = (visual[v].level & 1u) != 0u;" \
+  "    const bool rtl = false;"
 
 case_ "the end of a paragraph left as no break at all" \
   ffi/ztext_bidi.c \
-  "wrap loop covers a paragraph exactly once" \
+  "line breaks are offered between words, never inside one" \
   "  out[length - 1u] = (char)ZTEXT_BREAK_MANDATORY;" \
   "  (void)0;"
 
@@ -434,12 +454,16 @@ case_ "a face loads without activating its own FT_Size" \
   const FT_Error error = FT_Load_Glyph(face->font->ft, (FT_UInt)glyph_id," \
   "  const FT_Error error = FT_Load_Glyph(face->font->ft, (FT_UInt)glyph_id,"
 
+# isMark stops recognising marks, rather than the caller stopping asking. The
+# older mutation deleted the call, which left isMark unused and failed the
+# build on -Werror instead of failing a test.
 case_ "a covered prefix that splits a base from its marks" \
   ffi/ztext_face.c \
   "never splits a base from its marks" \
-  "    if (!isMark(unicode, next)) boundary = i;" \
-  "    (void)next;
-    boundary = i;"
+  "    case HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK:
+      return true;" \
+  "    case HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK:
+      return false;"
 
 case_ "a covered prefix that breaks at a format character" \
   ffi/ztext_face.c \
@@ -452,11 +476,18 @@ case_ "a covered prefix that breaks at a format character" \
 
 # A8 coverage and an SDF are both one byte per pixel, so a bitmap labelled
 # with the wrong one produces a washed-out picture rather than an error.
+#
+# The label is wrong INSIDE the function that decides it, not at the call site.
+# Replacing the call left bitmapFormatOf uncalled, and -Werror stopped the
+# build on the unused function before a test could run: a mutation that does
+# not compile proves nothing about the suite.
 case_ "a bitmap that does not say which format it is" \
   ffi/ztext_raster.c \
   "says which format its bytes are in" \
-  "  const ZtextBitmapFormat format = bitmapFormatOf(mode);" \
-  "  const ZtextBitmapFormat format = ZTEXT_BITMAP_FORMAT_A8;"
+  "    case ZTEXT_RENDER_MODE_SDF:
+      return ZTEXT_BITMAP_FORMAT_SDF;" \
+  "    case ZTEXT_RENDER_MODE_SDF:
+      return ZTEXT_BITMAP_FORMAT_A8;"
 
 case_ "a pixel size rounded to whole pixels" \
   ffi/ztext_core.c \
@@ -474,7 +505,7 @@ case_ "a font released without telling the library that owns it" \
   "leaked" \
   "  library->live_fonts -= 1u;
   releaseLibrary(library);" \
-  ""
+  "  (void)library;"
 
 # The other half of the allocator seam: which allocator MAKES a block. A face's
 # glyph buffer is allocated lazily, long after the face, so charging it to

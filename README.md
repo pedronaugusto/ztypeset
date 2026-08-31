@@ -1029,14 +1029,20 @@ breaks. Reaching a stranded anchor the slow way costs a full sweep, which is
 long enough that nobody runs it before pushing, which is how a case comes to be
 stranded in the first place.
 
-A third verdict exists and is worth knowing about: **TRUNCATED**. When two
-tests fail at once, `zig build` replaces the tail of its own output with
-`unable to read results of configure phase`, and the second failure's
-diagnostics never appear — so a *caught* mutation can read as a hole. The
+A third verdict exists and is worth knowing about: **TRUNCATED**. When a test
+fails with a long trace -- one is enough, measured; two make it certain --
+`zig build` replaces the tail of its own output with `unable to read results
+of configure phase`, and a later failure's diagnostics never appear — so a *caught* mutation can read as a hole. The
 script names that state rather than calling it a wrong failure, and the fix for
 a case that lands there is to make the mutation fail one test, not two.
 
-And a fourth, **TIMED OUT**, because a mutation is a deliberate bug and a bug
+A fourth, **DID NOT COMPILE**, says the mutation broke the build rather than a
+test -- it deleted the last use of a variable or the last call to a function,
+and `-Werror` stopped the build before anything ran. Such a case tested
+nothing, and the fix is the mutation rather than the expectation. Four cases
+were in that state, each reading as a wrong failure that named a real test.
+
+And a fifth, **TIMED OUT**, because a mutation is a deliberate bug and a bug
 is not obliged to terminate. Each case's command is run with its output going
 to a file rather than down a pipe the harness has to drain, and with a
 deadline of twenty times the baseline build measured at the start of the same

@@ -217,6 +217,24 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **Six guard cases proved nothing, and now say so when they do.** Four
+  applied a mutation that could not compile: each deleted the last use of a
+  variable or the last call to a function, and `-Werror` stopped the build on
+  the unused one before any test ran. The verdict read "expected to see: <a
+  real test name>", which is true and useless. They now break the value a
+  function returns or the flag a branch reads, so the code still compiles and
+  then misbehaves -- which is what a mutation has to do to test anything.
+
+  The other two expected a test that is not the first to fail. `zig build`
+  replaces the tail of its own output once a failure carries a long trace --
+  measured: one failing test is enough, not two, which is what the harness and
+  the README both said -- so the named test's line was never printed and the
+  case read as TRUNCATED. Each now names the test that fails first.
+
+  Both states are now verdicts of their own rather than a generic wrong
+  failure: **DID NOT COMPILE** says the mutation broke the build, and points
+  at the mutation rather than the expectation.
+
 - **A guard case can no longer hang the sweep.** `ci/check-guards.sh` ran
   each case's command straight into a command substitution, unbounded: the
   output went down a pipe the harness only drained at the end, and nothing put
