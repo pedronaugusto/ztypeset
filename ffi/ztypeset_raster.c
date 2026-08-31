@@ -1,18 +1,18 @@
 //===----------------------------------------------------------------------===//
-// ztext -- turning a glyph index into pixels.
+// ztypeset -- turning a glyph index into pixels.
 //===----------------------------------------------------------------------===//
 
-#include "ztext_internal.h"
+#include "ztypeset_internal.h"
 
 /// FreeType load flags for a hinting mode.
 ///
 /// FT_LOAD_NO_BITMAP is unconditional: without it a face carrying embedded
 /// bitmap strikes can answer with a 1-bit or pre-rendered bitmap instead of a
-/// rasterised outline, and the pixel format ztext promises would depend on
-/// which glyph you asked for. ztext always rasterises outlines. Colour and
+/// rasterised outline, and the pixel format ztypeset promises would depend on
+/// which glyph you asked for. ztypeset always rasterises outlines. Colour and
 /// bitmap strikes are out of scope -- see README.
-static FT_Int32 loadFlags(ZtextHinting hinting, ZtextRenderMode mode) {
-  if (mode == ZTEXT_RENDER_MODE_SDF) {
+static FT_Int32 loadFlags(ZtypesetHinting hinting, ZtypesetRenderMode mode) {
+  if (mode == ZTYPESET_RENDER_MODE_SDF) {
     // A hinted outline has been moved onto the pixel grid for one specific
     // size. Baking that into a distance field, whose entire purpose is to be
     // sampled at other sizes, is self-defeating -- so SDF ignores the caller's
@@ -21,13 +21,13 @@ static FT_Int32 loadFlags(ZtextHinting hinting, ZtextRenderMode mode) {
   }
 
   switch (hinting) {
-    case ZTEXT_HINTING_LIGHT:
+    case ZTYPESET_HINTING_LIGHT:
       // Light hinting is its own target: vertical only, and unrelated to the
       // grid the glyph is about to be sampled on.
       return FT_LOAD_TARGET_LIGHT | FT_LOAD_NO_BITMAP;
-    case ZTEXT_HINTING_NONE:
+    case ZTYPESET_HINTING_NONE:
       return FT_LOAD_NO_HINTING | FT_LOAD_NO_BITMAP;
-    case ZTEXT_HINTING_NORMAL:
+    case ZTYPESET_HINTING_NORMAL:
     default:
       break;
   }
@@ -35,53 +35,53 @@ static FT_Int32 loadFlags(ZtextHinting hinting, ZtextRenderMode mode) {
   // Normal hinting is hinting FOR a grid, so the grid the glyph will be
   // sampled on is part of the request.
   switch (mode) {
-    case ZTEXT_RENDER_MODE_LCD:
+    case ZTYPESET_RENDER_MODE_LCD:
       return FT_LOAD_TARGET_LCD | FT_LOAD_NO_BITMAP;
-    case ZTEXT_RENDER_MODE_LCD_V:
+    case ZTYPESET_RENDER_MODE_LCD_V:
       return FT_LOAD_TARGET_LCD_V | FT_LOAD_NO_BITMAP;
-    case ZTEXT_RENDER_MODE_A8:
-    case ZTEXT_RENDER_MODE_SDF:
+    case ZTYPESET_RENDER_MODE_A8:
+    case ZTYPESET_RENDER_MODE_SDF:
     default:
       return FT_LOAD_DEFAULT | FT_LOAD_NO_BITMAP;
   }
 }
 
-/// The render mode ztext promises, as FreeType's own.
-static FT_Render_Mode ftRenderMode(ZtextRenderMode mode) {
+/// The render mode ztypeset promises, as FreeType's own.
+static FT_Render_Mode ftRenderMode(ZtypesetRenderMode mode) {
   switch (mode) {
-    case ZTEXT_RENDER_MODE_SDF:
+    case ZTYPESET_RENDER_MODE_SDF:
       return FT_RENDER_MODE_SDF;
-    case ZTEXT_RENDER_MODE_LCD:
+    case ZTYPESET_RENDER_MODE_LCD:
       return FT_RENDER_MODE_LCD;
-    case ZTEXT_RENDER_MODE_LCD_V:
+    case ZTYPESET_RENDER_MODE_LCD_V:
       return FT_RENDER_MODE_LCD_V;
-    case ZTEXT_RENDER_MODE_A8:
+    case ZTYPESET_RENDER_MODE_A8:
     default:
       return FT_RENDER_MODE_NORMAL;
   }
 }
 
-static ZtextBitmapFormat bitmapFormatOf(ZtextRenderMode mode) {
+static ZtypesetBitmapFormat bitmapFormatOf(ZtypesetRenderMode mode) {
   switch (mode) {
-    case ZTEXT_RENDER_MODE_SDF:
-      return ZTEXT_BITMAP_FORMAT_SDF;
-    case ZTEXT_RENDER_MODE_LCD:
-      return ZTEXT_BITMAP_FORMAT_LCD;
-    case ZTEXT_RENDER_MODE_LCD_V:
-      return ZTEXT_BITMAP_FORMAT_LCD_V;
-    case ZTEXT_RENDER_MODE_A8:
+    case ZTYPESET_RENDER_MODE_SDF:
+      return ZTYPESET_BITMAP_FORMAT_SDF;
+    case ZTYPESET_RENDER_MODE_LCD:
+      return ZTYPESET_BITMAP_FORMAT_LCD;
+    case ZTYPESET_RENDER_MODE_LCD_V:
+      return ZTYPESET_BITMAP_FORMAT_LCD_V;
+    case ZTYPESET_RENDER_MODE_A8:
     default:
-      return ZTEXT_BITMAP_FORMAT_A8;
+      return ZTYPESET_BITMAP_FORMAT_A8;
   }
 }
 
-uint32_t ztextBitmapFormatChannels(ZtextBitmapFormat format) {
+uint32_t ztypesetBitmapFormatChannels(ZtypesetBitmapFormat format) {
   switch (format) {
-    case ZTEXT_BITMAP_FORMAT_A8:
-    case ZTEXT_BITMAP_FORMAT_SDF:
+    case ZTYPESET_BITMAP_FORMAT_A8:
+    case ZTYPESET_BITMAP_FORMAT_SDF:
       return 1u;
-    case ZTEXT_BITMAP_FORMAT_LCD:
-    case ZTEXT_BITMAP_FORMAT_LCD_V:
+    case ZTYPESET_BITMAP_FORMAT_LCD:
+    case ZTYPESET_BITMAP_FORMAT_LCD_V:
       return 3u;
     default:
       return 0u;
@@ -90,14 +90,14 @@ uint32_t ztextBitmapFormatChannels(ZtextBitmapFormat format) {
 
 /// The pixel mode FreeType must have produced for `format`, so a silent change
 /// upstream is an error here rather than garbage pixels at the consumer.
-static FT_Pixel_Mode ftPixelMode(ZtextBitmapFormat format) {
+static FT_Pixel_Mode ftPixelMode(ZtypesetBitmapFormat format) {
   switch (format) {
-    case ZTEXT_BITMAP_FORMAT_LCD:
+    case ZTYPESET_BITMAP_FORMAT_LCD:
       return FT_PIXEL_MODE_LCD;
-    case ZTEXT_BITMAP_FORMAT_LCD_V:
+    case ZTYPESET_BITMAP_FORMAT_LCD_V:
       return FT_PIXEL_MODE_LCD_V;
-    case ZTEXT_BITMAP_FORMAT_A8:
-    case ZTEXT_BITMAP_FORMAT_SDF:
+    case ZTYPESET_BITMAP_FORMAT_A8:
+    case ZTYPESET_BITMAP_FORMAT_SDF:
     default:
       return FT_PIXEL_MODE_GRAY;
   }
@@ -107,9 +107,9 @@ static FT_Pixel_Mode ftPixelMode(ZtextBitmapFormat format) {
 ///
 /// This is FreeType's own arithmetic with the constant taken out: ftsynth.c
 /// computes `ppem * 0x0AAA / 1024`, and 0x0AAA / 65536 is exactly
-/// ZTEXT_SYNTHETIC_BOLD_DEFAULT, so the default strength reproduces it to the
-/// unit. It is also HarfBuzz's, which rounds `|scale| * embolden` with scale
-/// already 26.6 -- one number, three places that need it.
+/// ZTYPESET_SYNTHETIC_BOLD_DEFAULT, so the default strength reproduces it to
+/// the unit. It is also HarfBuzz's, which rounds `|scale| * embolden` with
+/// scale already 26.6 -- one number, three places that need it.
 static FT_Pos scaledStrength(uint32_t ppem, float strength) {
   const double scaled = (double)ppem * 64.0 * (double)strength;
   return (FT_Pos)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
@@ -121,7 +121,7 @@ static FT_Fixed toFixed16(float value) {
   return (FT_Fixed)(scaled >= 0.0 ? scaled + 0.5 : scaled - 0.5);
 }
 
-static bool isIdentity(const ZtextMatrix* matrix) {
+static bool isIdentity(const ZtypesetMatrix* matrix) {
   return matrix->xx == 1.0f && matrix->xy == 0.0f && matrix->yx == 0.0f &&
          matrix->yy == 1.0f;
 }
@@ -131,8 +131,8 @@ static bool isIdentity(const ZtextMatrix* matrix) {
 ///
 /// The advances a SHAPED run reports do not come through here at all; they
 /// come from HarfBuzz, which is told the same two numbers by
-/// ztextFaceApplySynthetic and applies them with the same arithmetic.
-static bool applySynthetic(const ZtextFace* face, FT_GlyphSlot slot) {
+/// ztypesetFaceApplySynthetic and applies them with the same arithmetic.
+static bool applySynthetic(const ZtypesetFace* face, FT_GlyphSlot slot) {
   if (slot->format != FT_GLYPH_FORMAT_OUTLINE) return false;
   if (face->synthetic_bold == 0.0f && face->synthetic_oblique == 0.0f) {
     return false;
@@ -168,27 +168,27 @@ static bool applySynthetic(const ZtextFace* face, FT_GlyphSlot slot) {
 }
 
 
-static FT_Stroker_LineCap ftLineCap(ZtextLineCap cap) {
+static FT_Stroker_LineCap ftLineCap(ZtypesetLineCap cap) {
   switch (cap) {
-    case ZTEXT_LINE_CAP_ROUND:
+    case ZTYPESET_LINE_CAP_ROUND:
       return FT_STROKER_LINECAP_ROUND;
-    case ZTEXT_LINE_CAP_SQUARE:
+    case ZTYPESET_LINE_CAP_SQUARE:
       return FT_STROKER_LINECAP_SQUARE;
-    case ZTEXT_LINE_CAP_BUTT:
+    case ZTYPESET_LINE_CAP_BUTT:
     default:
       return FT_STROKER_LINECAP_BUTT;
   }
 }
 
-static FT_Stroker_LineJoin ftLineJoin(ZtextLineJoin join) {
+static FT_Stroker_LineJoin ftLineJoin(ZtypesetLineJoin join) {
   switch (join) {
-    case ZTEXT_LINE_JOIN_BEVEL:
+    case ZTYPESET_LINE_JOIN_BEVEL:
       return FT_STROKER_LINEJOIN_BEVEL;
-    case ZTEXT_LINE_JOIN_MITER:
+    case ZTYPESET_LINE_JOIN_MITER:
       return FT_STROKER_LINEJOIN_MITER_VARIABLE;
-    case ZTEXT_LINE_JOIN_MITER_FIXED:
+    case ZTYPESET_LINE_JOIN_MITER_FIXED:
       return FT_STROKER_LINEJOIN_MITER_FIXED;
-    case ZTEXT_LINE_JOIN_ROUND:
+    case ZTYPESET_LINE_JOIN_ROUND:
     default:
       return FT_STROKER_LINEJOIN_ROUND;
   }
@@ -200,10 +200,10 @@ static FT_Stroker_LineJoin ftLineJoin(ZtextLineJoin join) {
 /// FT_Outline_New sets n_points and n_contours to the sizes it allocated;
 /// the stroker's exports APPEND, so the counts are reset to zero at the point
 /// of use and the allocated sizes are remembered here instead.
-static ZtextResult reserveStroked(ZtextFace* face, FT_UInt points,
+static ZtypesetResult reserveStroked(ZtypesetFace* face, FT_UInt points,
                                   FT_UInt contours) {
   if (points <= face->stroked_points && contours <= face->stroked_contours) {
-    return ZTEXT_RESULT_OK;
+    return ZTYPESET_RESULT_OK;
   }
   const FT_UInt want_points =
       points > face->stroked_points ? points : face->stroked_points;
@@ -214,13 +214,13 @@ static ZtextResult reserveStroked(ZtextFace* face, FT_UInt points,
   FT_Outline grown;
   const FT_Error error =
       FT_Outline_New(ft, want_points, (FT_Int)want_contours, &grown);
-  if (error != FT_Err_Ok) return ztextFromFtError(error);
+  if (error != FT_Err_Ok) return ztypesetFromFtError(error);
 
   if (face->stroked_points != 0u) FT_Outline_Done(ft, &face->stroked);
   face->stroked = grown;
   face->stroked_points = want_points;
   face->stroked_contours = want_contours;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 /// Traces this face's pen round the just-loaded glyph and puts the result in
@@ -230,21 +230,21 @@ static ZtextResult reserveStroked(ZtextFace* face, FT_UInt points,
 /// The slot's outline is left pointing at memory this FACE owns. Every entry
 /// point loads the glyph before reading it and FT_Load_Glyph reassigns
 /// slot->outline from the driver's own loader, so the borrowed pointer never
-/// outlives the call that made it; ztextFaceDestroy clears it anyway rather
+/// outlives the call that made it; ztypesetFaceDestroy clears it anyway rather
 /// than leave a freed pointer reachable.
-static ZtextResult applyStroke(ZtextFace* face, FT_GlyphSlot slot,
+static ZtypesetResult applyStroke(ZtypesetFace* face, FT_GlyphSlot slot,
                                bool* stroked) {
   *stroked = false;
-  if (slot->format != FT_GLYPH_FORMAT_OUTLINE) return ZTEXT_RESULT_OK;
-  if (face->stroke.radius <= 0.0f) return ZTEXT_RESULT_OK;
+  if (slot->format != FT_GLYPH_FORMAT_OUTLINE) return ZTYPESET_RESULT_OK;
+  if (face->stroke.radius <= 0.0f) return ZTYPESET_RESULT_OK;
   // A glyph with no ink -- a space -- has no path to trace, and stroking
   // nothing is still nothing.
-  if (slot->outline.n_points == 0) return ZTEXT_RESULT_OK;
+  if (slot->outline.n_points == 0) return ZTYPESET_RESULT_OK;
 
   if (face->stroker == NULL) {
     const FT_Error error =
         FT_Stroker_New(face->font->library->ft, &face->stroker);
-    if (error != FT_Err_Ok) return ztextFromFtError(error);
+    if (error != FT_Err_Ok) return ztypesetFromFtError(error);
   }
 
   // FreeType's own default, and SVG's and PostScript's. Its unit is a
@@ -253,36 +253,37 @@ static ZtextResult applyStroke(ZtextFace* face, FT_GlyphSlot slot,
       face->stroke.miter_limit > 0.0f ? face->stroke.miter_limit : 4.0f;
   // FT_Stroker_Set rewinds the stroker, so the borders left by the previous
   // glyph are dropped here rather than accumulated.
-  FT_Stroker_Set(face->stroker, (FT_Fixed)ztextToFixed266(face->stroke.radius),
+  FT_Stroker_Set(face->stroker,
+                 (FT_Fixed)ztypesetToFixed266(face->stroke.radius),
                  ftLineCap(face->stroke.cap), ftLineJoin(face->stroke.join),
                  toFixed16(miter_limit));
 
   FT_Error error = FT_Stroker_ParseOutline(face->stroker, &slot->outline, 0);
-  if (error != FT_Err_Ok) return ztextFromFtError(error);
+  if (error != FT_Err_Ok) return ztypesetFromFtError(error);
 
   // The BAND is both contours, wound against each other, which is
   // FT_Glyph_Stroke; either one alone is a solid shape, which is
   // FT_Glyph_StrokeBorder. Which of them is "outside" depends on the
   // contour's winding, which is the font format's business and not the
   // caller's -- FreeType answers it.
-  const bool whole = face->stroke.style == ZTEXT_STROKE_STYLE_BAND;
+  const bool whole = face->stroke.style == ZTYPESET_STROKE_STYLE_BAND;
   FT_StrokerBorder border = FT_STROKER_BORDER_LEFT;
   FT_UInt points = 0u;
   FT_UInt contours = 0u;
   if (whole) {
     error = FT_Stroker_GetCounts(face->stroker, &points, &contours);
   } else {
-    border = face->stroke.style == ZTEXT_STROKE_STYLE_SHRUNK
+    border = face->stroke.style == ZTYPESET_STROKE_STYLE_SHRUNK
                  ? FT_Outline_GetInsideBorder(&slot->outline)
                  : FT_Outline_GetOutsideBorder(&slot->outline);
     error =
         FT_Stroker_GetBorderCounts(face->stroker, border, &points, &contours);
   }
-  if (error != FT_Err_Ok) return ztextFromFtError(error);
-  if (points == 0u || contours == 0u) return ZTEXT_RESULT_OK;
+  if (error != FT_Err_Ok) return ztypesetFromFtError(error);
+  if (points == 0u || contours == 0u) return ZTYPESET_RESULT_OK;
 
-  const ZtextResult reserved = reserveStroked(face, points, contours);
-  if (reserved != ZTEXT_RESULT_OK) return reserved;
+  const ZtypesetResult reserved = reserveStroked(face, points, contours);
+  if (reserved != ZTYPESET_RESULT_OK) return reserved;
 
   face->stroked.n_points = 0;
   face->stroked.n_contours = 0;
@@ -294,22 +295,22 @@ static ZtextResult applyStroke(ZtextFace* face, FT_GlyphSlot slot,
 
   slot->outline = face->stroked;
   *stroked = true;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 /// Maps the glyph with the caller's own 2x2. Answers whether it changed
 /// anything.
 ///
 /// No advance is touched here, and that is the decision rather than an
-/// omission: a shaped run's advances come from HarfBuzz, which has no matrix
-/// to be told about, so transforming FreeType's and not HarfBuzz's would make
-/// the two disagree by exactly the caller's matrix. See ztextFaceSetTransform.
-static bool applyTransform(const ZtextFace* face, FT_GlyphSlot slot) {
+/// omission: a shaped run's advances come from HarfBuzz, which has no matrix to
+/// be told about, so transforming FreeType's and not HarfBuzz's would make the
+/// two disagree by exactly the caller's matrix. See ztypesetFaceSetTransform.
+static bool applyTransform(const ZtypesetFace* face, FT_GlyphSlot slot) {
   if (slot->format != FT_GLYPH_FORMAT_OUTLINE) return false;
   if (isIdentity(&face->transform)) return false;
 
   // FT_Matrix is written the way the multiply reads: xy is the y term of the
-  // x output, which is the same convention as ZtextMatrix.
+  // x output, which is the same convention as ZtypesetMatrix.
   FT_Matrix matrix;
   matrix.xx = toFixed16(face->transform.xx);
   matrix.xy = toFixed16(face->transform.xy);
@@ -322,9 +323,9 @@ static bool applyTransform(const ZtextFace* face, FT_GlyphSlot slot) {
 /// Recomputes the glyph's cached ink metrics from the outline as it now is.
 ///
 /// Neither of the two steps above updates them -- they move the outline and
-/// nothing else -- so ztextFaceGlyphExtents would otherwise keep reporting
+/// nothing else -- so ztypesetFaceGlyphExtents would otherwise keep reporting
 /// the bounds the glyph had when it was loaded. The control-point box is what
-/// ztextFaceGlyphExtents reads through slot->metrics.
+/// ztypesetFaceGlyphExtents reads through slot->metrics.
 static void refreshInkMetrics(FT_GlyphSlot slot) {
   FT_BBox cbox;
   FT_Outline_Get_CBox(&slot->outline, &cbox);
@@ -334,20 +335,20 @@ static void refreshInkMetrics(FT_GlyphSlot slot) {
   slot->metrics.height = cbox.yMax - cbox.yMin;
 }
 
-static ZtextResult loadGlyph(ZtextFace* face, uint32_t glyph_id,
-                             ZtextHinting hinting, ZtextRenderMode mode) {
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+static ZtypesetResult loadGlyph(ZtypesetFace* face, uint32_t glyph_id,
+                             ZtypesetHinting hinting, ZtypesetRenderMode mode) {
+  if (face == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   if (glyph_id >= (uint32_t)face->font->ft->num_glyphs) {
-    return ZTEXT_RESULT_GLYPH_NOT_FOUND;
+    return ZTYPESET_RESULT_GLYPH_NOT_FOUND;
   }
 
   // The FT_Face is shared with this font's other faces, so the size to load
   // at is whichever one was activated last -- make it ours.
-  ztextFaceActivate(face);
+  ztypesetFaceActivate(face);
 
   const FT_Error error = FT_Load_Glyph(face->font->ft, (FT_UInt)glyph_id,
                                        loadFlags(hinting, mode));
-  if (error != FT_Err_Ok) return ztextFromFtError(error);
+  if (error != FT_Err_Ok) return ztypesetFromFtError(error);
 
   // Order is load-bearing, and it is design, then ornament, then map. The
   // two synthetic styles are part of the FONT's design and are applied in its
@@ -359,11 +360,11 @@ static ZtextResult loadGlyph(ZtextFace* face, uint32_t glyph_id,
   FT_GlyphSlot slot = face->font->ft->glyph;
   const bool synthesised = applySynthetic(face, slot);
   bool stroked = false;
-  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
-  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const ZtypesetResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;
   const bool transformed = applyTransform(face, slot);
   if (synthesised || stroked || transformed) refreshInkMetrics(slot);
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 /// Every number this file converts to fixed point has to be one. NaN compares
@@ -374,10 +375,11 @@ static bool isFiniteStrength(float value) {
   return value == value && value > -1.0e30f && value < 1.0e30f;
 }
 
-ZtextResult ztextFaceSetTransform(ZtextFace* face, const ZtextMatrix* matrix) {
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetFaceSetTransform(ZtypesetFace* face,
+                                        const ZtypesetMatrix* matrix) {
+  if (face == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
 
-  ZtextMatrix wanted;
+  ZtypesetMatrix wanted;
   if (matrix == NULL) {
     wanted.xx = 1.0f;
     wanted.xy = 0.0f;
@@ -386,7 +388,7 @@ ZtextResult ztextFaceSetTransform(ZtextFace* face, const ZtextMatrix* matrix) {
   } else {
     if (!isFiniteStrength(matrix->xx) || !isFiniteStrength(matrix->xy) ||
         !isFiniteStrength(matrix->yx) || !isFiniteStrength(matrix->yy)) {
-      return ZTEXT_RESULT_INVALID_ARGUMENT;
+      return ZTYPESET_RESULT_INVALID_ARGUMENT;
     }
     wanted = *matrix;
   }
@@ -394,34 +396,36 @@ ZtextResult ztextFaceSetTransform(ZtextFace* face, const ZtextMatrix* matrix) {
   // No generation bump, and deliberately: the matrix reaches no advance and
   // no HarfBuzz extent, so nothing a shaped run reports goes stale.
   face->transform = wanted;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceTransform(const ZtextFace* face, ZtextMatrix* out) {
-  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetFaceTransform(const ZtypesetFace* face,
+                                     ZtypesetMatrix* out) {
+  if (out == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   memset(out, 0, sizeof(*out));
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (face == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   *out = face->transform;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetStroke(ZtextFace* face, const ZtextStroke* stroke) {
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetFaceSetStroke(ZtypesetFace* face,
+                                     const ZtypesetStroke* stroke) {
+  if (face == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
 
-  ZtextStroke wanted;
+  ZtypesetStroke wanted;
   memset(&wanted, 0, sizeof(wanted));
   if (stroke != NULL) {
     if (!isFiniteStrength(stroke->radius) ||
         !isFiniteStrength(stroke->miter_limit)) {
-      return ZTEXT_RESULT_INVALID_ARGUMENT;
+      return ZTYPESET_RESULT_INVALID_ARGUMENT;
     }
     // A radius too large for 26.6 converts to zero, which would read as "no
     // stroke" -- a request refused is better than a request silently
     // dropped.
-    if (stroke->radius > 0.0f && ztextToFixed266(stroke->radius) == 0) {
-      ztextSetErrorDetail("the stroke radius is larger than FreeType's fixed "
-                          "point can hold");
-      return ZTEXT_RESULT_INVALID_ARGUMENT;
+    if (stroke->radius > 0.0f && ztypesetToFixed266(stroke->radius) == 0) {
+      ztypesetSetErrorDetail("the stroke radius is larger than "
+                             "FreeType's fixed point can hold");
+      return ZTYPESET_RESULT_INVALID_ARGUMENT;
     }
     // Rejected rather than defaulted: a cap this build does not name is a
     // consumer built against a newer header, and quietly drawing a butt cap
@@ -434,14 +438,15 @@ ZtextResult ztextFaceSetStroke(ZtextFace* face, const ZtextStroke* stroke) {
     const int cap = (int)stroke->cap;
     const int join = (int)stroke->join;
     const int style = (int)stroke->style;
-    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE ||
-        join < (int)ZTEXT_LINE_JOIN_ROUND ||
-        join > (int)ZTEXT_LINE_JOIN_MITER_FIXED ||
-        style < (int)ZTEXT_STROKE_STYLE_BAND ||
-        style > (int)ZTEXT_STROKE_STYLE_SHRUNK) {
-      ztextSetErrorDetail("the stroke names a cap, join or style this build "
+    if (cap < (int)ZTYPESET_LINE_CAP_BUTT ||
+        cap > (int)ZTYPESET_LINE_CAP_SQUARE ||
+        join < (int)ZTYPESET_LINE_JOIN_ROUND ||
+        join > (int)ZTYPESET_LINE_JOIN_MITER_FIXED ||
+        style < (int)ZTYPESET_STROKE_STYLE_BAND ||
+        style > (int)ZTYPESET_STROKE_STYLE_SHRUNK) {
+      ztypesetSetErrorDetail("the stroke names a cap, join or style this build "
                           "does not have");
-      return ZTEXT_RESULT_INVALID_ARGUMENT;
+      return ZTYPESET_RESULT_INVALID_ARGUMENT;
     }
     wanted = *stroke;
   }
@@ -449,41 +454,44 @@ ZtextResult ztextFaceSetStroke(ZtextFace* face, const ZtextStroke* stroke) {
   // No generation bump, for the same reason as the matrix: a pen moves ink
   // and no advance, and nothing a shaped run reports goes stale.
   face->stroke = wanted;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceStroke(const ZtextFace* face, ZtextStroke* out) {
-  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetFaceStroke(const ZtypesetFace* face,
+                                  ZtypesetStroke* out) {
+  if (out == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   memset(out, 0, sizeof(*out));
-  if (face == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (face == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   *out = face->stroke;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face, float strength) {
+ZtypesetResult ztypesetFaceSetSyntheticBold(ZtypesetFace* face,
+                                            float strength) {
   if (face == NULL || !isFiniteStrength(strength)) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
-  if (face->synthetic_bold == strength) return ZTEXT_RESULT_OK;
+  if (face->synthetic_bold == strength) return ZTYPESET_RESULT_OK;
   face->synthetic_bold = strength;
   // Shaped advances move with this now, so a run measured against this face
   // before the change is as stale as one measured before a resize.
-  face->generation = ztextNextGeneration();
-  ztextFaceApplySynthetic(face);
-  return ZTEXT_RESULT_OK;
+  face->generation = ztypesetNextGeneration();
+  ztypesetFaceApplySynthetic(face);
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {
+ZtypesetResult ztypesetFaceSetSyntheticOblique(ZtypesetFace* face,
+                                               float slant) {
   if (face == NULL || !isFiniteStrength(slant)) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
-  if (face->synthetic_oblique == slant) return ZTEXT_RESULT_OK;
+  if (face->synthetic_oblique == slant) return ZTYPESET_RESULT_OK;
   face->synthetic_oblique = slant;
-  // A shear moves the ink and not the advance, but ztextShaperExtents reads
+  // A shear moves the ink and not the advance, but ztypesetShaperExtents reads
   // ink, so the same staleness applies.
-  face->generation = ztextNextGeneration();
-  ztextFaceApplySynthetic(face);
-  return ZTEXT_RESULT_OK;
+  face->generation = ztypesetNextGeneration();
+  ztypesetFaceApplySynthetic(face);
+  return ZTYPESET_RESULT_OK;
 }
 
 /// Copies the rendered slot into the face's own buffer, tightly packed and
@@ -494,19 +502,19 @@ ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {
 /// rule shrinks to "this face"; and a negative pitch -- FreeType's bottom-up
 /// bitmaps -- is normalised away, so no consumer can render upside down by
 /// ignoring a sign it did not know about.
-static ZtextResult copyBitmap(ZtextFace* face, const FT_Bitmap* bitmap,
-                              ZtextGlyphBitmap* out) {
+static ZtypesetResult copyBitmap(ZtypesetFace* face, const FT_Bitmap* bitmap,
+                              ZtypesetGlyphBitmap* out) {
   const uint32_t width = bitmap->width;
   const uint32_t height = bitmap->rows;
-  if (width == 0u || height == 0u) return ZTEXT_RESULT_OK;
+  if (width == 0u || height == 0u) return ZTYPESET_RESULT_OK;
 
   const size_t row_bytes = (size_t)width;
   // The face's own allocator, which is its library's: a glyph buffer is part
   // of the face, and a handle's memory does not depend on what happened to be
   // installed the first time it drew something.
-  if (!ztextArrayReserve(ztextAllocatorOf(face), &face->bitmap,
+  if (!ztypesetArrayReserve(ztypesetAllocatorOf(face), &face->bitmap,
                          row_bytes * (size_t)height, 1u)) {
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
   unsigned char* dst = (unsigned char*)face->bitmap.data;
   face->bitmap.count = row_bytes * (size_t)height;
@@ -524,41 +532,42 @@ static ZtextResult copyBitmap(ZtextFace* face, const FT_Bitmap* bitmap,
   }
 
   out->pixels = dst;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
-                                 ZtextRenderMode mode, ZtextHinting hinting,
+ZtypesetResult ztypesetFaceRenderGlyph(ZtypesetFace* face, uint32_t glyph_id,
+                                 ZtypesetRenderMode mode,
+    ZtypesetHinting hinting,
                                  int32_t offset_x, int32_t offset_y,
-                                 ZtextGlyphBitmap* out) {
-  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+                                 ZtypesetGlyphBitmap* out) {
+  if (out == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   memset(out, 0, sizeof(*out));
 
-  const ZtextResult loaded = loadGlyph(face, glyph_id, hinting, mode);
-  if (loaded != ZTEXT_RESULT_OK) return loaded;
+  const ZtypesetResult loaded = loadGlyph(face, glyph_id, hinting, mode);
+  if (loaded != ZTYPESET_RESULT_OK) return loaded;
 
   FT_GlyphSlot slot = face->font->ft->glyph;
 
-  // Ignored in SDF mode -- see ztext.h for why baking a sub-pixel shift into
+  // Ignored in SDF mode -- see ztypeset.h for why baking a sub-pixel shift into
   // a reusable, atlas-sampled field would be pointless.
-  if (mode != ZTEXT_RENDER_MODE_SDF && (offset_x != 0 || offset_y != 0)) {
+  if (mode != ZTYPESET_RENDER_MODE_SDF && (offset_x != 0 || offset_y != 0)) {
     FT_Outline_Translate(&slot->outline, offset_x, offset_y);
   }
   const FT_Error error = FT_Render_Glyph(slot, ftRenderMode(mode));
   if (error != FT_Err_Ok) {
-    const ZtextResult mapped = ztextFromFtError(error);
+    const ZtypesetResult mapped = ztypesetFromFtError(error);
     // FreeType reports a rasteriser refusing the outline through the same
     // error space as everything else; anything that got this far is a render
     // failure rather than a bad font.
-    return mapped == ZTEXT_RESULT_BAD_FONT ? ZTEXT_RESULT_RENDER_FAILED
+    return mapped == ZTYPESET_RESULT_BAD_FONT ? ZTYPESET_RESULT_RENDER_FAILED
                                            : mapped;
   }
 
   // Written whether or not there were pixels: a caller must be able to read
   // the format of an inkless glyph without a special case, and memset left
   // this at A8 regardless of what was rendered.
-  const ZtextBitmapFormat format = bitmapFormatOf(mode);
-  const uint32_t channels = ztextBitmapFormatChannels(format);
+  const ZtypesetBitmapFormat format = bitmapFormatOf(mode);
+  const uint32_t channels = ztypesetBitmapFormatChannels(format);
 
   // With FT_LOAD_NO_BITMAP this is always 8 bits per sample. Checked rather
   // than assumed, because a silent format change would reach a consumer as
@@ -576,21 +585,21 @@ ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
     const int gray_levels = (int)slot->bitmap.num_grays;
     if (slot->bitmap.pixel_mode != (unsigned char)ftPixelMode(format) ||
         (gray_levels != 256 && gray_levels != 255)) {
-      ztextSetErrorDetail("FreeType produced a bitmap in another format");
-      return ZTEXT_RESULT_RENDER_FAILED;
+      ztypesetSetErrorDetail("FreeType produced a bitmap in another format");
+      return ZTYPESET_RESULT_RENDER_FAILED;
     }
     // A subpixel bitmap is three samples wide, or three rows tall, per pixel.
     // Checked because the pixel dimensions below divide by three, and a
     // remainder would silently drop the last stripe of the last pixel.
-    const uint32_t across = (mode == ZTEXT_RENDER_MODE_LCD) ? channels : 1u;
-    const uint32_t down = (mode == ZTEXT_RENDER_MODE_LCD_V) ? channels : 1u;
+    const uint32_t across = (mode == ZTYPESET_RENDER_MODE_LCD) ? channels : 1u;
+    const uint32_t down = (mode == ZTYPESET_RENDER_MODE_LCD_V) ? channels : 1u;
     if (slot->bitmap.width % across != 0u || slot->bitmap.rows % down != 0u) {
-      ztextSetErrorDetail("FreeType produced a subpixel bitmap of a size that "
-                          "is not three samples per pixel");
-      return ZTEXT_RESULT_RENDER_FAILED;
+      ztypesetSetErrorDetail("FreeType produced a subpixel bitmap of "
+                             "a size that is not three samples per pixel");
+      return ZTYPESET_RESULT_RENDER_FAILED;
     }
-    const ZtextResult copied = copyBitmap(face, &slot->bitmap, out);
-    if (copied != ZTEXT_RESULT_OK) return copied;
+    const ZtypesetResult copied = copyBitmap(face, &slot->bitmap, out);
+    if (copied != ZTYPESET_RESULT_OK) return copied;
   }
 
   out->format = format;
@@ -598,40 +607,44 @@ ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
   // samples and an LCD_V bitmap's height in sub-rows; a consumer that read
   // either as a pixel count would lay the glyph out three times too wide or
   // too tall.
-  out->width = (mode == ZTEXT_RENDER_MODE_LCD) ? slot->bitmap.width / channels
-                                               : slot->bitmap.width;
-  out->height = (mode == ZTEXT_RENDER_MODE_LCD_V) ? slot->bitmap.rows / channels
-                                                  : slot->bitmap.rows;
+  out->width = (mode == ZTYPESET_RENDER_MODE_LCD)
+                   ? slot->bitmap.width / channels
+                   : slot->bitmap.width;
+  out->height = (mode == ZTYPESET_RENDER_MODE_LCD_V)
+                    ? slot->bitmap.rows / channels
+                    : slot->bitmap.rows;
   // Bytes per PIXEL row, so pitch * height is the buffer in every format. The
   // copy is tightly packed, and an LCD_V pixel row is three of FreeType's.
-  out->pitch = (int32_t)(slot->bitmap.width *
-                         ((mode == ZTEXT_RENDER_MODE_LCD_V) ? channels : 1u));
+  out->pitch = (int32_t)(
+      slot->bitmap.width *
+      ((mode == ZTYPESET_RENDER_MODE_LCD_V) ? channels : 1u));
   out->left = slot->bitmap_left;
   out->top = slot->bitmap_top;
-  out->x_advance = ztextFrom266(slot->advance.x);
-  return ZTEXT_RESULT_OK;
+  out->x_advance = ztypesetFrom266(slot->advance.x);
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceGlyphExtents(ZtextFace* face, uint32_t glyph_id,
-                                  ZtextHinting hinting, ZtextExtents* out) {
-  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetFaceGlyphExtents(ZtypesetFace* face, uint32_t glyph_id,
+                                  ZtypesetHinting hinting,
+    ZtypesetExtents* out) {
+  if (out == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   memset(out, 0, sizeof(*out));
 
-  const ZtextResult loaded =
-      loadGlyph(face, glyph_id, hinting, ZTEXT_RENDER_MODE_A8);
-  if (loaded != ZTEXT_RESULT_OK) return loaded;
+  const ZtypesetResult loaded =
+      loadGlyph(face, glyph_id, hinting, ZTYPESET_RENDER_MODE_A8);
+  if (loaded != ZTYPESET_RESULT_OK) return loaded;
 
   // FT_Glyph_Metrics is 26.6 once the glyph has been scaled. y is up, and
   // horiBearingY is the distance from the baseline to the TOP of the ink, so
   // the bottom is that minus the height.
   const FT_Glyph_Metrics* metrics = &face->font->ft->glyph->metrics;
-  out->x_min = ztextFrom266(metrics->horiBearingX);
-  out->x_max = ztextFrom266(metrics->horiBearingX + metrics->width);
-  out->y_max = ztextFrom266(metrics->horiBearingY);
-  out->y_min = ztextFrom266(metrics->horiBearingY - metrics->height);
-  out->x_advance = ztextFrom266(metrics->horiAdvance);
+  out->x_min = ztypesetFrom266(metrics->horiBearingX);
+  out->x_max = ztypesetFrom266(metrics->horiBearingX + metrics->width);
+  out->y_max = ztypesetFrom266(metrics->horiBearingY);
+  out->y_min = ztypesetFrom266(metrics->horiBearingY - metrics->height);
+  out->x_advance = ztypesetFrom266(metrics->horiAdvance);
   out->y_advance = 0.0f;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 //===----------------------------------------------------------------------===//
@@ -639,32 +652,32 @@ ZtextResult ztextFaceGlyphExtents(ZtextFace* face, uint32_t glyph_id,
 //===----------------------------------------------------------------------===//
 
 typedef struct DecomposeContext {
-  const ZtextOutlineFuncs* funcs;
-  ZtextResult result;
+  const ZtypesetOutlineFuncs* funcs;
+  ZtypesetResult result;
   bool started;
 } DecomposeContext;
 
 /// FT_Outline_Decompose never calls a "close" event of its own -- a contour
 /// ends with an implicit line/conic/cubic back to its start. This is where
-/// ztext's close() is synthesised: once before every move_to but the first,
+/// ztypeset's close() is synthesised: once before every move_to but the first,
 /// and once more after decomposition finishes successfully.
 static int decomposeMoveTo(const FT_Vector* to, void* user) {
   DecomposeContext* ctx = (DecomposeContext*)user;
   if (ctx->started) {
     ctx->result = ctx->funcs->close(ctx->funcs->user);
-    if (ctx->result != ZTEXT_RESULT_OK) return 1;
+    if (ctx->result != ZTYPESET_RESULT_OK) return 1;
   }
   ctx->started = true;
   ctx->result =
       ctx->funcs->move_to(ctx->funcs->user, (int32_t)to->x, (int32_t)to->y);
-  return ctx->result == ZTEXT_RESULT_OK ? 0 : 1;
+  return ctx->result == ZTYPESET_RESULT_OK ? 0 : 1;
 }
 
 static int decomposeLineTo(const FT_Vector* to, void* user) {
   DecomposeContext* ctx = (DecomposeContext*)user;
   ctx->result =
       ctx->funcs->line_to(ctx->funcs->user, (int32_t)to->x, (int32_t)to->y);
-  return ctx->result == ZTEXT_RESULT_OK ? 0 : 1;
+  return ctx->result == ZTYPESET_RESULT_OK ? 0 : 1;
 }
 
 static int decomposeConicTo(const FT_Vector* control, const FT_Vector* to,
@@ -673,7 +686,7 @@ static int decomposeConicTo(const FT_Vector* control, const FT_Vector* to,
   ctx->result = ctx->funcs->conic_to(ctx->funcs->user, (int32_t)control->x,
                                      (int32_t)control->y, (int32_t)to->x,
                                      (int32_t)to->y);
-  return ctx->result == ZTEXT_RESULT_OK ? 0 : 1;
+  return ctx->result == ZTYPESET_RESULT_OK ? 0 : 1;
 }
 
 static int decomposeCubicTo(const FT_Vector* control1,
@@ -684,21 +697,22 @@ static int decomposeCubicTo(const FT_Vector* control1,
       ctx->funcs->user, (int32_t)control1->x, (int32_t)control1->y,
       (int32_t)control2->x, (int32_t)control2->y, (int32_t)to->x,
       (int32_t)to->y);
-  return ctx->result == ZTEXT_RESULT_OK ? 0 : 1;
+  return ctx->result == ZTYPESET_RESULT_OK ? 0 : 1;
 }
 
-ZtextResult ztextFaceDecomposeOutline(ZtextFace* face, uint32_t glyph_id,
-                                      ZtextHinting hinting,
-                                      const ZtextOutlineFuncs* funcs) {
+ZtypesetResult ztypesetFaceDecomposeOutline(ZtypesetFace* face,
+                                            uint32_t glyph_id,
+                                      ZtypesetHinting hinting,
+                                      const ZtypesetOutlineFuncs* funcs) {
   if (funcs == NULL || funcs->move_to == NULL || funcs->line_to == NULL ||
       funcs->conic_to == NULL || funcs->cubic_to == NULL ||
       funcs->close == NULL) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
 
-  const ZtextResult loaded =
-      loadGlyph(face, glyph_id, hinting, ZTEXT_RENDER_MODE_A8);
-  if (loaded != ZTEXT_RESULT_OK) return loaded;
+  const ZtypesetResult loaded =
+      loadGlyph(face, glyph_id, hinting, ZTYPESET_RENDER_MODE_A8);
+  if (loaded != ZTYPESET_RESULT_OK) return loaded;
 
   // shift = delta = 0: the points FT_Outline_Decompose hands the callbacks
   // below are exactly the outline's own 26.6 coordinates, already scaled to
@@ -709,16 +723,17 @@ ZtextResult ztextFaceDecomposeOutline(ZtextFace* face, uint32_t glyph_id,
   };
   DecomposeContext ctx;
   ctx.funcs = funcs;
-  ctx.result = ZTEXT_RESULT_OK;
+  ctx.result = ZTYPESET_RESULT_OK;
   ctx.started = false;
 
   const FT_Error error = FT_Outline_Decompose(&face->font->ft->glyph->outline,
                                               &ft_funcs, &ctx);
   if (error != FT_Err_Ok) {
-    // A callback's own decline surfaces as its own ZtextResult; anything else
-    // is FreeType rejecting the outline's structure.
-    return ctx.result != ZTEXT_RESULT_OK ? ctx.result : ztextFromFtError(error);
+    // A callback's own decline surfaces as its own ZtypesetResult; anything
+    // else is FreeType rejecting the outline's structure.
+    return ctx.result != ZTYPESET_RESULT_OK ? ctx.result :
+    ztypesetFromFtError(error);
   }
 
-  return ctx.started ? funcs->close(funcs->user) : ZTEXT_RESULT_OK;
+  return ctx.started ? funcs->close(funcs->user) : ZTYPESET_RESULT_OK;
 }

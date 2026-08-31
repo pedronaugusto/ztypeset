@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- run the local CI matrix before every push.
+# ztypeset -- run the local CI matrix before every push.
 #
 # ci/run.sh is the same matrix CI runs, so a failure caught here is a failure
 # not caught in a pull request. Install once; skip an individual push with

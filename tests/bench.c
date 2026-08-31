@@ -1,17 +1,17 @@
 //===----------------------------------------------------------------------===//
-// ztext -- the harness behind the numbers in README.md.
+// ztypeset -- the harness behind the numbers in README.md.
 //
 // It exists so those numbers are reproducible rather than asserted. Run it
 // with `zig build bench -Doptimize=ReleaseFast -Dsanitize_c=false`; anything
 // else measures the sanitiser.
 //
 // Written in C, against the C ABI, for one reason: `clock()` is in the C
-// standard library on every platform ztext targets, and a portable monotonic
+// standard library on every platform ztypeset targets, and a portable monotonic
 // clock in Zig is not. It reports CPU time, so a ratio between two rows here
 // is meaningful even where the absolute numbers are not comparable across
 // machines.
 //
-// Usage: ztext-bench <font.ttf>
+// Usage: ztypeset-bench <font.ttf>
 //===----------------------------------------------------------------------===//
 
 #include <stdio.h>
@@ -19,8 +19,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "ztext.h"
-#include "ztext_test_io.h"
+#include "ztypeset.h"
+#include "ztypeset_test_io.h"
 
 static size_t live_bytes;
 static size_t peak_bytes;
@@ -54,28 +54,29 @@ int main(int argc, char** argv) {
     return 2;
   }
   size_t font_size = 0;
-  unsigned char* font = ztextTestReadFile(argv[1], &font_size);
+  unsigned char* font = ztypesetTestReadFile(argv[1], &font_size);
   if (font == NULL) {
     printf("could not read %s\n", argv[1]);
     return 2;
   }
 
-  ZtextAllocator allocator = {benchAllocate, NULL, benchDeallocate, NULL};
-  ztextSetAllocator(&allocator);
+  ZtypesetAllocator allocator = {benchAllocate, NULL, benchDeallocate, NULL};
+  ztypesetSetAllocator(&allocator);
 
-  ZtextLibrary* library = NULL;
-  ZtextFont* the_font = NULL;
-  ZtextFace* face = NULL;
-  ZtextShaper* shaper = NULL;
-  if (ztextLibraryCreate(&library) != ZTEXT_RESULT_OK) return 1;
-  if (ztextFontCreateFromMemory(library, font, font_size, 0,
-                                &the_font) != ZTEXT_RESULT_OK) {
+  ZtypesetLibrary* library = NULL;
+  ZtypesetFont* the_font = NULL;
+  ZtypesetFace* face = NULL;
+  ZtypesetShaper* shaper = NULL;
+  if (ztypesetLibraryCreate(&library) != ZTYPESET_RESULT_OK) return 1;
+  if (ztypesetFontCreateFromMemory(library, font, font_size, 0,
+                                &the_font) != ZTYPESET_RESULT_OK) {
     return 1;
   }
-  if (ztextFaceCreate(the_font, 0, 32, &face) != ZTEXT_RESULT_OK) return 1;
-  if (ztextShaperCreate(&shaper) != ZTEXT_RESULT_OK) return 1;
+  if (ztypesetFaceCreate(the_font, 0, 32,
+      &face) != ZTYPESET_RESULT_OK) return 1;
+  if (ztypesetShaperCreate(&shaper) != ZTYPESET_RESULT_OK) return 1;
 
-  printf("ztext bench -- %s at 32 px\n", argv[1]);
+  printf("ztypeset bench -- %s at 32 px\n", argv[1]);
   printf("%-28s %12s  %s\n", "", "per op", "notes");
 
   //--------------------------------------------------------------------------
@@ -83,27 +84,27 @@ int main(int argc, char** argv) {
   //--------------------------------------------------------------------------
   const char* sentence = "The quick brown fox jumps over the lazy dog";
   const size_t sentence_length = strlen(sentence);
-  ZtextShapeParams params;
+  ZtypesetShapeParams params;
   memset(&params, 0, sizeof(params));
-  params.direction = ZTEXT_DIRECTION_LTR;
-  params.script = ZTEXT_TAG('L', 'a', 't', 'n');
+  params.direction = ZTYPESET_DIRECTION_LTR;
+  params.script = ZTYPESET_TAG('L', 'a', 't', 'n');
 
   for (int i = 0; i < 32; i++) {
-    ztextShaperShape(shaper, face, sentence, sentence_length,
-                     ZTEXT_ENCODING_UTF8, 0,
+    ztypesetShaperShape(shaper, face, sentence, sentence_length,
+                     ZTYPESET_ENCODING_UTF8, 0,
                          sentence_length, &params);
   }
   const long shape_runs = 20000;
   clock_t start = clock();
   for (long i = 0; i < shape_runs; i++) {
-    ztextShaperShape(shaper, face, sentence, sentence_length,
-                     ZTEXT_ENCODING_UTF8, 0,
+    ztypesetShaperShape(shaper, face, sentence, sentence_length,
+                     ZTYPESET_ENCODING_UTF8, 0,
                          sentence_length, &params);
   }
   clock_t elapsed = clock() - start;
   printf("%-28s %9.2f us  %zu chars, %zu glyphs, reusing one shaper\n",
          "shape a run", microsPer(elapsed, shape_runs), sentence_length,
-         ztextShaperGlyphCount(shaper));
+         ztypesetShaperGlyphCount(shaper));
 
   //--------------------------------------------------------------------------
   // The SAME run, in a longer text.
@@ -111,7 +112,7 @@ int main(int argc, char** argv) {
   // HarfBuzz decodes the run itself plus at most five characters of context
   // either side (CONTEXT_LENGTH in libs/harfbuzz/src/hb-buffer.hh), so its
   // cost does not move with the length of the text around the run. Anything
-  // that does move is ztext's own -- which is what this pair of numbers is
+  // that does move is ztypeset's own -- which is what this pair of numbers is
   // for. A paragraph is shaped one run at a time, so a per-call cost that
   // grows with the whole paragraph is paid once per run: quadratic in the
   // paragraph, invisible in a benchmark that shapes a single sentence.
@@ -125,13 +126,13 @@ int main(int argc, char** argv) {
   const size_t long_length = sentence_length * copies;
 
   for (int i = 0; i < 32; i++) {
-    ztextShaperShape(shaper, face, long_text, long_length,
-                     ZTEXT_ENCODING_UTF8, 0, sentence_length, &params);
+    ztypesetShaperShape(shaper, face, long_text, long_length,
+                     ZTYPESET_ENCODING_UTF8, 0, sentence_length, &params);
   }
   start = clock();
   for (long i = 0; i < shape_runs; i++) {
-    ztextShaperShape(shaper, face, long_text, long_length,
-                     ZTEXT_ENCODING_UTF8, 0, sentence_length, &params);
+    ztypesetShaperShape(shaper, face, long_text, long_length,
+                     ZTYPESET_ENCODING_UTF8, 0, sentence_length, &params);
   }
   elapsed = clock() - start;
   printf("%-28s %9.2f us  the same %zu-char run, %zu chars around it\n",
@@ -139,34 +140,37 @@ int main(int argc, char** argv) {
          sentence_length, long_length);
 
   // And the same run again, as a run OF A PARAGRAPH. Identical work inside
-  // HarfBuzz; the difference is the walk ztext does not have to do, because
+  // HarfBuzz; the difference is the walk ztypeset does not have to do, because
   // the paragraph validated this text once when it was created.
-  ZtextParagraph* long_paragraph = NULL;
-  if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
-                           ZTEXT_BASE_DIRECTION_LTR, ZTEXT_SEGMENTATION_ALL,
-                           &long_paragraph) != ZTEXT_RESULT_OK) {
+  ZtypesetParagraph* long_paragraph = NULL;
+  if (ztypesetParagraphCreate(long_text, long_length, ZTYPESET_ENCODING_UTF8,
+                           ZTYPESET_BASE_DIRECTION_LTR,
+    ZTYPESET_SEGMENTATION_ALL,
+                           &long_paragraph) != ZTYPESET_RESULT_OK) {
     return 1;
   }
-  ZtextShapingRun bench_run;
+  ZtypesetShapingRun bench_run;
   bench_run.offset = 0u;
   bench_run.length = (uint32_t)sentence_length;
-  bench_run.script = ZTEXT_TAG('L', 'a', 't', 'n');
+  bench_run.script = ZTYPESET_TAG('L', 'a', 't', 'n');
   bench_run.level = 0u;
-  ZtextShapeParams run_params;
+  ZtypesetShapeParams run_params;
   memset(&run_params, 0, sizeof(run_params));
 
   for (int i = 0; i < 32; i++) {
-    ztextShaperShapeRun(shaper, face, long_paragraph, &bench_run, &run_params);
+    ztypesetShaperShapeRun(shaper, face, long_paragraph, &bench_run,
+                           &run_params);
   }
   start = clock();
   for (long i = 0; i < shape_runs; i++) {
-    ztextShaperShapeRun(shaper, face, long_paragraph, &bench_run, &run_params);
+    ztypesetShaperShapeRun(shaper, face, long_paragraph, &bench_run,
+                           &run_params);
   }
   elapsed = clock() - start;
   printf("%-28s %9.2f us  the same run, from a %zu-char paragraph\n",
          "shape a paragraph run", microsPer(elapsed, shape_runs), long_length);
 
-  ztextParagraphDestroy(long_paragraph);
+  ztypesetParagraphDestroy(long_paragraph);
 
   //--------------------------------------------------------------------------
   // Analysing a paragraph, and what the segmentation passes cost.
@@ -181,28 +185,29 @@ int main(int argc, char** argv) {
   size_t paragraph_bytes[2];
   for (int arm = 0; arm < 2; arm++) {
     const uint32_t wanted =
-        (arm == 0) ? (uint32_t)ZTEXT_SEGMENTATION_ALL
-                   : (uint32_t)ZTEXT_SEGMENTATION_NONE;
+        (arm == 0) ? (uint32_t)ZTYPESET_SEGMENTATION_ALL
+                   : (uint32_t)ZTYPESET_SEGMENTATION_NONE;
 
-    ZtextParagraph* measured_paragraph = NULL;
+    ZtypesetParagraph* measured_paragraph = NULL;
     const size_t before_paragraph = live_bytes;
-    if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
-                             ZTEXT_BASE_DIRECTION_LTR, wanted,
-                             &measured_paragraph) != ZTEXT_RESULT_OK) {
+    if (ztypesetParagraphCreate(long_text, long_length, ZTYPESET_ENCODING_UTF8,
+                             ZTYPESET_BASE_DIRECTION_LTR, wanted,
+                             &measured_paragraph) != ZTYPESET_RESULT_OK) {
       return 1;
     }
     paragraph_bytes[arm] = live_bytes - before_paragraph;
-    ztextParagraphDestroy(measured_paragraph);
+    ztypesetParagraphDestroy(measured_paragraph);
 
     start = clock();
     for (long i = 0; i < paragraph_rounds; i++) {
-      ZtextParagraph* round = NULL;
-      if (ztextParagraphCreate(long_text, long_length, ZTEXT_ENCODING_UTF8,
-                               ZTEXT_BASE_DIRECTION_LTR, wanted,
-                               &round) != ZTEXT_RESULT_OK) {
+      ZtypesetParagraph* round = NULL;
+      if (ztypesetParagraphCreate(long_text, long_length,
+          ZTYPESET_ENCODING_UTF8,
+                               ZTYPESET_BASE_DIRECTION_LTR, wanted,
+                               &round) != ZTYPESET_RESULT_OK) {
         return 1;
       }
-      ztextParagraphDestroy(round);
+      ztypesetParagraphDestroy(round);
     }
     elapsed = clock() - start;
     paragraph_us[arm] = microsPer(elapsed, paragraph_rounds);
@@ -227,26 +232,28 @@ int main(int argc, char** argv) {
   const size_t glyph_count = sizeof(codepoints) / sizeof(codepoints[0]);
   uint32_t glyphs[8];
   for (size_t i = 0; i < glyph_count; i++) {
-    glyphs[i] = ztextFontGlyphIndex(the_font, codepoints[i]);
+    glyphs[i] = ztypesetFontGlyphIndex(the_font, codepoints[i]);
   }
 
   double a8_us = 0.0;
   double sdf_us = 0.0;
   for (int mode = 0; mode < 2; mode++) {
-    const ZtextRenderMode render =
-        (mode == 0) ? ZTEXT_RENDER_MODE_A8 : ZTEXT_RENDER_MODE_SDF;
+    const ZtypesetRenderMode render =
+        (mode == 0) ? ZTYPESET_RENDER_MODE_A8 : ZTYPESET_RENDER_MODE_SDF;
     // SDF is slow enough that a large count is simply a long wait.
     const long rounds = (mode == 0) ? 4000 : 40;
-    ZtextGlyphBitmap bitmap;
+    ZtypesetGlyphBitmap bitmap;
 
     for (size_t i = 0; i < glyph_count; i++) {
-      ztextFaceRenderGlyph(face, glyphs[i], render, ZTEXT_HINTING_NONE, 0, 0,
+      ztypesetFaceRenderGlyph(face, glyphs[i], render, ZTYPESET_HINTING_NONE, 0,
+                              0,
                            &bitmap);
     }
     start = clock();
     for (long round = 0; round < rounds; round++) {
       for (size_t i = 0; i < glyph_count; i++) {
-        ztextFaceRenderGlyph(face, glyphs[i], render, ZTEXT_HINTING_NONE, 0, 0,
+        ztypesetFaceRenderGlyph(face, glyphs[i], render, ZTYPESET_HINTING_NONE,
+                                0, 0,
                              &bitmap);
       }
     }
@@ -267,7 +274,7 @@ int main(int argc, char** argv) {
            "SDF cost ratio", sdf_us / a8_us);
   }
 
-  ztextFaceDestroy(face);
+  ztypesetFaceDestroy(face);
 
   //--------------------------------------------------------------------------
   // What one font at several sizes costs -- which is the number the Font/Face
@@ -279,37 +286,37 @@ int main(int argc, char** argv) {
   // the bare handles would flatter the design.
   //--------------------------------------------------------------------------
   static const float sizes[] = {12.0f, 16.0f, 24.0f, 32.0f};
-  ZtextGlyphBitmap bitmap;
+  ZtypesetGlyphBitmap bitmap;
 
   // The font on its own, paid once however many sizes follow.
   const size_t before_font = live_bytes;
-  ZtextFont* measured = NULL;
-  ztextFontCreateFromMemory(library, font, font_size, 0, &measured);
-  ZtextFace* faces[4];
-  ztextFaceCreate(measured, 0, sizes[0], &faces[0]);
-  ztextShaperShape(shaper, faces[0], sentence, sentence_length,
-                   ZTEXT_ENCODING_UTF8, 0,
+  ZtypesetFont* measured = NULL;
+  ztypesetFontCreateFromMemory(library, font, font_size, 0, &measured);
+  ZtypesetFace* faces[4];
+  ztypesetFaceCreate(measured, 0, sizes[0], &faces[0]);
+  ztypesetShaperShape(shaper, faces[0], sentence, sentence_length,
+                   ZTYPESET_ENCODING_UTF8, 0,
                        sentence_length, &params);
-  ztextFaceRenderGlyph(faces[0], glyphs[0], ZTEXT_RENDER_MODE_A8,
-                       ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
+  ztypesetFaceRenderGlyph(faces[0], glyphs[0], ZTYPESET_RENDER_MODE_A8,
+                       ZTYPESET_HINTING_NORMAL, 0, 0, &bitmap);
   const size_t font_and_one_face = live_bytes - before_font;
 
   // Three more sizes over the same font.
   for (size_t i = 1; i < 4; i++) {
-    ztextFaceCreate(measured, 0, sizes[i], &faces[i]);
-    ztextShaperShape(shaper, faces[i], sentence, sentence_length,
-                     ZTEXT_ENCODING_UTF8, 0,
+    ztypesetFaceCreate(measured, 0, sizes[i], &faces[i]);
+    ztypesetShaperShape(shaper, faces[i], sentence, sentence_length,
+                     ZTYPESET_ENCODING_UTF8, 0,
                          sentence_length, &params);
-    ztextFaceRenderGlyph(faces[i], glyphs[0], ZTEXT_RENDER_MODE_A8,
-                         ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
+    ztypesetFaceRenderGlyph(faces[i], glyphs[0], ZTYPESET_RENDER_MODE_A8,
+                         ZTYPESET_HINTING_NORMAL, 0, 0, &bitmap);
   }
   const size_t four_sizes = live_bytes - before_font;
   printf("%-28s %9zu B   one font plus its first size\n", "font + one face",
          font_and_one_face);
   printf("%-28s %9zu B   %zu B per additional size\n", "one font, four sizes",
          four_sizes, (four_sizes - font_and_one_face) / 3u);
-  for (size_t i = 0; i < 4; i++) ztextFaceDestroy(faces[i]);
-  ztextFontDestroy(measured);
+  for (size_t i = 0; i < 4; i++) ztypesetFaceDestroy(faces[i]);
+  ztypesetFontDestroy(measured);
 
   //--------------------------------------------------------------------------
   // The other arm, without which the first is a number and not a comparison.
@@ -326,20 +333,21 @@ int main(int argc, char** argv) {
   // only.
   //--------------------------------------------------------------------------
   const size_t before_collapsed = live_bytes;
-  ZtextFont* collapsed[4];
-  ZtextFace* collapsed_faces[4];
+  ZtypesetFont* collapsed[4];
+  ZtypesetFace* collapsed_faces[4];
   size_t collapsed_one = 0u;
   for (size_t i = 0; i < 4; i++) {
     collapsed[i] = NULL;
     collapsed_faces[i] = NULL;
-    ztextFontCreateFromMemory(library, font, font_size, 0,
+    ztypesetFontCreateFromMemory(library, font, font_size, 0,
                               &collapsed[i]);
-    ztextFaceCreate(collapsed[i], 0, sizes[i], &collapsed_faces[i]);
-    ztextShaperShape(shaper, collapsed_faces[i], sentence,
-                     sentence_length, ZTEXT_ENCODING_UTF8,
+    ztypesetFaceCreate(collapsed[i], 0, sizes[i], &collapsed_faces[i]);
+    ztypesetShaperShape(shaper, collapsed_faces[i], sentence,
+                     sentence_length, ZTYPESET_ENCODING_UTF8,
                          0, sentence_length, &params);
-    ztextFaceRenderGlyph(collapsed_faces[i], glyphs[0], ZTEXT_RENDER_MODE_A8,
-                         ZTEXT_HINTING_NORMAL, 0, 0, &bitmap);
+    ztypesetFaceRenderGlyph(collapsed_faces[i], glyphs[0],
+                            ZTYPESET_RENDER_MODE_A8,
+                         ZTYPESET_HINTING_NORMAL, 0, 0, &bitmap);
     if (i == 0) collapsed_one = live_bytes - before_collapsed;
   }
   const size_t collapsed_four = live_bytes - before_collapsed;
@@ -356,15 +364,15 @@ int main(int argc, char** argv) {
                (double)((collapsed_four - collapsed_one) / 3u));
   }
   for (size_t i = 0; i < 4; i++) {
-    ztextFaceDestroy(collapsed_faces[i]);
-    ztextFontDestroy(collapsed[i]);
+    ztypesetFaceDestroy(collapsed_faces[i]);
+    ztypesetFontDestroy(collapsed[i]);
   }
 
-  ztextShaperDestroy(shaper);
+  ztypesetShaperDestroy(shaper);
 
-  ztextFontDestroy(the_font);
-  ztextLibraryDestroy(library);
-  ztextSetAllocator(NULL);
+  ztypesetFontDestroy(the_font);
+  ztypesetLibraryDestroy(library);
+  ztypesetSetAllocator(NULL);
   free(font);
 
   if (live_bytes != 0) {

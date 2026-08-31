@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- the CI matrix, run locally.
+# ztypeset -- the CI matrix, run locally.
 #
 # This mirrors .github/workflows/ci.yml so a failure can be reproduced and
 # fixed on your own machine instead of in a pull request. Install it as a
@@ -70,7 +70,7 @@ run() {
 
 section() { printf '\n%s%s%s\n' "$BOLD" "$1" "$OFF"; }
 
-printf '%sztext local CI%s  %s%s%s\n' "$BOLD" "$OFF" "$DIM" "$(zig version)" "$OFF"
+printf '%sztypeset local CI%s  %s%s%s\n' "$BOLD" "$OFF" "$DIM" "$(zig version)" "$OFF"
 
 #-----------------------------------------------------------------------------
 section 'Hygiene'
@@ -89,7 +89,7 @@ run 'zig fmt (every .zig in the repo)' \
 # The C sources have no formatter, so the one rule that is actually enforced is
 # enforced here -- in ci/check-columns.sh, which the hosted workflow runs too,
 # because a rule with two implementations can disagree with itself.
-run "ztext's C is ASCII, within 80 columns" ci/check-columns.sh
+run "ztypeset's C is ASCII, within 80 columns" ci/check-columns.sh
 
 # The null sweep is only worth having if it still covers everything. This
 # fails when the header grows an entry point the sweep never learned about.
@@ -116,8 +116,8 @@ section 'Tests -- native'
 #-----------------------------------------------------------------------------
 
 # The C sanitizer is opt-in -- a library must not force its runtime into a
-# consumer's link -- so ztext's own Debug run asks for it explicitly. This is
-# the run that would catch undefined behaviour in ztext's own C.
+# consumer's link -- so ztypeset's own Debug run asks for it explicitly. This is
+# the run that would catch undefined behaviour in ztypeset's own C.
 run 'test Debug (UBSan on)' zig build test -Doptimize=Debug -Dsanitize_c=true
 
 if [ $QUICK -eq 0 ]; then
@@ -133,7 +133,7 @@ if [ $QUICK -eq 0 ]; then
   # every single-run gate was green on. See ci/crash-loop.sh.
   run 'crash loop (200 x test-c)' ci/crash-loop.sh 200
 
-  # Consuming ztext as a dependency is a different code path from building it,
+  # Consuming ztypeset as a dependency is a different code path from building it,
   # and the difference has bitten before -- see tests/consumer/build.zig.
   run 'consumer (module + artifacts)' \
     env -C tests/consumer zig build run

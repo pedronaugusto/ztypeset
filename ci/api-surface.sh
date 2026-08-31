@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# ztext -- every entry point, and everywhere it lives.
+# ztypeset -- every entry point, and everywhere it lives.
 #
-# A C entry point exists in up to six places: declared in ffi/ztext.h, defined
+# A C entry point exists in up to six places: declared in ffi/ztypeset.h, defined
 # in ffi/*.c, declared again as a Zig extern in src/c.zig, wrapped in src/*.zig,
 # called from the tests, and shown in README.md. Changing a signature means
 # changing all of them, and the cost of doing that from memory is a missed site
@@ -48,9 +48,9 @@ fi
 # keeps a sweep from silently covering less as the surface grows.
 if [ "${1:-}" = "--sweep" ]; then
   missing=0
-  for name in $(grep -oE '\bztext[A-Za-z0-9_]+\(' ffi/ztext.h |
-                grep -oE '^ztext[A-Za-z0-9_]+' | sort -u); do
-    grep -qE "ZTEXT_API[^;]*\b$name\(" ffi/ztext.h || continue
+  for name in $(grep -oE '\bztypeset[A-Za-z0-9_]+\(' ffi/ztypeset.h |
+                grep -oE '^ztypeset[A-Za-z0-9_]+' | sort -u); do
+    grep -qE "ZTYPESET_API[^;]*\b$name\(" ffi/ztypeset.h || continue
     if ! grep -qF "$name" tests/null_sweep.c; then
       printf '%s%-34s%s never called by tests/null_sweep.c\n' "$RED" "$name" "$OFF"
       missing=$((missing + 1))
@@ -78,7 +78,7 @@ declared_gap() {
     # because a Zig handle can own the reference the C one has to hand back.
     # Wrapping the accessor as well would be a second way to ask the same
     # question, and the two could disagree after a change to either.
-    ztextFaceFont:wrap) return 0 ;;
+    ztypesetFaceFont:wrap) return 0 ;;
   esac
   return 1
 }
@@ -86,7 +86,7 @@ declared_gap() {
 GAPS_ONLY=0
 [ "${1:-}" = "--gaps" ] && GAPS_ONLY=1
 
-names=$(grep -oE '\bztext[A-Za-z0-9_]+' ffi/ztext.h | sort -u)
+names=$(grep -oE '\bztypeset[A-Za-z0-9_]+' ffi/ztypeset.h | sort -u)
 
 printf '%s%-34s %-4s %-4s %-4s %-4s %-4s%s\n' \
   "$BOLD" "entry point" "hdr" "impl" "c.zig" "wrap" "test" "$OFF"
@@ -96,7 +96,7 @@ declared_gaps=0
 undeclared_names=
 total=0
 for name in $names; do
-  hdr=$(grep -c "ZTEXT_API[^;]*\b$name\b" ffi/ztext.h)
+  hdr=$(grep -c "ZTYPESET_API[^;]*\b$name\b" ffi/ztypeset.h)
   [ "$hdr" -eq 0 ] && continue          # a macro or a type, not an entry point
   total=$((total + 1))
 
@@ -155,7 +155,7 @@ done
 #
 # The check is deliberately literal: the name must appear as a word in
 # README.md. It cannot tell documentation from a passing mention and does not
-# try to. What it holds is that the list of what ztext exposes and the list of
+# try to. What it holds is that the list of what ztypeset exposes and the list of
 # what it names are the same list, so adding a public function forces a
 # decision about the README instead of allowing silence.
 #===----------------------------------------------------------------------===#
@@ -166,7 +166,7 @@ done
 # worth writing down.
 declared_undocumented() {
   case "$1" in
-    ZTEXT_NO_SUCH_NAME) return 0 ;;
+    ZTYPESET_NO_SUCH_NAME) return 0 ;;
   esac
   return 1
 }

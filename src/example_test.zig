@@ -3,7 +3,7 @@
 //! `examples/quickstart.zig` is a program `zig build test` compiles and runs.
 //! Two regions of it, marked `//<<<name` and `//>>>name`, are the source of
 //! every copy: the fenced blocks in README.md and the example in
-//! `src/ztext.zig`'s module doc. Each test below extracts a region and
+//! `src/ztypeset.zig`'s module doc. Each test below extracts a region and
 //! requires the document to contain it verbatim.
 //!
 //! It exists because the copies disagreed and nothing could tell. README's
@@ -113,5 +113,5 @@ test "the module doc quotes the usage example verbatim" {
     }
     if (quoted.items.len > 0) _ = quoted.pop();
 
-    try expectQuotes(module_doc, "src/ztext.zig's module doc", quoted.items);
+    try expectQuotes(module_doc, "src/ztypeset.zig's module doc", quoted.items);
 }

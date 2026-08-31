@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- the same C smoke test, two hundred times.
+# ztypeset -- the same C smoke test, two hundred times.
 #
 # WHY THIS IS A SEPARATE GATE. `zig build test-c` runs the C boundary once, and
 # one run of a fault that happens one run in fifty is indistinguishable from no
@@ -53,10 +53,10 @@ if ! zig build install-c-tests "$@"; then
   exit 1
 fi
 
-EXE=zig-out/bin/ztext-c-smoke
+EXE=zig-out/bin/ztypeset-c-smoke
 [ -x "$EXE" ] || EXE="$EXE.exe"
 if [ ! -x "$EXE" ]; then
-  printf 'crash-loop: no ztext-c-smoke in zig-out/bin after install-c-tests\n' >&2
+  printf 'crash-loop: no ztypeset-c-smoke in zig-out/bin after install-c-tests\n' >&2
   exit 1
 fi
 

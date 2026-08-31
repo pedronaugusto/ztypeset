@@ -4,7 +4,7 @@
 //! `c.zig` is written by hand so the wrapper gets exactly the types it wants
 //! and the shipped module never runs translate-c. The cost of hand-writing is
 //! drift, and nothing in either compiler notices when this file's twin stops
-//! matching `ffi/ztext.h`.
+//! matching `ffi/ztypeset.h`.
 //!
 //! This closes that by `@cImport`-ing the header — in a test only, so the
 //! shipped module stays translate-c-free — and comparing the two namespaces
@@ -16,10 +16,10 @@
 //!
 //! The naming conventions are therefore load-bearing, not cosmetic:
 //!
-//!   * a type `Foo`            pairs with `ZtextFoo`
-//!   * a function `ztextFoo`   pairs with itself
-//!   * a constant `foo_bar`    pairs with `ZTEXT_FOO_BAR`
-//!   * an enum `Foo`'s field `bar` pairs with `ZTEXT_FOO_BAR`
+//!   * a type `Foo`            pairs with `ZtypesetFoo`
+//!   * a function `ztypesetFoo`   pairs with itself
+//!   * a constant `foo_bar`    pairs with `ZTYPESET_FOO_BAR`
+//!   * an enum `Foo`'s field `bar` pairs with `ZTYPESET_FOO_BAR`
 //!
 //! A declaration that breaks the convention fails this check, which is the
 //! pressure that keeps the two sides legible as twins.
@@ -36,11 +36,11 @@
 //! against the *library*. Those two diverge when the header is preprocessed
 //! with different macros than the library was compiled with.
 //!
-//! For ztext that gap is narrow and the narrowness is measured, not assumed:
-//! `ffi/ztext.h` includes only `<stddef.h>` and `<stdint.h>` and is sensitive
-//! to exactly one macro, `ZTEXT_SHARED`, which changes the `ZTEXT_API`
+//! For ztypeset that gap is narrow and the narrowness is measured, not assumed:
+//! `ffi/ztypeset.h` includes only `<stddef.h>` and `<stdint.h>` and is sensitive
+//! to exactly one macro, `ZTYPESET_SHARED`, which changes the `ZTYPESET_API`
 //! attribute and no type. Every FreeType and HarfBuzz configuration macro
-//! reaches the implementation, never the installed header. `ztextAbiProbe`
+//! reaches the implementation, never the installed header. `ztypesetAbiProbe`
 //! covers the residue from the other side, by comparing these declarations
 //! against what the compiled library actually does rather than what the header
 //! says.
@@ -49,11 +49,11 @@ const std = @import("std");
 const c = @import("c.zig");
 
 const h = @cImport({
-    @cInclude("ztext.h");
+    @cInclude("ztypeset.h");
 });
 
 /// Functions the header defines inline, which emit no symbol and so have
-/// nothing for `c.zig` to declare. ztext has none; the list exists so that
+/// nothing for `c.zig` to declare. ztypeset has none; the list exists so that
 /// adding one is a one-line change rather than a puzzle about why the reverse
 /// sweep started failing.
 const header_inline_fns = [_][]const u8{};
@@ -85,15 +85,15 @@ fn screaming(comptime name: []const u8) []const u8 {
 }
 
 fn typeCName(comptime name: []const u8) []const u8 {
-    return "Ztext" ++ name;
+    return "Ztypeset" ++ name;
 }
 
 fn constCName(comptime name: []const u8) []const u8 {
-    return "ZTEXT_" ++ screaming(name);
+    return "ZTYPESET_" ++ screaming(name);
 }
 
 fn fieldCName(comptime type_name: []const u8, comptime field_name: []const u8) []const u8 {
-    return "ZTEXT_" ++ screaming(type_name) ++ "_" ++ screaming(field_name);
+    return "ZTYPESET_" ++ screaming(type_name) ++ "_" ++ screaming(field_name);
 }
 
 //=============================================================================
@@ -105,13 +105,13 @@ fn fieldCName(comptime type_name: []const u8, comptime field_name: []const u8) [
 //=============================================================================
 
 fn fail(comptime msg: []const u8) void {
-    @compileError("ztext ABI drift: " ++ msg);
+    @compileError("ztypeset ABI drift: " ++ msg);
 }
 
 fn theirDecl(comptime name: []const u8, comptime because: []const u8) type {
     if (!@hasDecl(h, name)) {
         fail("`" ++ because ++ "` in src/c.zig expects `" ++ name ++
-            "` in ffi/ztext.h, which does not declare it");
+            "` in ffi/ztypeset.h, which does not declare it");
     }
     return @TypeOf(@field(h, name));
 }
@@ -124,12 +124,12 @@ fn sameSizeAndAlign(
     if (@sizeOf(Ours) != @sizeOf(Theirs)) {
         fail(what ++ " is " ++ std.fmt.comptimePrint("{d}", .{@sizeOf(Ours)}) ++
             " bytes in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{@sizeOf(Theirs)}) ++
-            " in ffi/ztext.h");
+            " in ffi/ztypeset.h");
     }
     if (@alignOf(Ours) != @alignOf(Theirs)) {
         fail(what ++ " has alignment " ++ std.fmt.comptimePrint("{d}", .{@alignOf(Ours)}) ++
             " in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{@alignOf(Theirs)}) ++
-            " in ffi/ztext.h");
+            " in ffi/ztypeset.h");
     }
 }
 
@@ -146,12 +146,12 @@ fn checkFnType(
     if (ours.params.len != theirs.params.len) {
         fail(what ++ " takes " ++ std.fmt.comptimePrint("{d}", .{ours.params.len}) ++
             " parameters in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{theirs.params.len}) ++
-            " in ffi/ztext.h");
+            " in ffi/ztypeset.h");
     }
 
     inline for (ours.params, theirs.params, 0..) |op, tp, i| {
         const OP = op.type orelse fail(what ++ " has an untyped parameter in src/c.zig");
-        const TP = tp.type orelse fail(what ++ " has an untyped parameter in ffi/ztext.h");
+        const TP = tp.type orelse fail(what ++ " has an untyped parameter in ffi/ztypeset.h");
         sameSizeAndAlign(
             what ++ " parameter " ++ std.fmt.comptimePrint("{d}", .{i}),
             OP,
@@ -160,7 +160,7 @@ fn checkFnType(
     }
 
     const OR = ours.return_type orelse fail(what ++ " has no return type in src/c.zig");
-    const TR = theirs.return_type orelse fail(what ++ " has no return type in ffi/ztext.h");
+    const TR = theirs.return_type orelse fail(what ++ " has no return type in ffi/ztypeset.h");
     sameSizeAndAlign(what ++ " return value", OR, TR);
 }
 
@@ -181,23 +181,23 @@ fn checkStructLayout(
     const ours = @typeInfo(Ours).@"struct";
     const theirs = switch (@typeInfo(Theirs)) {
         .@"struct" => |s| s,
-        else => fail(what ++ " is a struct in src/c.zig but not in ffi/ztext.h"),
+        else => fail(what ++ " is a struct in src/c.zig but not in ffi/ztypeset.h"),
     };
 
     if (ours.fields.len != theirs.fields.len) {
         fail(what ++ " has " ++ std.fmt.comptimePrint("{d}", .{ours.fields.len}) ++
             " fields in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{theirs.fields.len}) ++
-            " in ffi/ztext.h");
+            " in ffi/ztypeset.h");
     }
 
     inline for (ours.fields) |f| {
         if (!@hasField(Theirs, f.name)) {
-            fail(what ++ " has field `" ++ f.name ++ "` in src/c.zig, which ffi/ztext.h does not");
+            fail(what ++ " has field `" ++ f.name ++ "` in src/c.zig, which ffi/ztypeset.h does not");
         }
         if (@offsetOf(Ours, f.name) != @offsetOf(Theirs, f.name)) {
             fail(what ++ "." ++ f.name ++ " is at byte " ++
                 std.fmt.comptimePrint("{d}", .{@offsetOf(Ours, f.name)}) ++ " in src/c.zig but " ++
-                std.fmt.comptimePrint("{d}", .{@offsetOf(Theirs, f.name)}) ++ " in ffi/ztext.h");
+                std.fmt.comptimePrint("{d}", .{@offsetOf(Theirs, f.name)}) ++ " in ffi/ztypeset.h");
         }
         sameSizeAndAlign(
             what ++ "." ++ f.name,
@@ -207,7 +207,7 @@ fn checkStructLayout(
     }
 }
 
-/// Enumerator values, paired by the `ZTEXT_<TYPE>_<FIELD>` convention.
+/// Enumerator values, paired by the `ZTYPESET_<TYPE>_<FIELD>` convention.
 ///
 /// translate-c flattens a C enum to an integer alias and loses which
 /// enumerators belonged to it, so the values cannot be recovered from the type.
@@ -224,7 +224,7 @@ fn checkEnumValues(
         if (@as(i128, @field(h, cname)) != @as(i128, f.value)) {
             fail(what ++ "." ++ f.name ++ " is " ++
                 std.fmt.comptimePrint("{d}", .{f.value}) ++ " in src/c.zig but " ++ cname ++
-                " is " ++ std.fmt.comptimePrint("{d}", .{@field(h, cname)}) ++ " in ffi/ztext.h");
+                " is " ++ std.fmt.comptimePrint("{d}", .{@field(h, cname)}) ++ " in ffi/ztypeset.h");
         }
     }
 }
@@ -264,9 +264,9 @@ fn sweepOurs() Counts {
                         // Nothing to compare but existence: an opaque handle
                         // has no layout on either side, which is the point.
                         const Theirs = theirDecl(cname, what);
-                        if (Theirs != type) fail(cname ++ " is not a type in ffi/ztext.h");
+                        if (Theirs != type) fail(cname ++ " is not a type in ffi/ztypeset.h");
                         if (@typeInfo(@field(h, cname)) != .@"opaque") {
-                            fail(what ++ " is opaque in src/c.zig but not in ffi/ztext.h");
+                            fail(what ++ " is opaque in src/c.zig but not in ffi/ztypeset.h");
                         }
                     },
                     .@"struct" => |s| {
@@ -277,7 +277,7 @@ fn sweepOurs() Counts {
                                 checkStructLayout(what, Ours, Theirs);
                                 n.fields += s.fields.len;
                             },
-                            .@"packed" => fail(what ++ " is a packed struct. ztext has no " ++
+                            .@"packed" => fail(what ++ " is a packed struct. ztypeset has no " ++
                                 "bit-mask types today, so there is no tested code here to " ++
                                 "compare one with -- add a case rather than letting it pass."),
                             .auto => fail(what ++ " has automatic layout, so it has no defined " ++
@@ -298,7 +298,7 @@ fn sweepOurs() Counts {
                         const ti = @typeInfo(Theirs);
                         if (oi == .int and ti == .int and oi.int.signedness != ti.int.signedness) {
                             fail(what ++ " is " ++ @typeName(Ours) ++ " in src/c.zig but " ++
-                                @typeName(Theirs) ++ " in ffi/ztext.h");
+                                @typeName(Theirs) ++ " in ffi/ztypeset.h");
                         }
                     },
                     .pointer => {
@@ -345,7 +345,7 @@ fn sweepOurs() Counts {
                 if (ours_val != theirs_val) {
                     fail(what ++ " is " ++ std.fmt.comptimePrint("{d}", .{ours_val}) ++
                         " in src/c.zig but " ++ cname ++ " is " ++
-                        std.fmt.comptimePrint("{d}", .{theirs_val}) ++ " in ffi/ztext.h");
+                        std.fmt.comptimePrint("{d}", .{theirs_val}) ++ " in ffi/ztypeset.h");
                 }
                 n.constants += 1;
                 continue;
@@ -366,7 +366,7 @@ fn sweepOurs() Counts {
                 if (ours_val != theirs_val) {
                     fail(what ++ " is " ++ std.fmt.comptimePrint("{d}", .{ours_val}) ++
                         " in src/c.zig but " ++ cname ++ " is " ++
-                        std.fmt.comptimePrint("{d}", .{theirs_val}) ++ " in ffi/ztext.h");
+                        std.fmt.comptimePrint("{d}", .{theirs_val}) ++ " in ffi/ztypeset.h");
                 }
                 n.constants += 1;
                 continue;
@@ -393,8 +393,8 @@ fn sweepTheirs() usize {
             // Filter by name BEFORE touching the value: translate-c emits
             // `@compileError` declarations for system macros it cannot render,
             // and evaluating one of those would fail the build for a reason
-            // that has nothing to do with ztext.
-            if (!std.mem.startsWith(u8, d.name, "ztext")) continue;
+            // that has nothing to do with ztypeset.
+            if (!std.mem.startsWith(u8, d.name, "ztypeset")) continue;
             if (@typeInfo(@TypeOf(@field(h, d.name))) != .@"fn") continue;
 
             var inline_in_header = false;
@@ -406,7 +406,7 @@ fn sweepTheirs() usize {
             found += 1;
             if (!@hasDecl(c, d.name)) {
                 missing += 1;
-                fail("ffi/ztext.h exports `" ++ d.name ++ "` but src/c.zig never declares it");
+                fail("ffi/ztypeset.h exports `" ++ d.name ++ "` but src/c.zig never declares it");
             }
         }
         return found;
@@ -414,20 +414,20 @@ fn sweepTheirs() usize {
 }
 
 //=============================================================================
-// ZtextAbiProbe covers every plain-data type
+// ZtypesetAbiProbe covers every plain-data type
 //=============================================================================
 
 /// Every extern struct `c.zig` declares must have a field in `AbiProbe`.
 ///
-/// `ztextAbiProbe`'s whole claim is "every plain-data type ztext hands across
+/// `ztypesetAbiProbe`'s whole claim is "every plain-data type ztypeset hands across
 /// the boundary, in one struct", and nothing checked it: it covered ten of
-/// sixteen. `ZtextCharmap`, `ZtextVariationAxis`, `ZtextVariation`,
-/// `ZtextMatrix`, `ZtextStroke` and `ZtextOutlineFuncs` all crossed the
+/// sixteen. `ZtypesetCharmap`, `ZtypesetVariationAxis`, `ZtypesetVariation`,
+/// `ZtypesetMatrix`, `ZtypesetStroke` and `ZtypesetOutlineFuncs` all crossed the
 /// boundary unprobed, so two same-typed fields of any of them could have been
 /// transposed with nothing able to say so.
 ///
-/// The two ABI structs are excluded: `ZtextAbiLayout` is what describes the
-/// others, and `ZtextAbiProbe` cannot contain itself.
+/// The two ABI structs are excluded: `ZtypesetAbiLayout` is what describes the
+/// others, and `ZtypesetAbiProbe` cannot contain itself.
 fn sweepProbeCoverage() usize {
     comptime {
         var covered: usize = 0;
@@ -445,7 +445,7 @@ fn sweepProbeCoverage() usize {
             }
             if (!found) {
                 fail("`" ++ typeCName(d.name) ++ "` crosses the ABI boundary but " ++
-                    "ZtextAbiProbe has no field of that type, so nothing proves " ++
+                    "ZtypesetAbiProbe has no field of that type, so nothing proves " ++
                     "its fields land where src/c.zig believes they do");
             }
             covered += 1;
@@ -463,7 +463,7 @@ fn sweepProbeCoverage() usize {
 // matched everything.
 //=============================================================================
 
-test "ABI: src/c.zig agrees with ffi/ztext.h" {
+test "ABI: src/c.zig agrees with ffi/ztypeset.h" {
     @setEvalBranchQuota(1_000_000);
 
     const ours = comptime sweepOurs();

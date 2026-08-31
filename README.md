@@ -1,6 +1,6 @@
-# ztext
+# ztypeset
 
-[![CI](https://github.com/pedronaugusto/ztext/actions/workflows/ci.yml/badge.svg)](https://github.com/pedronaugusto/ztext/actions/workflows/ci.yml)
+[![CI](https://github.com/pedronaugusto/ztypeset/actions/workflows/ci.yml/badge.svg)](https://github.com/pedronaugusto/ztypeset/actions/workflows/ci.yml)
 
 Text shaping and glyph rasterisation for Zig: [FreeType](https://freetype.org),
 [HarfBuzz](https://harfbuzz.github.io),
@@ -13,7 +13,7 @@ wired together, with no renderer, no atlas and no layout engine attached.
   once serves every size you draw it at.
 - Shape a run of **UTF-8, UTF-16 or UTF-32** → glyph ids, advances, offsets,
   and a cluster map in **code-unit offsets** of whichever encoding you passed.
-  All three upstreams take all three natively, so ztext transcodes nothing.
+  All three upstreams take all three natively, so ztypeset transcodes nothing.
 - Bidi paragraph → ordered visual runs, plus script itemisation, so mixed text
   can be split into runs a shaper can actually take — and **per line**, because
   UAX #9 applies rules L1 and L2 over a line and not over a paragraph.
@@ -45,15 +45,15 @@ vulnerability.
 ## Usage
 
 ```zig
-const ztext = @import("ztext");
+const ztypeset = @import("ztypeset");
 
-// Copied, not borrowed: ztext keeps its own copy for as long as any handle
+// Copied, not borrowed: ztypeset keeps its own copy for as long as any handle
 // can reach it. Installing also warms the caches the upstreams keep for the
-// life of the process, so this allocator only ever sees ztext's working set.
-try ztext.setAllocator(gpa_state.allocator());
-defer ztext.resetAllocator();
+// life of the process, so this allocator only ever sees ztypeset's working set.
+try ztypeset.setAllocator(gpa_state.allocator());
+defer ztypeset.resetAllocator();
 
-const library = try ztext.Library.init();
+const library = try ztypeset.Library.init();
 defer library.deinit();
 
 // The bytes are BORROWED and must outlive the font. Handles have no
@@ -66,10 +66,10 @@ defer font.deinit();
 const face = try font.face(0, 16);
 defer face.deinit();
 
-const shaper = try ztext.Shaper.init();
+const shaper = try ztypeset.Shaper.init();
 defer shaper.deinit();
 
-const paragraph = try ztext.Paragraph.init(text, .{});
+const paragraph = try ztypeset.Paragraph.init(text, .{});
 defer paragraph.deinit();
 
 // shapingRuns, not visualRuns: one visual run can span several scripts, and
@@ -88,7 +88,7 @@ for (paragraph.shapingRuns()) |run| {
 }
 ```
 
-Pick the face per run from `run.script` when you carry more than one; ztext has
+Pick the face per run from `run.script` when you carry more than one; ztypeset has
 no fallback chain of its own.
 
 Both blocks on this page are quoted from
@@ -103,7 +103,7 @@ iterate a `Line` per visual line:
 const breaks = paragraph.lineBreaks(); // one entry per code unit
 var start: usize = 0;
 while (start < text.len) {
-    // Furthest permitted break that still fits. ztext says where a break is
+    // Furthest permitted break that still fits. ztypeset says where a break is
     // ALLOWED; only you know how wide the box is.
     const end = chooseBreak(breaks, start, box_width);
 
@@ -126,21 +126,21 @@ character, which lands between a letter and its accent.
 Add it as a dependency and link the module:
 
 ```zig
-const ztext_dep = b.dependency("ztext", .{ .target = target, .optimize = optimize });
-exe.root_module.addImport("ztext", ztext_dep.module("ztext"));
+const ztypeset_dep = b.dependency("ztypeset", .{ .target = target, .optimize = optimize });
+exe.root_module.addImport("ztypeset", ztypeset_dep.module("ztypeset"));
 ```
 
 FreeType, HarfBuzz and SheenBidi are also exposed as artifacts with their own
 headers installed, so a C or C++ part of your program can use them directly:
 
 ```zig
-exe.root_module.linkLibrary(ztext_dep.artifact("harfbuzz"));
+exe.root_module.linkLibrary(ztypeset_dep.artifact("harfbuzz"));
 ```
 
-That is deliberate. For anything past ztext's scope, HarfBuzz's own API is
+That is deliberate. For anything past ztypeset's scope, HarfBuzz's own API is
 better documented and more capable than a façade over it could be.
 
-What is installed is exactly what was compiled. ztext builds a reduced
+What is installed is exactly what was compiled. ztypeset builds a reduced
 configuration of each upstream — FreeType without the modules it does not
 register, and `libharfbuzz` without the four separate libraries upstream builds
 beside it (`-subset`, `-raster`, `-vector`, `-gpu`, each with its own external
@@ -155,7 +155,7 @@ Windows ABIs.
 
 ### The pipeline stops at runs
 
-Correct text goes **order → itemise → shape → rasterise**, and ztext does all
+Correct text goes **order → itemise → shape → rasterise**, and ztypeset does all
 four — then stops. It has no atlas, no line breaking, no justification, no
 caret model and no rich text, because those belong to a layout engine that
 knows about your UI, and folding them in is what makes a text library
@@ -203,14 +203,14 @@ learn here than during an integration:
 - **Bidi mirroring is already done, and needs no API.** Rule L4 — the one that
   turns `(` into `)` inside a right-to-left run — is applied by HarfBuzz
   itself, at shaping time, before OpenType features run
-  (`hb_ot_rotate_chars`). ztext neither duplicates it nor exposes a hook for
+  (`hb_ot_rotate_chars`). ztypeset neither duplicates it nor exposes a hook for
   it, and a test pins the behaviour so a re-vendor that changed it would fail
   rather than silently produce backwards brackets.
 - **Segmentation is in scope, and that is a deliberate line.** It would be
-  easy to call line breaking "the host's job", but that is arbitrary: ztext
+  easy to call line breaking "the host's job", but that is arbitrary: ztypeset
   already owns UAX #9, and `Line` takes a code-unit range a host would
   otherwise have no way to find. FreeType, HarfBuzz and SheenBidi implement none of
-  UAX #14 or #29 between them, so ztext vendors libunibreak and provides break
+  UAX #14 or #29 between them, so ztypeset vendors libunibreak and provides break
   *opportunities*. Deciding where to break needs a width, and that stays the
   host's.
 - **Which passes run is the caller's choice, because they are the largest
@@ -234,9 +234,9 @@ deeply nested, and **partly conditional on FreeType's own configuration
 macros**. Hand-mirroring those as Zig `extern struct`s would put silent memory
 corruption one re-vendor away. Stopping them at a C boundary means the C
 compiler checks every upstream layout change for free, and only small, flat,
-ztext-owned structs ever cross into Zig.
+ztypeset-owned structs ever cross into Zig.
 
-So `ffi/ztext.h` is scoped to that job. It is not an attempt to re-present
+So `ffi/ztypeset.h` is scoped to that job. It is not an attempt to re-present
 HarfBuzz to the world under a different name.
 
 ### Allocator injection — three seams, one of them global
@@ -255,7 +255,7 @@ HarfBuzz is the binding constraint, so `setAllocator` is process-wide. That is
 surfaced rather than hidden behind a per-object parameter that could not be
 honoured.
 
-FreeType is the exception, and it is genuinely per-library: ztext builds it
+FreeType is the exception, and it is genuinely per-library: ztypeset builds it
 with `FT_New_Library` rather than `FT_Init_FreeType`, records the installed
 allocator in the `Library` at creation, and points FreeType's `FT_Memory` at
 that record. So a `Library` and its faces keep allocating and freeing through
@@ -267,7 +267,7 @@ allocator and kept it.
 
 All three also **free without a size** — `FT_Free_Func`, `hb_free_impl` and
 `SBAllocatorDeallocateBlockFunc` each receive only a pointer. Rather than push
-that asymmetry onto every host, ztext records the size and alignment in a
+that asymmetry onto every host, ztypeset records the size and alignment in a
 header ahead of each block and hands them back on `deallocate`. A host with a
 sized allocator — Zig's `std.mem.Allocator`, a pool, an arena with accounting —
 therefore needs no bookkeeping of its own. It costs two pointer-sized words per
@@ -282,7 +282,7 @@ allocated under one installed allocator was destroyed under whichever one was
 installed later — while the FreeType memory of the *same font* went back to the
 right one. One handle, two heaps, and nothing that could tell you.
 
-So ztext does not rely on the rule being kept. Every allocator ever installed
+So ztypeset does not rely on the rule being kept. Every allocator ever installed
 gets an entry in a small registry, the block header records the **index** of
 the one that issued the block, and every free and every grow is routed back to
 that entry rather than to whatever is installed at the time. The index shares
@@ -296,17 +296,17 @@ What that buys, concretely:
 - The upstreams' process-lifetime caches — HarfBuzz's language intern table is
   the one that grows — are reallocated through the allocator that made them,
   not through whichever came next.
-- A ztext-internal mistake, a block allocated in one place and released by
+- A ztypeset-internal mistake, a block allocated in one place and released by
   naming another, **stops the process** with both allocators named on stderr
-  and exit code `ZTEXT_EXIT_ALLOCATOR_MISMATCH` (70). The block is not freed:
+  and exit code `ZTYPESET_EXIT_ALLOCATOR_MISMATCH` (70). The block is not freed:
   leaking one block is recoverable, handing a pointer to a heap that never
   issued it is not. `ci/check-guards.sh` plants that mistake to prove the check
   is live.
 
-What it costs: one `ZtextAllocator` per **distinct** allocator ever installed
+What it costs: one `ZtypesetAllocator` per **distinct** allocator ever installed
 (installing the same one twice reuses its entry), allocated with `malloc` and
 never freed, because it has to outlive the last block it issued. That is the
-only allocation ztext makes outside the installed allocator.
+only allocation ztypeset makes outside the installed allocator.
 
 The header check is a detector, not a checksum: sixteen bytes leave no room for
 a magic number, so a prefix that was overrun into garbage whose two fields
@@ -315,7 +315,7 @@ deallocation, is an allocator index past the end of the registry and an
 alignment that is not a power of two at or below `max_align_t`'s.
 
 `reallocate` is optional, and returning null from it means *"I decline"*, not
-*"out of memory"* — ztext falls back to allocate-copy-free either way. That
+*"out of memory"* — ztypeset falls back to allocate-copy-free either way. That
 distinction is load-bearing; see [what the tests found](#what-the-tests-found).
 
 ### Determinism
@@ -326,7 +326,7 @@ every machine. Two things had to be done for that to be true:
 - **The process locale is ignored, on both paths that could read it.**
   HarfBuzz's `guess_segment_properties` fills an unset language from
   `setlocale(LC_CTYPE, NULL)`, so out of the box two machines shape
-  differently. ztext seeds the buffer so it cannot, and applies
+  differently. ztypeset seeds the buffer so it cannot, and applies
   language-specific features only when you pass a language explicitly. The
   second path is not shaping at all: the autohinter shapes each script's
   blue-zone strings through HarfBuzz and does let it guess, so hinting could
@@ -336,13 +336,13 @@ every machine. Two things had to be done for that to be true:
   define rather than an absence.
 - **`FREETYPE_PROPERTIES` is ignored.** `FT_Init_FreeType` reads that
   environment variable and lets it change the TrueType interpreter version and
-  the autohinter. ztext does not call the function that does it.
+  the autohinter. ztypeset does not call the function that does it.
 - **HarfBuzz's three are ignored too.** It reads `HB_SHAPER_LIST`,
-  `HB_FONT_FUNCS` and `HB_FACE_LOADER`, and two of them changed what ztext
+  `HB_FONT_FUNCS` and `HB_FACE_LOADER`, and two of them changed what ztypeset
   rendered: with `HB_SHAPER_LIST=fallback` five golden tests failed — standard
   ligatures stopped applying, and moving a variation axis stopped moving the
   shaped result. `HB_FONT_FUNCS=ft` leaked 216 bytes, because hb-ft's font
-  funcs open an `FT_Face` from an `FT_Library` ztext neither owns nor frees.
+  funcs open an `FT_Face` from an `FT_Library` ztypeset neither owns nor frees.
   The build passes `-DHB_NO_GETENV`, which makes `getenv` return null inside
   HarfBuzz.
 
@@ -366,7 +366,7 @@ propagates:
 - A `Shaper` handles one call at a time; give each thread its own.
 - `Paragraph` touches FreeType not at all. Once built it is immutable and
   readable from several threads.
-- The installed allocator is process-wide and must be thread-safe if ztext is
+- The installed allocator is process-wide and must be thread-safe if ztypeset is
   used from more than one thread.
 
 ### Font and Face are separate, and why the bitmap is copied
@@ -394,7 +394,7 @@ Noto Sans, x86_64-windows-gnu:
 That is 56% off a size. The absolute bytes move with the platform, the
 allocator and the build options; the ratio is the claim, and `ci/measurements.sh`
 reprints both rows on whatever machine you run it. Blind spot: the bench counts
-what ztext's allocator seam is asked for, so it cannot attribute a byte to
+what ztypeset's allocator seam is asked for, so it cannot attribute a byte to
 FreeType rather than HarfBuzz, and it does not see the host allocator's own
 per-block overhead.
 
@@ -420,14 +420,14 @@ pointer really is freed by the next load through any sibling. The copy is one
 memcpy of a few hundred bytes against a rasterisation measured in microseconds,
 the buffer is reused so steady state still allocates nothing, and the rule got
 *narrower* rather than wider -- "this face", not "any face of this font". It
-also lets ztext promise a tightly
+also lets ztypeset promise a tightly
 packed, top-down bitmap, so a consumer cannot render upside down by ignoring
 FreeType's signed pitch.
 
 No handle has a **destruction order**: whichever of a pair is released second
 frees what they share. That covers the library too, which is the one place it
 is not free -- `FT_Done_Library` destroys every face still registered with it,
-so a library released first would leave its fonts reading freed memory. ztext
+so a library released first would leave its fonts reading freed memory. ztypeset
 counts live fonts and defers the library's own teardown instead, for one
 `size_t` and one `bool` per handle. The alternative was a rule that only a
 comment could state and only a caller could keep, whose violation was a
@@ -435,7 +435,7 @@ use-after-free rather than an error code.
 
 ### Validation at the boundary
 
-Unlike a binding over an unmaintained parser, ztext is **not** compensating for
+Unlike a binding over an unmaintained parser, ztypeset is **not** compensating for
 upstreams that check nothing -- but that is not equally true of all four, and
 the difference is worth stating rather than smoothing over.
 
@@ -445,11 +445,11 @@ carries that table, with what was checked and when; it is not repeated here,
 because a fact written in two documents is a fact that can go stale in one of
 them while the other still reads as current.
 
-What ztext does about it is the part that belongs in this section: every
+What ztypeset does about it is the part that belongs in this section: every
 buffer is validated here, before SheenBidi or libunibreak see a byte of it.
 That is a boundary check and not a substitute for fuzzing them.
 
-ztext's job is narrower and it should be said plainly:
+ztypeset's job is narrower and it should be said plainly:
 
 - **Not adding holes of its own** — null and size checks at every entry point,
   overflow-checked arithmetic in the allocator and the array helper, and
@@ -459,7 +459,7 @@ ztext's job is narrower and it should be said plainly:
   three encodings it arrived in. HarfBuzz substitutes U+FFFD for malformed
   input and SheenBidi has its own recovery. Reasonable for a text editor,
   wrong for an engine reading a localisation table, where malformed input
-  means the table is corrupt. ztext returns `InvalidText`. Text enters once:
+  means the table is corrupt. ztypeset returns `InvalidText`. Text enters once:
   a `Paragraph` validates and copies it, and `shapeRun` therefore does not
   walk it again per run — which is a cost, not only a tidiness, and it is
   measured below.
@@ -474,26 +474,26 @@ from untrusted sources, put a signature around them.
 
 ### Versions, and what a bump promises
 
-[CHANGELOG.md](CHANGELOG.md) is the one home for ztext's release history and
+[CHANGELOG.md](CHANGELOG.md) is the one home for ztypeset's release history and
 for the rules its numbers follow: with the major at 0 the MINOR position is
 the breaking one, an ABI change lands as one commit, and the
-`ZtextAbiLayout` handshake grows with the struct that changed.
+`ZtypesetAbiLayout` handshake grows with the struct that changed.
 
-The version itself is written in three files -- `ffi/ztext.h`'s macros,
+The version itself is written in three files -- `ffi/ztypeset.h`'s macros,
 `build.zig.zon`, and that changelog's newest heading -- and
 `ci/measurements.sh --check` fails if they disagree, including if one of the
 three patterns stops matching. A policy nothing checks is a paragraph.
 
 ### The ABI guard, in both directions
 
-Downwards, at the upstreams: `_Static_assert`s in `ffi/ztext_abi.c` fail the
-**build** if a re-vendor changes the shape of something ztext depends on —
+Downwards, at the upstreams: `_Static_assert`s in `ffi/ztypeset_abi.c` fail the
+**build** if a re-vendor changes the shape of something ztypeset depends on —
 `hb_position_t`'s width, `FT_Bitmap::pitch` staying *signed* (a width check
 alone would let an upstream change to `unsigned` through, and every bottom-up
 glyph would then render as garbage), `SBLevel` being a byte. That is the payoff
 for stopping upstream types at the C boundary.
 
-Upwards, at Zig: the wrapper hand-writes `extern struct`s mirroring `ztext.h`,
+Upwards, at Zig: the wrapper hand-writes `extern struct`s mirroring `ztypeset.h`,
 and nothing in either compiler checks they still agree. **Three** guards close
 that, each answering a question the other two cannot, and each validated by
 breaking it on purpose rather than by passing:
@@ -511,13 +511,13 @@ breaking it on purpose rather than by passing:
   which a check on the last enumerator alone cannot do — renumbering a *middle*
   one leaves the last unchanged. And the sweep runs in both directions: a
   function the header exports that `c.zig` never declared fails too.
-- **`ztextAbiProbe()`** writes a distinct marker into every field of every
+- **`ztypesetAbiProbe()`** writes a distinct marker into every field of every
   shared struct so the Zig side reads each one back. This is the only guard
   that compares the declarations against the **compiled library** rather than
   against the header, and the two diverge exactly when a header is preprocessed
   with different macros than the library was built with — the axis a
   header-only comparison is blind to by construction. It is also the guard that
-  needs no source at all: it would catch a prebuilt `libztext` from a different
+  needs no source at all: it would catch a prebuilt `libztypeset` from a different
   configuration.
 - **`tests/c_smoke.c`** drives the whole API from C, with no Zig in the
   picture. That is what covers the cross-check's documented residue: translate-c
@@ -526,23 +526,23 @@ breaking it on purpose rather than by passing:
   proves the allocator seam is genuinely in use, by asserting allocations
   balance.
 
-`ztextAbiLayout()` remains part of the C API — a non-Zig host still wants a way
+`ztypesetAbiLayout()` remains part of the C API — a non-Zig host still wants a way
 to self-check what it linked against — but it is no longer the primary guard
 and is not grown by hand as the API grows.
 
 The naming convention the cross-check relies on is load-bearing, not cosmetic:
 translate-c flattens a C enum to an integer alias and loses which enumerators
-belonged to it, so `ZTEXT_<TYPE>_<FIELD>` is the only thing that can pair them
+belonged to it, so `ZTYPESET_<TYPE>_<FIELD>` is the only thing that can pair them
 back up. That is why the header's enumerators are named strictly, with no
 readable-but-irregular exceptions.
 
 One thing the cross-check does **not** need, and the reason is measured rather
-than assumed: macro wiring. `ffi/ztext.h` includes only `<stddef.h>` and
-`<stdint.h>` and is sensitive to exactly one macro, `ZTEXT_SHARED`, which
+than assumed: macro wiring. `ffi/ztypeset.h` includes only `<stddef.h>` and
+`<stdint.h>` and is sensitive to exactly one macro, `ZTYPESET_SHARED`, which
 changes an attribute and no type; every FreeType and HarfBuzz configuration
 macro reaches the implementation, never the installed header. A package whose
 public header changes type widths with its build options would have to forward
-those macros into the `@cImport`; ztext's does not.
+those macros into the `@cImport`; ztypeset's does not.
 
 ### Build hygiene
 
@@ -552,19 +552,19 @@ those macros into the `@cImport`; ztext's does not.
 - FreeType's configuration lives in `ffi/`, not `libs/`, so the vendored trees
   stay byte-identical to upstream and `ci/verify-vendor.sh` can prove it.
 - No `-fno-access-control`. Zig's C sanitizer is **opt-in** (`-Dsanitize_c=true`)
-  rather than tied to `optimize`, and ztext's own Debug runs ask for it. A
+  rather than tied to `optimize`, and ztypeset's own Debug runs ask for it. A
   library that turns it on by default forces its runtime into every consumer's
-  link — a consumer who writes `b.dependency("ztext", .{})` and forgets to
+  link — a consumer who writes `b.dependency("ztypeset", .{})` and forgets to
   forward `optimize` otherwise gets `undefined symbol: __ubsan_handle_*`, which
   names nothing they can act on.
 - Only headers whose implementation is actually compiled are installed. A
-  header for a module ztext leaves out would compile for a consumer and then
+  header for a module ztypeset leaves out would compile for a consumer and then
   fail at link; `FT_Stroker_New` was the one that made the point.
 - A shared build compiles with `-fvisibility=hidden`, so the upstream symbols
   statically inside it stay internal instead of being exported alongside
-  ztext's own. What remains beyond ztext's entry points is FreeType's public
+  ztypeset's own. What remains beyond ztypeset's entry points is FreeType's public
   API, which upstream marks `visibility("default")` itself; if you load a
-  shared ztext beside a system FreeType, link statically or add a version
+  shared ztypeset beside a system FreeType, link statically or add a version
   script. `ci/measurements.sh` prints the exact counts, and they are printed
   rather than quoted here on purpose: a macOS `.dylib`, a Linux `.so` and a
   Windows `.dll` do not export the same set, so any single number in this
@@ -576,7 +576,7 @@ those macros into the `@cImport`; ztext's does not.
   | option | default | what it changes |
   |---|---|---|
   | `-Dshared` | `false` | builds the C library as a shared object, with `-fvisibility=hidden` |
-  | `-Dsanitize_c` | `false` | compiles ztext's own C with Zig's undefined-behaviour sanitizer |
+  | `-Dsanitize_c` | `false` | compiles ztypeset's own C with Zig's undefined-behaviour sanitizer |
 
   A third option added to `build.zig` and not to that table fails
   `ci/measurements.sh --check`: an option a caller cannot find is an option
@@ -604,7 +604,7 @@ would expect of an allocation total and is worth checking rather than assuming.
 | | Cost | Read this as |
 |---|---|---|
 | Shape a 43-character run | **~2.5 µs** | 2.25-2.70 µs. Reusing one `Shaper`. A separate test proves warm shapes allocate **nothing**; the count is under [What the tests actually do](#what-the-tests-actually-do). |
-| The same run, 4300 characters around it, through `shape` | **~3.3 µs** | HarfBuzz decodes the run and at most five characters either side, so its cost does not move. The extra **~1.05 µs** is ztext validating the whole borrowed buffer — about 0.25 ns per code unit, paid on every call. |
+| The same run, 4300 characters around it, through `shape` | **~3.3 µs** | HarfBuzz decodes the run and at most five characters either side, so its cost does not move. The extra **~1.05 µs** is ztypeset validating the whole borrowed buffer — about 0.25 ns per code unit, paid on every call. |
 | Analyse a 4300-character paragraph, all three segmentation passes | **~265 µs** | 26 898 B live. Bidi, itemisation, the copy of the text, UAX #14 and both of #29. |
 | The same paragraph, no segmentation | **~115 µs** | 13 982 B live. One variable between the two arms: **the three passes are 56.6% of the time and 12 916 B of the memory**, which is why they are a choice and not a policy. |
 | The same run, through `shapeRun` | **~2.25 µs** | Identical to the 43-character case: a paragraph's text was validated when the paragraph was created. Shaping an N-unit paragraph as R runs costs R walks of N through `shape` and none through `shapeRun`. |
@@ -624,7 +624,7 @@ FreeType's SDF output is verified rather than assumed: a test asserts the field
 grows by the spread on every side, that a scanline across an `o` crosses the
 128 mid-point exactly four times, and that it ramps rather than steps.
 
-**On the optional glyph flags.** ztext asks HarfBuzz for `UNSAFE_TO_CONCAT` and
+**On the optional glyph flags.** ztypeset asks HarfBuzz for `UNSAFE_TO_CONCAT` and
 `SAFE_TO_INSERT_TATWEEL` on every shape, which upstream withholds by default
 because computing them costs something. That cost was measured on this row
 rather than argued about: three runs of the unchanged tree gave 2.35, 2.45 and
@@ -657,7 +657,7 @@ has to hold unchanged; that is what proves `-DHB_NO_GETENV` is doing its job
 rather than being believed. So `zig build test` reports **294/294 passed**.
 
 The tests that touch a face, a shaper or a paragraph install
-`std.testing.allocator`, so any allocation ztext or an upstream fails to return
+`std.testing.allocator`, so any allocation ztypeset or an upstream fails to return
 fails the test; the rest check tags, versions and the ABI and allocate nothing.
 
 - **Golden shaping** against the committed fonts: ligature substitution and
@@ -670,9 +670,9 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
 - **Bidi**: base-level resolution both ways, visual runs that tile the
   paragraph exactly once with no byte dropped or doubled, and script runs that
   are contiguous and complete.
-- **Wrapping, end to end**: break opportunities from ztext, the width decision
-  from the test, reordering per line from ztext, shaping with context from
-  ztext — asserting the lines tile the paragraph exactly once. Removing the
+- **Wrapping, end to end**: break opportunities from ztypeset, the width decision
+  from the test, reordering per line from ztypeset, shaping with context from
+  ztypeset — asserting the lines tile the paragraph exactly once. Removing the
   one line that marks a paragraph's end as a break makes it fail, which is how
   that bug was found rather than shipped.
 - **A caret moves by grapheme**: `e` + combining acute is one grapheme in two
@@ -707,7 +707,7 @@ fails the test; the rest check tags, versions and the ABI and allocate nothing.
   script, with the script pieces reversed inside a right-to-left run.
 - **Bracket mirroring stays HarfBuzz's job**: `(` shaped right-to-left must
   come back as the `)` glyph and vice versa, which pins the upstream behaviour
-  ztext relies on instead of duplicating.
+  ztypeset relies on instead of duplicating.
 - **The externs match the header**, checked by reflection over every public
   declaration rather than a hand-maintained list — see
   [The ABI guard](#the-abi-guard-in-both-directions).
@@ -761,7 +761,7 @@ coverage.
 `ci/api-surface.sh --gaps` holds the other half. Every entry point has up to
 six homes -- the header, an implementation, a Zig extern, a Zig wrapper, a
 test, this file -- and the script fails if one of them is empty without a
-written reason. Not every hole is a defect: `ztextFaceFont` has no Zig wrapper
+written reason. Not every hole is a defect: `ztypesetFaceFont` has no Zig wrapper
 because the Zig `Face` already carries its `Font` as a field, and wrapping the
 accessor too would be a second way to ask one question. That is a decision, so
 it is declared in the script. Anything not declared is a failure, which is the
@@ -773,7 +773,7 @@ Two bugs worth naming, because both were invisible from reading the code:
 
 **Shaping silently lost all OpenType layout when a host installed its own
 allocator.** Zig's `std.mem.Allocator` only resizes in place and returns null
-the moment a block must move. ztext reported that upward as an allocation
+the moment a block must move. ztypeset reported that upward as an allocation
 failure — and HarfBuzz treats a failed allocation as a reason to abandon
 optional work and carry on. The symptom was not a crash or an error: it was
 Arabic rendered as unjoined nominal letters, correct-looking and completely
@@ -816,21 +816,21 @@ keep, each found by building something rather than reading something:
 were registered behind `if (b.pkg_hash.len == 0)`, and `Dependency.artifact`
 resolves by scanning install steps — so the README's "use the upstreams
 directly" example could never have worked, while every in-repo test passed.
-`tests/consumer/` now builds ztext the way a dependant does, on every CI host.
+`tests/consumer/` now builds ztypeset the way a dependant does, on every CI host.
 
 **FreeType's per-library allocator was not per-library.** The claim appeared in
 five places; the shims ignored their `FT_Memory` and used the global. Swapping
 allocators mid-life then handed a library's FreeType blocks to an allocator
 that never issued them — an abort under Zig's DebugAllocator, heap corruption
 under a pool. Both halves are fixed, and the Zig wrapper cannot re-break it:
-`setAllocator` copies the allocator into a slot ztext owns and never frees, so
+`setAllocator` copies the allocator into a slot ztypeset owns and never frees, so
 there is no single mutable global for a later install to overwrite.
 
 **Seven headers promised an API that was not there.** Four HarfBuzz headers —
 `hb-gpu.h`, `hb-raster.h`, `hb-subset-depend.h`, `hb-vector.h` — were installed
 with no compiled translation unit behind them, which is a compile for the
 consumer and a link error afterwards; `hb-subset-depend.h` could not even be
-compiled, since it opens by demanding a header from a library ztext does not
+compiled, since it opens by demanding a header from a library ztypeset does not
 build. FreeType's `ftrender.h` included `ftglyph.h`, which was not installed at
 all, and `freetype.h` declared three entry points — `FT_Get_FSType_Flags`,
 `FT_Face_CheckTrueTypePatents`, `FT_Face_SetUnpatentedHinting` — whose sources
@@ -847,7 +847,7 @@ remembering: `setAllocator` warms those caches itself, so there is no longer a
 call to omit.
 
 Then this page was corrected to `shapeRun` — the run shaped in the context
-of the whole text — and the same example in `src/ztext.zig`'s module doc
+of the whole text — and the same example in `src/ztypeset.zig`'s module doc
 went on shaping `text[run.offset..][0..run.length]`, which is precisely the
 defect this paragraph claimed was fixed. Two homes for one example, and
 nothing compiled either. Now there is one:
@@ -855,23 +855,23 @@ nothing compiled either. Now there is one:
 runs, both documents quote its marked regions, and a test fails if either has
 drifted.
 
-**The glyph structs did not say what they were.** A `ZtextGlyph` carried
+**The glyph structs did not say what they were.** A `ZtypesetGlyph` carried
 positions and nothing about the text around it, so a host wrapping a paragraph
 had to re-shape every line after breaking it — the flags HarfBuzz computes to
-make that unnecessary stopped at ztext's boundary. And a `ZtextGlyphBitmap`
+make that unnecessary stopped at ztypeset's boundary. And a `ZtypesetGlyphBitmap`
 described its pixels without saying how to read them: A8 coverage and an SDF
 are both one byte per pixel, so a caller that remembered the wrong
-`ZtextRenderMode` got no error, just a washed-out picture. Both were the same
+`ZtypesetRenderMode` got no error, just a washed-out picture. Both were the same
 defect — a value whose meaning lived somewhere other than the value.
 
-`ZtextGlyph` now carries `flags`, an OR of `ZtextGlyphFlag` mirroring
-HarfBuzz's own with a static assertion per flag; `ZtextGlyphBitmap` carries
+`ZtypesetGlyph` now carries `flags`, an OR of `ZtypesetGlyphFlag` mirroring
+HarfBuzz's own with a static assertion per flag; `ZtypesetGlyphBitmap` carries
 `format`, written even for a glyph with no ink so it is meaningful before the
 NULL check. Both structs changed size, so the ABI went 0.1 to 0.2 in one
-change: the header's version macros, `build.zig.zon`, the `ZtextAbiLayout`
-handshake, the `ztextAbiProbe` markers and the Zig mirror move together, and
+change: the header's version macros, `build.zig.zon`, the `ZtypesetAbiLayout`
+handshake, the `ztypesetAbiProbe` markers and the Zig mirror move together, and
 `ci/measurements.sh --check` fails if the version homes disagree. There are
-four: `ffi/ztext.h`'s macros, `build.zig.zon`, the newest heading in
+four: `ffi/ztypeset.h`'s macros, `build.zig.zon`, the newest heading in
 `CHANGELOG.md`, and the status line at the top of this file. The last of those
 was not checked until it was caught reading **v0.1** through the whole of 0.2's
 development — three homes gated and a fourth in prose beside them, which is
@@ -880,7 +880,7 @@ as though it covered every one of them.
 
 A fifth was found and removed rather than gated: a test whose subject was
 `Version.format` asserted the literals `"0.1.0"` and `"2.14.3"`, so the first
-bump of ztext or of FreeType would have turned a formatting test red for a
+bump of ztypeset or of FreeType would have turned a formatting test red for a
 reason that had nothing to do with formatting. It now formats a synthetic
 version it owns, and compares the real one against its own fields.
 
@@ -891,13 +891,13 @@ stores it, the TOP edge of the stroke, while FreeType subtracts half the
 thickness to convert the TrueType meaning to its own
 (`libs/freetype/src/sfnt/sfobjs.c`). For Noto Sans that is -100 against -125
 design units. Neither is wrong and a caller drawing a rectangle needs to know
-which edge it was handed, so the difference is now stated in `ffi/ztext.h` and
+which edge it was handed, so the difference is now stated in `ffi/ztypeset.h` and
 pinned by a test that asserts the gap is exactly half the thickness. The first
 draft of that test asserted the two would *agree*, which is what turned an
 assumption into a measurement.
 
 **A documented contract that the source contradicted.** The first draft of
-`ztextFontVariantGlyphIndex` said 0 also meant "this font maps the pair by
+`ztypesetFontVariantGlyphIndex` said 0 also meant "this font maps the pair by
 default". FreeType does the opposite: for a sequence recorded as the default it
 resolves the base character through the Unicode cmap and returns that glyph
 (`tt_cmap14_char_var_index`, `libs/freetype/src/sfnt/ttcmap.c`). The corrected
@@ -949,7 +949,7 @@ coverage pass builds a HarfBuzz buffer and lets it guess its segment
 properties, which interns the default language — a **fifth** process-lifetime
 HarfBuzz singleton, on a path that did not exist in this package before, and
 charged to whichever allocator was installed the first time a glyph was
-*hinted* rather than shaped. `ztextWarmup()` now touches it, and the C smoke
+*hinted* rather than shaped. `ztypesetWarmup()` now touches it, and the C smoke
 test — the one place that counts every byte in and out — now hints with the
 autohinter, because a byte count that never meets a path cannot say anything
 about it.
@@ -962,10 +962,10 @@ MSVC ABI — cross-compiles eight targets, verifies the vendored trees against
 their upstreams, and runs the mutation harness below. See
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 
-`tests/consumer/` is worth singling out: it builds ztext the way a dependant
+`tests/consumer/` is worth singling out: it builds ztypeset the way a dependant
 does, which is a genuinely different code path from building it in place. Every
 artifact used to be registered behind `if (b.pkg_hash.len == 0)`, so
-`dep.artifact("harfbuzz")` panicked for anyone who took ztext as a dependency
+`dep.artifact("harfbuzz")` panicked for anyone who took ztypeset as a dependency
 while every in-repo test passed. A promise nothing exercises is a promise that
 breaks.
 
@@ -1011,7 +1011,7 @@ they described, and a reader had no way to tell which rows those were.
 | Synthetic styles | a style applied to the ink and not to the shaping; emboldening asked for in place, so the advance never moves; the lazily built font never told what style it was born into; a restyled face that still passes for the one a run was shaped against; a strength quantised back to the one weight upstream ships; a strength that is not a number, taken at face value |
 | Encodings | SheenBidi told the text is UTF-8 whatever it is; libunibreak given UTF-16 through its UTF-8 entry point; HarfBuzz handed UTF-16 as UTF-8; a UTF-16 surrogate pair treated as two characters |
 | Shaping | a run shaped without the text around it; the optional glyph flags never asked for; extents taken from a face the run was not shaped against; a rejected shape leaves the previous run queryable; a paragraph run shaped left to right whatever its level; a run's direction and the caller's, both accepted; a hand-built run trusted about its own bounds |
-| Allocator | a declined reallocate reported as out of memory; a block freed through whatever is installed now; a library-owned block released by the wrong allocator; the process-lifetime caches left unwarmed; an allocator slot per install rather than per allocator; SheenBidi handed memory ztext did not write |
+| Allocator | a declined reallocate reported as out of memory; a block freed through whatever is installed now; a library-owned block released by the wrong allocator; the process-lifetime caches left unwarmed; an allocator slot per install rather than per allocator; SheenBidi handed memory ztypeset did not write |
 | Documentation | a documented example edited away from the program |
 | Reproducibility | the environment allowed to reach HarfBuzz |
 | OpenType metrics | a metric tag nobody vetted, forwarded to HarfBuzz |
@@ -1166,7 +1166,7 @@ Exposed today:
   or vertically. FreeType's **Harmony** mode — three samples a third of a pixel
   apart rather than one sample through a filter — because
   `FT_CONFIG_OPTION_SUBPIXEL_RENDERING` is off, which is upstream's default and
-  needs no filter to be chosen; see `ffi/ztext_ftoption.h` for the whole
+  needs no filter to be chosen; see `ffi/ztypeset_ftoption.h` for the whole
   choice. `width`, `height`, `left` and `top` are in **pixels** in every
   format and `pitch` is bytes per pixel row, so `pitch * height` is the buffer
   and no consumer has to know which of the three numbers FreeType counts in
@@ -1174,13 +1174,13 @@ Exposed today:
 - **A pen traced round every glyph** (`setStroke`): FreeType's stroker, with a
   radius in pixels, a line cap, a line join and a miter limit, and three
   styles, named for what each one is: the glyph **grown** by the radius (the
-  bottom layer of two-pass outlined text, and what `ztext.outline(radius)`
+  bottom layer of two-pass outlined text, and what `ztypeset.outline(radius)`
   selects), the glyph **shrunk** by it, or the hollow **band** the pen sweeps
   between the two. It runs at
   glyph loading, so `glyphExtents`, `renderGlyph` and `decomposeOutline` all
   see one stroked outline; it moves no advance, because a stroked glyph is
   wider than its ink box and the run is still laid out on the font's own
-  advances. `ztext.outline(radius)` is the pen a game UI wants
+  advances. `ztypeset.outline(radius)` is the pen a game UI wants
 - **A 2x2 transform per face** (`setTransform`): rotation, scale, mirror,
   shear, composed after the synthetic styles so emboldening stays isotropic in
   the font's own space. It maps the glyph **image** and no advance — neither
@@ -1232,23 +1232,23 @@ Not exposed:
     garbage pixels rather than as an error.
 - Reusable `Paragraph` scratch. Less valuable than it looks: SheenBidi
   allocates per paragraph internally regardless, so a reusable handle would
-  save ztext's copy and nothing else.
+  save ztypeset's copy and nothing else.
 
 Deliberately out of scope: an atlas, a layout engine, justification, a caret
 *model*, rich text. Those are a host's job, and keeping them out is what makes
 this package reusable.
 
 Note exactly where the line falls, because "no line breaking" would be the
-easier claim and the wrong one. ztext says where a break is **permitted**; the
+easier claim and the wrong one. ztypeset says where a break is **permitted**; the
 host decides
 where one **happens**, because that needs a width and a width is not a property
-of text. Same for the caret: ztext says where the grapheme boundaries are, the
+of text. Same for the caret: ztypeset says where the grapheme boundaries are, the
 host owns the caret.
 
 ### The rest of the surface, by name
 
 The sections above describe capabilities. These are the calls that carry
-them, gathered here so that the list of what ztext exposes and the list of
+them, gathered here so that the list of what ztypeset exposes and the list of
 what it names are the same list. Thirty public functions of the Zig wrapper
 appeared nowhere in this file -- not unexplained, but unfindable by anyone
 reading the documentation rather than the source. `ci/api-surface.sh` now
@@ -1285,12 +1285,12 @@ fails when a public function is named nowhere in README.md.
   arrays, which is why it accepts both.
 - **Why the last call failed, in words**: `lastDetail` returns this thread's
   most recent error detail, which is where FreeType's own error name survives
-  ztext's flat `Result`.
+  ztypeset's flat `Result`.
 
 
 ## Licence
 
-ztext's own code is MIT — see [LICENSE](LICENSE).
+ztypeset's own code is MIT — see [LICENSE](LICENSE).
 
 The vendored upstreams are **FreeType** under the FreeType License (elected
 explicitly over the GPLv2 alternative), **HarfBuzz** under "Old MIT",
@@ -1298,7 +1298,7 @@ explicitly over the GPLv2 alternative), **HarfBuzz** under "Old MIT",
 static linking into a closed commercial product; none requires source
 disclosure, royalties or on-screen attribution.
 
-If you ship a binary containing ztext, [LICENSES.md](LICENSES.md) is the file
+If you ship a binary containing ztypeset, [LICENSES.md](LICENSES.md) is the file
 to read — it says exactly what has to appear in your third-party notices,
 which of FreeType's four internal sub-licences actually reaches a binary, and
 what the FTL's incompatibility with GPLv2 does and does not mean for you. It
@@ -1314,7 +1314,7 @@ Issues and pull requests are welcome. Three things to know first:
 
 - **`libs/` is vendored verbatim and must not be edited.** Changes there are
   lost at the next re-vendor, and `ci/verify-vendor.sh` will fail. If upstream
-  needs fixing, fix it upstream; if ztext needs to work around upstream, do it
+  needs fixing, fix it upstream; if ztypeset needs to work around upstream, do it
   in `ffi/` and record it in [UPSTREAM.md](UPSTREAM.md).
 - **Run `ci/run.sh` before pushing** — or `ci/install-hooks.sh` once, and it
   runs itself.

@@ -1,5 +1,5 @@
 /*
- * The exact set of FreeType modules ztext compiles in.
+ * The exact set of FreeType modules ztypeset compiles in.
  *
  * FreeType includes this file wherever it would have included
  * <freetype/config/ftmodule.h>; build.zig points FT_CONFIG_MODULES_H here. It
@@ -18,7 +18,7 @@
  *                      predate OpenType; no game ships them.
  *   pfr, winfnt,       Bitmap and legacy formats: PFR, Windows FNT/FON, PCF,
  *   pcf, bdf           BDF.  X11 and DOS-era, not asset-pack material.
- *   raster1            The monochrome rasteriser.  ztext renders A8 coverage
+ *   raster1            The monochrome rasteriser.  ztypeset renders A8 coverage
  *                      and SDF; there is no API path that asks for 1-bit.
  *   svg                OT-SVG needs a caller-supplied SVG rendering hook, which
  *                      would be a whole second dependency.

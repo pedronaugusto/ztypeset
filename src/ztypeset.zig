@@ -1,20 +1,20 @@
-//! ztext -- text shaping and glyph rasterisation for Zig.
+//! ztypeset -- text shaping and glyph rasterisation for Zig.
 //!
 //! Four vendored upstreams behind one package: FreeType rasterises, HarfBuzz
-//! shapes, SheenBidi orders, libunibreak segments. ztext owns no atlas, no layout, no line breaking
+//! shapes, SheenBidi orders, libunibreak segments. ztypeset owns no atlas, no layout, no line breaking
 //! and no rich text -- a host owns those, and keeping them out is what makes
 //! this reusable.
 //!
 //! ```zig
-//! const ztext = @import("ztext");
+//! const ztypeset = @import("ztypeset");
 //!
-//! // Copied, not borrowed: ztext keeps its own copy for as long as any handle
+//! // Copied, not borrowed: ztypeset keeps its own copy for as long as any handle
 //! // can reach it. Installing also warms the caches the upstreams keep for the
-//! // life of the process, so this allocator only ever sees ztext's working set.
-//! try ztext.setAllocator(gpa_state.allocator());
-//! defer ztext.resetAllocator();
+//! // life of the process, so this allocator only ever sees ztypeset's working set.
+//! try ztypeset.setAllocator(gpa_state.allocator());
+//! defer ztypeset.resetAllocator();
 //!
-//! const library = try ztext.Library.init();
+//! const library = try ztypeset.Library.init();
 //! defer library.deinit();
 //!
 //! // The bytes are BORROWED and must outlive the font. Handles have no
@@ -27,10 +27,10 @@
 //! const face = try font.face(0, 16);
 //! defer face.deinit();
 //!
-//! const shaper = try ztext.Shaper.init();
+//! const shaper = try ztypeset.Shaper.init();
 //! defer shaper.deinit();
 //!
-//! const paragraph = try ztext.Paragraph.init(text, .{});
+//! const paragraph = try ztypeset.Paragraph.init(text, .{});
 //! defer paragraph.deinit();
 //!
 //! // shapingRuns, not visualRuns: one visual run can span several scripts, and
@@ -77,9 +77,9 @@ pub const lastErrorDetail = error_mod.lastDetail;
 /// `setAllocator` calls this before it installs anything, so a host never has
 /// to know to. Two caches are out of its reach because both need a real face:
 /// shape one throwaway run before installing if you audit and use either. See
-/// `ffi/ztext.h` and UPSTREAM.md for what they are.
+/// `ffi/ztypeset.h` and UPSTREAM.md for what they are.
 pub fn warmup() void {
-    c.ztextWarmup();
+    c.ztypesetWarmup();
 }
 
 pub const setAllocator = memory_mod.setAllocator;
@@ -162,7 +162,7 @@ pub const runDirection = bidi_mod.runDirection;
 
 /// Build options the C library was actually compiled with, so a consumer can
 /// branch on them instead of assuming.
-pub const options = @import("ztext_options");
+pub const options = @import("ztypeset_options");
 
 //=============================================================================
 // Versions
@@ -188,26 +188,26 @@ pub const Version = struct {
 
 /// Version of these bindings.
 pub fn version() Version {
-    return Version.unpack(c.ztextVersion());
+    return Version.unpack(c.ztypesetVersion());
 }
 
 /// Versions of the vendored upstreams, as compiled in -- not as UPSTREAM.md
 /// claims.
 pub fn freetypeVersion() Version {
-    return Version.unpack(c.ztextFreetypeVersion());
+    return Version.unpack(c.ztypesetFreetypeVersion());
 }
 
 pub fn harfbuzzVersion() Version {
-    return Version.unpack(c.ztextHarfbuzzVersion());
+    return Version.unpack(c.ztypesetHarfbuzzVersion());
 }
 
 pub fn sheenbidiVersion() Version {
-    return Version.unpack(c.ztextSheenbidiVersion());
+    return Version.unpack(c.ztypesetSheenbidiVersion());
 }
 
 /// Version of the vendored libunibreak, which supplies UAX #14 and #29.
 pub fn unibreakVersion() Version {
-    return Version.unpack(c.ztextUnibreakVersion());
+    return Version.unpack(c.ztypesetUnibreakVersion());
 }
 
 //=============================================================================
@@ -250,20 +250,20 @@ fn pascal(comptime snake: []const u8) []const u8 {
     }
 }
 
-/// The `c.zig` type a `ZtextAbiLayout` field prefix names.
+/// The `c.zig` type a `ZtypesetAbiLayout` field prefix names.
 fn layoutType(comptime prefix: []const u8) type {
     if (!@hasDecl(c, pascal(prefix))) {
-        @compileError("ZtextAbiLayout has a field named for `" ++ prefix ++
+        @compileError("ZtypesetAbiLayout has a field named for `" ++ prefix ++
             "`, so src/c.zig must declare the type `" ++ pascal(prefix) ++
             "`, and it does not");
     }
     return @field(c, pascal(prefix));
 }
 
-/// What `ZtextAbiLayout.<name>` must hold, derived from the field's own name.
+/// What `ZtypesetAbiLayout.<name>` must hold, derived from the field's own name.
 ///
 /// There is no list of checks here, and that is the point: the NAME is the
-/// rule, so a field added to `ZtextAbiLayout` is checked the moment it exists
+/// rule, so a field added to `ZtypesetAbiLayout` is checked the moment it exists
 /// and a field whose name fits no rule is a compile error. Four fields --
 /// `charmap_size`, `charmap_align`, `matrix_size`, `matrix_align` -- were
 /// added to that struct and checked by nothing at all, which is what a
@@ -282,7 +282,7 @@ fn layoutExpectation(comptime name: []const u8) usize {
         const Owner = layoutType(name[0..at]);
         const member = name[at + "_offset_".len ..];
         if (!@hasField(Owner, member)) {
-            @compileError("ZtextAbiLayout." ++ name ++ " names a field `" ++ member ++
+            @compileError("ZtypesetAbiLayout." ++ name ++ " names a field `" ++ member ++
                 "` that " ++ @typeName(Owner) ++ " does not have");
         }
         return @offsetOf(Owner, member);
@@ -300,9 +300,9 @@ fn layoutExpectation(comptime name: []const u8) usize {
     if (comptime std.mem.endsWith(u8, name, "_count")) {
         return @typeInfo(layoutType(name[0 .. name.len - "_count".len])).@"enum".fields.len;
     }
-    @compileError("ZtextAbiLayout." ++ name ++
+    @compileError("ZtypesetAbiLayout." ++ name ++
         " ends in none of _size, _align, _offset_<field>, _last or _count, so " ++
-        "src/ztext.zig has no rule for what it should hold");
+        "src/ztypeset.zig has no rule for what it should hold");
 }
 
 test "the C library agrees with the extern declarations in c.zig" {
@@ -310,11 +310,11 @@ test "the C library agrees with the extern declarations in c.zig" {
     // Zig side believes in is checked against what the C translation unit
     // compiled to. A reordered field fails here rather than in production.
     //
-    // Every field, by construction: the sweep is over `ZtextAbiLayout`'s own
+    // Every field, by construction: the sweep is over `ZtypesetAbiLayout`'s own
     // fields and each one's expectation comes from its name, so there is no
     // way to add a field the check does not cover.
     var layout: c.AbiLayout = undefined;
-    c.ztextAbiLayout(&layout);
+    c.ztypesetAbiLayout(&layout);
 
     comptime var checked: usize = 0;
     inline for (@typeInfo(c.AbiLayout).@"struct".fields) |field| {
@@ -322,7 +322,7 @@ test "the C library agrees with the extern declarations in c.zig" {
         const want = comptime layoutExpectation(field.name);
         if (got != want) {
             std.debug.print(
-                "ZtextAbiLayout.{s}: the library says {d}, src/c.zig computes {d}\n",
+                "ZtypesetAbiLayout.{s}: the library says {d}, src/c.zig computes {d}\n",
                 .{ field.name, got, want },
             );
             return error.AbiLayoutDisagrees;
@@ -351,18 +351,18 @@ fn markerOf(value: anytype) u64 {
     return out;
 }
 
-/// What `ztextAbiProbe` writes into each field of each probed struct.
+/// What `ztypesetAbiProbe` writes into each field of each probed struct.
 ///
 /// The one home for the whole expectation. It is keyed by name and the sweep
 /// below requires an entry for EVERY field of every probed struct, so a field
 /// added to any of them is a compile error here rather than a value nothing
-/// checks -- which is what five of ZtextFaceMetrics' fields were: vertical
+/// checks -- which is what five of ZtypesetFaceMetrics' fields were: vertical
 /// ascender, descender, line height, max advance and the has-vertical flag
 /// were in the probe, in the header and in src/c.zig, and in no expectation.
 ///
 /// The markers are written on the Zig side against src/c.zig's own idea of
 /// where each field sits. That is the whole point: the C compiler laid the
-/// struct out from ffi/ztext.h and this reads it back through a layout
+/// struct out from ffi/ztypeset.h and this reads it back through a layout
 /// declared independently, so two same-typed fields that swapped places --
 /// which no size, alignment or offset can see -- come back holding each
 /// other's marker.
@@ -459,15 +459,15 @@ fn probeMarker(comptime name: []const u8) u64 {
         for (probe_markers) |entry| {
             if (std.mem.eql(u8, entry[0], name)) return entry[1];
         }
-        @compileError("ZtextAbiProbe has a field `" ++ name ++
-            "` that src/ztext.zig's probe_markers has no entry for, so nothing " ++
-            "says what ztextAbiProbe should have written into it");
+        @compileError("ZtypesetAbiProbe has a field `" ++ name ++
+            "` that src/ztypeset.zig's probe_markers has no entry for, so nothing " ++
+            "says what ztypesetAbiProbe should have written into it");
     }
 }
 
 /// Every probed field, with the type it has and the marker meant for it.
 ///
-/// Built from `ZtextAbiProbe` itself rather than from the table, so the table
+/// Built from `ZtypesetAbiProbe` itself rather than from the table, so the table
 /// is what has to keep up with the struct and not the other way round.
 const ProbeField = struct { name: []const u8, type_name: []const u8, marker: u64 };
 
@@ -478,7 +478,7 @@ const probe_fields = blk: {
     for (@typeInfo(c.AbiProbe).@"struct".fields) |member| {
         for (@typeInfo(member.type).@"struct".fields) |field| {
             if (n == list.len) {
-                @compileError("ZtextAbiProbe has more fields than src/ztext.zig's " ++
+                @compileError("ZtypesetAbiProbe has more fields than src/ztypeset.zig's " ++
                     "probe_markers has entries, so at least one field's marker is " ++
                     "named by nothing");
             }
@@ -492,8 +492,8 @@ const probe_fields = blk: {
         }
     }
     if (n != list.len) {
-        @compileError("src/ztext.zig's probe_markers has entries for fields " ++
-            "ZtextAbiProbe does not have");
+        @compileError("src/ztypeset.zig's probe_markers has entries for fields " ++
+            "ZtypesetAbiProbe does not have");
     }
     break :blk list;
 };
@@ -513,14 +513,14 @@ comptime {
     @setEvalBranchQuota(1_000_000);
     for (probe_fields, 0..) |field, i| {
         if (field.marker == 0) {
-            @compileError("ZtextAbiProbe." ++ field.name ++ " expects a marker of " ++
+            @compileError("ZtypesetAbiProbe." ++ field.name ++ " expects a marker of " ++
                 "zero, which is also what an untouched field holds");
         }
         for (probe_fields[0..i]) |prev| {
             if (prev.marker == field.marker and
                 std.mem.eql(u8, prev.type_name, field.type_name))
             {
-                @compileError("ZtextAbiProbe." ++ field.name ++ " and " ++ prev.name ++
+                @compileError("ZtypesetAbiProbe." ++ field.name ++ " and " ++ prev.name ++
                     " share the marker, so a swap between them would pass");
             }
         }
@@ -537,17 +537,17 @@ test "every probed field carries the distinct marker the library wrote" {
     // The sweep is over the fields themselves rather than over a list someone
     // maintains, so a field added to any probed struct is a compile error in
     // probe_fields above rather than a value nothing checks. Five of
-    // ZtextFaceMetrics' fields were exactly that: the vertical ascender,
+    // ZtypesetFaceMetrics' fields were exactly that: the vertical ascender,
     // descender, line height, max advance and the has-vertical flag were in
     // the probe, in the header and in src/c.zig, and in no expectation.
     //
-    // Blind spot, stated: the markers say what ztextAbiProbe was WRITTEN to
-    // put in each field. If ffi/ztext_abi.c assigned the wrong marker to the
+    // Blind spot, stated: the markers say what ztypesetAbiProbe was WRITTEN to
+    // put in each field. If ffi/ztypeset_abi.c assigned the wrong marker to the
     // right field and the table were updated to match, both would agree and
     // nothing here would notice. What it catches is the two sides disagreeing
     // about WHERE a field is -- which is the failure that ships.
     var probe: c.AbiProbe = undefined;
-    c.ztextAbiProbe(&probe);
+    c.ztypesetAbiProbe(&probe);
 
     var holes: usize = 0;
     var checked: usize = 0;
@@ -560,13 +560,13 @@ test "every probed field carries the distinct marker the library wrote" {
 
             if (got == 0) {
                 std.debug.print(
-                    "ZtextAbiProbe.{s} is zero: ztextAbiProbe never writes it\n",
+                    "ZtypesetAbiProbe.{s} is zero: ztypesetAbiProbe never writes it\n",
                     .{name},
                 );
                 holes += 1;
             } else if (got != want) {
                 std.debug.print(
-                    "ZtextAbiProbe.{s}: the library wrote {x}, src/ztext.zig expects {x}\n",
+                    "ZtypesetAbiProbe.{s}: the library wrote {x}, src/ztypeset.zig expects {x}\n",
                     .{ name, got, want },
                 );
                 holes += 1;

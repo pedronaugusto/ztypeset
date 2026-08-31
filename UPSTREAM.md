@@ -17,7 +17,7 @@ is what `ci/verify-vendor.sh` compares `git rev-parse HEAD` against.
 ## The FreeType licence election
 
 FreeType is offered under **either** the FreeType License (FTL, a BSD-style
-licence with a credit requirement) **or** GPLv2. ztext takes the **FTL**, and
+licence with a credit requirement) **or** GPLv2. ztypeset takes the **FTL**, and
 says so here because an unrecorded election is an argument waiting to happen:
 a reader who finds only "dual licensed" can reasonably claim the GPL branch
 applies.
@@ -43,14 +43,14 @@ lists at the top of that file.
 
 ## FreeType build configuration
 
-ztext compiles a reduced FreeType. Both configuration headers live in `ffi/`,
+ztypeset compiles a reduced FreeType. Both configuration headers live in `ffi/`,
 not in `libs/`, so the vendored tree stays pristine:
 
-* `ffi/ztext_ftoption.h` includes upstream's `ftoption.h` and then adjusts a
+* `ffi/ztypeset_ftoption.h` includes upstream's `ftoption.h` and then adjusts a
   handful of macros. It is deliberately **not** an edited copy of that file,
   which is what FreeType's own `docs/CUSTOMIZE` suggests — a copy would leave
   ~1000 lines of derived upstream to re-merge on every re-vendor.
-* `ffi/ztext_ftmodules.h` lists the modules registered.
+* `ffi/ztypeset_ftmodules.h` lists the modules registered.
 
 Dropped: Type 1/CID/Type 42, PFR, Windows FNT, PCF, BDF, the monochrome
 rasteriser, OT-SVG, zlib/gzip (and with it WOFF), and classic Mac resource-fork
@@ -58,7 +58,7 @@ fonts. Kept: TrueType, CFF/CFF2, sfnt, psaux/psnames/pshinter, the autohinter,
 the smooth (A8) rasteriser, the SDF renderers, and variable-font support.
 
 **The user-visible consequence:** a WOFF, WOFF2 or Type 1 file is reported as
-`ZTEXT_RESULT_UNSUPPORTED`, not as a broken font. Cook to TTF or OTF.
+`ZTYPESET_RESULT_UNSUPPORTED`, not as a broken font. Cook to TTF or OTF.
 
 ## Known upstream behaviour, worked around or recorded
 
@@ -72,7 +72,7 @@ found by running the code, not by reading it.
 calls `FT_Set_Default_Properties` (`src/base/ftinit.c:230`), which reads
 `FREETYPE_PROPERTIES` and can switch the TrueType interpreter version, the
 autohinter's warping and more. Glyph output that depends on the environment is
-not reproducible, and ztext's golden tests would inherit that. Worked around by
+not reproducible, and ztypeset's golden tests would inherit that. Worked around by
 building the library with `FT_New_Library` + `FT_Add_Default_Modules` and
 **not** calling `FT_Set_Default_Properties`. This also happens to be the only
 way to install a per-library allocator.
@@ -80,7 +80,7 @@ way to install a per-library allocator.
 ### HarfBuzz
 
 **Three environment variables change what HarfBuzz does, and two changed what
-ztext rendered.** `HB_SHAPER_LIST` (`src/hb-shaper.cc:48`) replaces the shaper
+ztypeset rendered.** `HB_SHAPER_LIST` (`src/hb-shaper.cc:48`) replaces the shaper
 list; `HB_FONT_FUNCS` (`src/hb-font.cc:2599`) replaces the default font funcs a
 new `hb_font_t` gets; `HB_FACE_LOADER` (`src/hb-face.cc:371`) replaces the
 loader used when a face is opened by file name.
@@ -90,12 +90,12 @@ Measured on this tree before the fix:
 | variable | value | effect |
 |---|---|---|
 | `HB_SHAPER_LIST` | `fallback` | five golden tests fail: standard ligatures stop applying, and moving a variation axis stops moving the shaped result |
-| `HB_FONT_FUNCS` | `ft` | the C smoke test reports 216 bytes leaked, and 26 blocks under the injection sweep — hb-ft's funcs open an `FT_Face` from an `FT_Library` ztext does not own |
-| `HB_FACE_LOADER` | any | none: ztext builds faces from memory with `hb_face_create_or_fail` and never from a file name |
+| `HB_FONT_FUNCS` | `ft` | the C smoke test reports 216 bytes leaked, and 26 blocks under the injection sweep — hb-ft's funcs open an `FT_Face` from an `FT_Library` ztypeset does not own |
+| `HB_FACE_LOADER` | any | none: ztypeset builds faces from memory with `hb_face_create_or_fail` and never from a file name |
 
 Worked around by compiling HarfBuzz with `-DHB_NO_GETENV`, which makes
 `getenv(Name)` expand to `nullptr` (`src/hb.hh:427-429`) so all three read
-empty. This is the same argument `ffi/ztext_face.c` already made for
+empty. This is the same argument `ffi/ztypeset_face.c` already made for
 FreeType's `FREETYPE_PROPERTIES`, applied to the library where it was live.
 `build.zig` runs the suite and the C smoke test a second time with all three
 set, so the claim is checked rather than asserted.
@@ -107,12 +107,12 @@ reports 256 (`src/base/ftobjs.c:537`); the SDF renderer overwrites it with 255
 (`src/sdf/ftsdfrend.c:316` and `:539`). Both
 produce one byte per pixel over the full range, so it is a bookkeeping
 inconsistency rather than a format difference — but a validity check that
-demands 256 rejects every SDF glyph, which is how this was found. `ztext_raster.c`
+demands 256 rejects every SDF glyph, which is how this was found. `ztypeset_raster.c`
 accepts either and says why.
 
 **A face index past the end of a collection is `Invalid_Argument`,** not
 `Unknown_File_Format`. Reasonable — the bytes are fine, the request is not —
-and ztext passes it through as `ZTEXT_RESULT_INVALID_ARGUMENT`.
+and ztypeset passes it through as `ZTYPESET_RESULT_INVALID_ARGUMENT`.
 
 **`hb_ft_font_changed` cannot read variation coordinates in this build.** The
 block in `hb-ft.cc` that calls `FT_Get_Var_Blend_Coordinates` is behind
@@ -123,20 +123,20 @@ built from the `hb_font_t`'s own coordinates, so a run shaped with
 `use_freetype_metrics` would resolve GSUB feature variations against the
 default instance. Worked around by telling that font the design coordinates
 directly as well as calling `hb_ft_font_changed`; the alternative, defining the
-macro, would make ztext's HarfBuzz configuration diverge from the explicit list
+macro, would make ztypeset's HarfBuzz configuration diverge from the explicit list
 in `build.zig` for one feature.
 
 **`FT_Set_Var_Design_Coordinates` does not recompute scaled metrics.** It calls
 `tt_apply_mvar`, which rewrites `face->ascender`, `descender` and `height` in
 *design* units; nothing re-runs `FT_Request_Metrics`. So a face whose font's
 variations changed reports the previous instance's line height until its size
-is set again. `ztextFontSetVariations` re-applies each face's exact stored 26.6
+is set again. `ztypesetFontSetVariations` re-applies each face's exact stored 26.6
 size for that reason — it is not defensive, it is required.
 
 **Colour bitmap strikes need libpng, which is not vendored.** CBDT and sbix
 store their strikes as PNG, and FreeType decodes them only under
 `FT_CONFIG_OPTION_USE_PNG`, which upstream leaves commented out
-(`include/freetype/config/ftoption.h:276`) and ztext does not enable. Turning it
+(`include/freetype/config/ftoption.h:276`) and ztypeset does not enable. Turning it
 on means vendoring libpng and zlib as a fourth and fifth upstream. Recorded
 rather than worked around, because the alternative reading — "colour fonts are
 broken" — is wrong: they load, they simply have no decodable strike.
@@ -149,12 +149,12 @@ dependency, and is the route to take if colour is ever wanted.
 `descender`, `height` and `max_advance` with `FT_PIX_CEIL`/`FT_PIX_FLOOR`/
 `FT_PIX_ROUND`, under a `GRID_FIT_METRICS` that is `#define`d unconditionally
 at `src/base/ftobjs.c:102` — there is no build option that turns it off. The
-visible consequence, once `ztextFaceSetPixelSize` takes a float, is that
+visible consequence, once `ztypesetFaceSetPixelSize` takes a float, is that
 18.0 px and 18.5 px report the *same* `line_height` while every advance
 differs. Not worked around: it is FreeType's answer and inventing a smoother
 one would mean disagreeing with the rasteriser about where the baselines are.
-Recorded, pinned by a test, and documented in `ffi/ztext.h` so it does not read
-as a ztext bug.
+Recorded, pinned by a test, and documented in `ffi/ztypeset.h` so it does not read
+as a ztypeset bug.
 
 ### HarfBuzz
 
@@ -171,19 +171,19 @@ calls.
 an FT_Face of its own, from an FT_Library of its own, out of the face's blob
 (`src/hb-ft.cc:1714`, `reference_ft_library`). Metrics would come from a
 different face than the one being rasterised, which defeats the entire purpose
-of asking FreeType for them. ztext uses `hb_ft_font_create`, which wraps the
+of asking FreeType for them. ztypeset uses `hb_ft_font_create`, which wraps the
 face it is given.
 
 **hb-ft is unhinted by default.** `_hb_ft_font_create` sets load flags to
 `FT_LOAD_DEFAULT | FT_LOAD_NO_HINTING` (`src/hb-ft.cc:115`), so out of the box
 "FreeType metrics" are the same unhinted numbers `hb-ot-font` already gives,
-with a lock and a cache in the way. ztext sets `FT_LOAD_DEFAULT` explicitly so
+with a lock and a cache in the way. ztypeset sets `FT_LOAD_DEFAULT` explicitly so
 the option means what its name suggests.
 
 **An allocation failure degrades silently rather than failing.** HarfBuzz treats
 a failed allocation as a reason to abandon optional work and carry on, so the
 symptom is not an error but text shaped *without* its OpenType layout — nominal
-glyphs, no joining, no ligatures. This is why `ztextRealloc` falls back to
+glyphs, no joining, no ligatures. This is why `ztypesetRealloc` falls back to
 allocate-copy-free when a host's `reallocate` declines instead of reporting
 failure upward: Zig's `std.mem.Allocator` only ever resizes in place, so
 declining is the common case, and propagating it turned Arabic into unjoined
@@ -209,13 +209,13 @@ OpenType font-functions (`src/hb-ot-font.cc`), the FreeType font-functions
 tag ever passed (`src/hb-common.cc:258`, `lang_find_or_insert`).
 
 One of those language entries arrives by a path that is easy to miss, and did
-not exist before the autohinter was given HarfBuzz: ztext names a language on
+not exist before the autohinter was given HarfBuzz: ztypeset names a language on
 every buffer it shapes, so nothing it does asks for the default one — but
 FreeType's coverage pass builds a buffer of its own and calls
 `hb_buffer_guess_segment_properties`, which asks for the default language
 (`hb_language_get_default`, `src/hb-common.cc:374`). It is charged to the
 allocator installed when the first glyph is HINTED, which is why
-`ztextWarmup()` touches it.
+`ztypesetWarmup()` touches it.
 
 The tag itself is not the machine's locale: `hb_setlocale` is the literal
 `"C"` unless `HAVE_NEWLOCALE` and `HAVE_USELOCALE` are both defined
@@ -237,19 +237,19 @@ cache is the better trade.
 
 These are caches with process lifetime, not leaks — but they are allocated
 through whichever allocator is installed when they are first touched, and they
-are still live when a host audits its heap at shutdown. `ztextWarmup()` is
-therefore load-bearing for any host that audits, not a convenience. `ztextWarmup()` touches
+are still live when a host audits its heap at shutdown. `ztypesetWarmup()` is
+therefore load-bearing for any host that audits, not a convenience. `ztypesetWarmup()` touches
 the ones it can reach so a host can populate them before installing a tracking
 allocator. It cannot reach two of them: the FreeType font-functions singleton
 and per-language entries both need a real face, so a host that uses
 `use_freetype_metrics` or explicit language tags pays one small permanent
-allocation for each, once. ztext's own suite warms those in its fixture and
+allocation for each, once. ztypeset's own suite warms those in its fixture and
 then asserts the heap balances exactly.
 
 **New in 14.4.0: `hb_set_intersects()`.** Recorded rather than adopted --
-ztext calls no `hb_set_*` entry point, because nothing it exposes hands a
+ztypeset calls no `hb_set_*` entry point, because nothing it exposes hands a
 character or glyph set across the boundary. It is here so the surface change is
-on the record: the next time ztext needs to ask whether two coverage sets meet,
+on the record: the next time ztypeset needs to ask whether two coverage sets meet,
 this is the call, and it exists from 14.4.0 onwards.
 
 **A stray `.pyc` in `src/__pycache__/` is gone as of 14.4.0.** Upstream tracked
@@ -262,12 +262,12 @@ simply has nothing to skip.
 
 **`SBAllocatorSetDefault` does not retain the allocator** it is given
 (`Source/API/SBAllocator.c:278` — a bare atomic store). The caller has to keep
-the reference alive; ztext creates one allocator object and holds it for the
+the reference alive; ztypeset creates one allocator object and holds it for the
 life of the process.
 
-That object is itself allocated *before* ztext's seam is live — by SheenBidi's
+That object is itself allocated *before* ztypeset's seam is live — by SheenBidi's
 own default allocator, i.e. `malloc` — so it never reaches a host allocator at
-all. `ztextWarmup()` makes when that happens predictable rather than dependent
+all. `ztypesetWarmup()` makes when that happens predictable rather than dependent
 on which paragraph came first.
 
 **A paragraph that fails to resolve releases a pointer it never wrote.**
@@ -287,10 +287,10 @@ zeroing made it **0 of 400**. Upstream has fixed two defects of exactly this
 shape before (issues #19 and #21, both closed), so this one is worth reporting
 — it is not reported yet, and the report is owed.
 
-ztext does not patch `libs/`, and there is no route to that failure path that
-does not pass through ztext's allocator seam, so the containment lives there:
+ztypeset does not patch `libs/`, and there is no route to that failure path that
+does not pass through ztypeset's allocator seam, so the containment lives there:
 `sbAllocateBlock` zeroes every block and `sbReallocateBlock` zeroes the tail a
-grow adds, so SheenBidi never reads a byte ztext has not written. The gate is
+grow adds, so SheenBidi never reads a byte ztypeset has not written. The gate is
 the poisoned arm of the injection sweep in `tests/c_smoke.c`, which runs an
 allocator that returns `0xCD` rather than leftovers: remove the memset and it
 dies on every run at the same injection point rather than on one run in fifty.
@@ -325,10 +325,10 @@ It runs as its own CI job. Run it after any step below.
 4. Write down what you expect to move BEFORE running anything, from the
    upstream's own NEWS for every release between the two pins. A prediction
    made afterwards is a rationalisation.
-5. `zig build test`. The `_Static_assert`s in `ffi/ztext_abi.c` fail the build
-   if a type ztext depends on has changed shape; the comptime cross-check in
-   `src/abi_check.zig` fails the build if the Zig externs and `ffi/ztext.h`
-   have drifted apart; `ztextAbiProbe` fails the test if the header and the
+5. `zig build test`. The `_Static_assert`s in `ffi/ztypeset_abi.c` fail the build
+   if a type ztypeset depends on has changed shape; the comptime cross-check in
+   `src/abi_check.zig` fails the build if the Zig externs and `ffi/ztypeset.h`
+   have drifted apart; `ztypesetAbiProbe` fails the test if the header and the
    compiled library disagree; the golden tests fail if shaping output moved.
    Bracket mirroring is pinned too, so a HarfBuzz that stopped applying rule
    L4 would fail rather than quietly render RTL brackets backwards.

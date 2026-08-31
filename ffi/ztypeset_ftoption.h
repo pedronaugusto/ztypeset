@@ -1,5 +1,5 @@
 /*
- * ztext's FreeType build configuration.
+ * ztypeset's FreeType build configuration.
  *
  * FreeType includes this file wherever it would have included
  * <freetype/config/ftoption.h>; build.zig points FT_CONFIG_OPTIONS_H here.
@@ -12,20 +12,20 @@
  * new default upstream adds instead of silently pinning an old one.
  */
 
-#ifndef ZTEXT_FTOPTION_H_
-#define ZTEXT_FTOPTION_H_
+#ifndef ZTYPESET_FTOPTION_H_
+#define ZTYPESET_FTOPTION_H_
 
 #include <freetype/config/ftoption.h>
 
 /*
  * Compressed and container formats. Upstream enables zlib by default, which
- * pulls in src/gzip and buys gzip-compressed PCF plus WOFF. ztext consumes
+ * pulls in src/gzip and buys gzip-compressed PCF plus WOFF. ztypeset consumes
  * TrueType and OpenType from an asset pack, where the pack is already the
  * compression layer, so both are dead weight -- and each one is parser surface
  * on untrusted bytes that we would otherwise be carrying for nothing.
  *
  * The consequence is stated rather than hidden: a WOFF or WOFF2 file handed to
- * ztext is rejected as an unsupported format. Cook to TTF/OTF.
+ * ztypeset is rejected as an unsupported format. Cook to TTF/OTF.
  */
 #undef FT_CONFIG_OPTION_USE_ZLIB
 
@@ -40,7 +40,8 @@
 
 /*
  * Classic Mac resource-fork fonts (LWFN, .dfont, FOND). Reachable only through
- * path-based entry points on macOS, and ztext has no path-based entry point at
+ * path-based entry points on macOS,
+    and ztypeset has no path-based entry point at
  * all: faces come from memory.
  */
 #undef FT_CONFIG_OPTION_MAC_FONTS
@@ -50,21 +51,22 @@
  *
  * The paragraph above used to end by saying that undefining MAC_FONTS dropped
  * src/base/ftrfork.c's guessing logic as well. It does not, and the file was
- * in every binary ztext has ever produced with a comment saying it was not.
+ * in every binary ztypeset has ever produced with a comment saying it was not.
  * ftrfork.c is compiled -- src/base/ftbase.c #includes it and ftbase.c is in
  * build.zig's list -- and its lines 319-893, the whole table of heuristics
  * over attacker-visible bytes, sit under this macro alone. MAC_FONTS gates
  * only FT_Raccess_Guess's outer entry point at :468.
  *
  * Undefining it selects ftrfork.c's other branch (:894-925), the stub that
- * reports the format is unsupported. ffi/ztext_abi.c refuses to compile if any
+ * reports the format is unsupported. ffi/ztypeset_abi.c refuses to compile if
+    any
  * of these switches comes back, because every claim in this file is about a
  * macro, and a macro is exactly the kind of claim a build can check.
  */
 #undef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
 
 /*
- * Report FreeType's own error strings. ztext maps FT errors onto its flat
+ * Report FreeType's own error strings. ztypeset maps FT errors onto its flat
  * result enum, which necessarily loses detail; keeping the strings means a
  * BadFont can still say *why* in a log line instead of only that it was bad.
  * Costs a few kilobytes of static text.
@@ -90,7 +92,7 @@
  * ARE mapped and takes the outputs, so a derived glyph inherits the style of
  * the character it came from.
  *
- * This reaches more of ztext than it looks. `ZTEXT_HINTING_LIGHT` is the
+ * This reaches more of ztypeset than it looks. `ZTYPESET_HINTING_LIGHT` is the
  * autohinter and nothing else for these faces: FT_LOAD_TARGET_LIGHT falls
  * through to it whenever the driver does not hint lightly itself, and the CFF
  * driver is the only one in FreeType that sets that flag (`cffdrivr.c`), so
@@ -133,16 +135,17 @@
  * ClearType-style FIR filter over the result, which the caller must select
  * with FT_Library_SetLcdFilter or get colour fringing.
  *
- * ztext exposes ZTEXT_RENDER_MODE_LCD and ZTEXT_RENDER_MODE_LCD_V, so both
+ * ztypeset exposes ZTYPESET_RENDER_MODE_LCD and ZTYPESET_RENDER_MODE_LCD_V,
+    so both
  * paths reach a consumer either way. Harmony is chosen because it needs no
  * filter to be selected, has no filter to be selected WRONGLY, and produces no
  * fringing of its own. The Microsoft patents that once shadowed the filtered
  * path have expired, so this is a technical choice and not a legal one.
  *
  * It is a COMPILE-time choice in FreeType, not a runtime one, which is why
- * ztext does not offer both and does not expose FT_Library_SetLcdFilter: in
+ * ztypeset does not offer both and does not expose FT_Library_SetLcdFilter: in
  * this configuration that function returns FT_Err_Unimplemented_Feature, and
  * an entry point that can only fail is worse than none.
  */
 
-#endif /* ZTEXT_FTOPTION_H_ */
+#endif /* ZTYPESET_FTOPTION_H_ */

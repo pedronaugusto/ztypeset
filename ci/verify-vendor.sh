@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- prove the vendored trees really are unmodified upstream.
+# ztypeset -- prove the vendored trees really are unmodified upstream.
 #
 # UPSTREAM.md says libs/ holds pristine copies of four specific commits. On
 # its own that is a claim in a markdown file: nothing stops an edit to libs/
@@ -120,7 +120,7 @@ verify sheenbidi libs/sheenbidi \
   -- Headers Source LICENSE README.md
 
 # The excludes here are upstream's generators, its conformance-test data and
-# its own build files -- everything that is not a translation unit ztext
+# its own build files -- everything that is not a translation unit ztypeset
 # compiles. They are listed in UPSTREAM.md; keep the two in step.
 verify libunibreak libs/libunibreak \
   -x 'generate_*.py' -x unicode_data_property.py -x '*.sed' -x '*.tmpl' \

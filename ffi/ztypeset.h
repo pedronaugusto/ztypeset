@@ -1,17 +1,17 @@
 //===----------------------------------------------------------------------===//
-// ztext -- a C ABI over FreeType, HarfBuzz, SheenBidi and libunibreak.
+// ztypeset -- a C ABI over FreeType, HarfBuzz, SheenBidi and libunibreak.
 //
 // This header is the contract between the C implementation and the Zig wrapper
 // in ../src. Unlike a binding over a C++ library, it is not here because Zig
 // cannot call the upstreams -- all four expose C APIs, and build.zig installs
 // their headers so a C or C++ host can use them directly, which for anything
-// beyond ztext's scope is the better choice.
+// beyond ztypeset's scope is the better choice.
 //
 // It is here for one reason: FreeType's FT_FaceRec and FT_GlyphSlotRec are
 // large, deeply nested, and partly conditional on FreeType's own configuration
 // macros. Hand-mirroring those in Zig would put silent memory corruption one
 // re-vendor away. Stopping them at a C boundary means the C compiler checks
-// every upstream layout change for free, and only small, flat, ztext-owned
+// every upstream layout change for free, and only small, flat, ztypeset-owned
 // structs cross into Zig.
 //
 // Ownership, uniformly:
@@ -23,14 +23,14 @@
 //   accessors  return pointers that borrow from the handle and die with it,
 //              or sooner where noted.
 //
-// ORDERING: there is none. A ZtextLibrary, the fonts made from it and the
+// ORDERING: there is none. A ZtypesetLibrary, the fonts made from it and the
 // faces made from those may be destroyed in any order. Whichever of a pair is
 // released second frees what they share, so no caller can produce a dangling
 // handle by destroying in the "wrong" order, and neither a leak nor a double
-// free is reachable. What a released handle will not do is take new work:
-// every entry point that takes a ZtextLibrary, and ztextFaceCreate on a
-// ZtextFont, answers ZTEXT_RESULT_INVALID_ARGUMENT once its handle has been
-// passed to *Destroy -- an error rather than undefined behaviour. The
+// free is reachable. What a released handle will not do is take new work: every
+// entry point that takes a ZtypesetLibrary, and ztypesetFaceCreate on a
+// ZtypesetFont, answers ZTYPESET_RESULT_INVALID_ARGUMENT once its handle has
+// been passed to *Destroy -- an error rather than undefined behaviour. The
 // accessors on the fonts and faces that outlive it keep working, because those
 // handles are still alive.
 //
@@ -38,25 +38,26 @@
 // order, and the paragraph above answers only the second. Passing one handle
 // to its *Destroy twice is undefined behaviour for every one of the six.
 //
-// ztextLibraryDestroy and ztextFontDestroy open with a flag test that reads
-// like a repeat guard -- `if (library == NULL || library->destroy_requested)
-// return;` -- and it is not one. The flag exists so that whichever of a
+// ztypesetLibraryDestroy and ztypesetFontDestroy open with a flag test
+// that reads like a repeat guard -- `if (library == NULL ||
+// library->destroy_requested) return;` -- and it is not one. The flag
+// exists so that whichever of a
 // library and its fonts is released SECOND performs the teardown; by the time
 // a caller could repeat the call, the handle it names has already been freed
 // by that teardown, so the flag test is itself the use-after-free. Measured,
-// not reasoned: a second ztextLibraryDestroy on a released library segfaults
-// on that line, at ffi/ztext_face.c:69. It reads like a guarantee, which is
+// not reasoned: a second ztypesetLibraryDestroy on a released library segfaults
+// on that line, at ffi/ztypeset_face.c:69. It reads like a guarantee, which is
 // the only reason it is written out here.
 //
 // There is no runtime check, and that is a decision rather than an omission. A
-// poison word written into the handle before the free could be read back on
-// the second call to diagnose it -- but reading it IS the use-after-free, so
-// the check would be undefined behaviour reporting undefined behaviour, and
-// ztext's own sanitiser build (CI runs Debug with -Dsanitize_c=true) would be
-// right to flag the diagnostic itself. A registry of live handles would avoid
-// the freed read at the price of process-wide mutable state on the drawing
-// path, which is the one thing the thread-safety rules above exist to keep
-// out. FreeType leaves this to the caller for the same reason; HarfBuzz
+// poison word written into the handle before the free could be read back on the
+// second call to diagnose it -- but reading it IS the use-after-free, so the
+// check would be undefined behaviour reporting undefined behaviour, and
+// ztypeset's own sanitiser build (CI runs Debug with -Dsanitize_c=true) would
+// be right to flag the diagnostic itself. A registry of live handles would
+// avoid the freed read at the price of process-wide mutable state on the
+// drawing path, which is the one thing the thread-safety rules above exist to
+// keep out. FreeType leaves this to the caller for the same reason; HarfBuzz
 // escapes it only by reference-counting every object, which is a different
 // ownership model rather than a check bolted onto this one.
 //
@@ -75,36 +76,37 @@
 // handle and is checked by the suite rather than read.
 //
 // Threading: see "Thread safety" below. Read it -- FT_Face is not thread-safe
-// and ztext does not pretend otherwise.
+// and ztypeset does not pretend otherwise.
 //===----------------------------------------------------------------------===//
 
-#ifndef ZTEXT_H_
-#define ZTEXT_H_
+#ifndef ZTYPESET_H_
+#define ZTYPESET_H_
 
 #include <stddef.h>
 #include <stdint.h>
 
 /* Exported deliberately and narrowly.
  *
- * A shared ztext is built with -fvisibility=hidden, so the ~10 000 FreeType,
+ * A shared ztypeset is built with -fvisibility=hidden, so the ~10 000 FreeType,
  * HarfBuzz and SheenBidi symbols linked into it stay internal. Without that,
- * loading libztext.so alongside a system libfreetype -- anything that pulls in
+ * loading libztypeset.so alongside a system libfreetype -- anything that pulls
+    in
  * pango, cairo or fontconfig does -- lets the two interpose on each other, and
  * one library's FT_Face ends up inside the other's functions.
  *
- * A consumer of an MSVC DLL must define ZTEXT_SHARED before including this
+ * A consumer of an MSVC DLL must define ZTYPESET_SHARED before including this
  * header, so the declarations become dllimport. Everywhere else nothing is
  * needed. */
-#if defined(_MSC_VER) && defined(ZTEXT_SHARED)
-#ifdef ZTEXT_BUILD
-#define ZTEXT_API __declspec(dllexport)
+#if defined(_MSC_VER) && defined(ZTYPESET_SHARED)
+#ifdef ZTYPESET_BUILD
+#define ZTYPESET_API __declspec(dllexport)
 #else
-#define ZTEXT_API __declspec(dllimport)
+#define ZTYPESET_API __declspec(dllimport)
 #endif
-#elif defined(ZTEXT_SHARED) && (defined(__GNUC__) || defined(__clang__))
-#define ZTEXT_API __attribute__((visibility("default")))
+#elif defined(ZTYPESET_SHARED) && (defined(__GNUC__) || defined(__clang__))
+#define ZTYPESET_API __attribute__((visibility("default")))
 #else
-#define ZTEXT_API
+#define ZTYPESET_API
 #endif
 
 #ifdef __cplusplus
@@ -117,61 +119,60 @@ extern "C" {
 // FreeType's FT_Library and FT_Face are not internally synchronised, and that
 // restriction propagates:
 //
-//   * A ZtextLibrary, every ZtextFont made from it, and every ZtextFace made
-//     from those, belong to ONE thread. The faces of a font share its FT_Face
-//     and its single glyph slot, so they are not independent even though they
-//     are separate handles. Use one ZtextLibrary per thread rather than
-//     sharing one behind a lock; FreeType's own documentation recommends the
-//     same.
-//   * ztextFaceRenderGlyph returns pixels the FACE owns, copied out of that
-//     shared slot. They are valid until the next ztextFaceRenderGlyph on the
-//     same face, and nothing else invalidates them -- not a call on a sibling
-//     face, not shaping, not measuring. Copying is what buys that; see the
-//     note on ZtextGlyphBitmap.
-//   * A ZtextShaper holds scratch for one shaping call at a time. Give each
-//     thread its own; they are cheap.
-//   * ZtextParagraph does not touch FreeType at all. Once created it is
-//     immutable and may be read from several threads.
+// * A ZtypesetLibrary, every ZtypesetFont made from it, and every ZtypesetFace
+// made from those, belong to ONE thread. The faces of a font share its FT_Face
+// and its single glyph slot, so they are not independent even though they are
+// separate handles. Use one ZtypesetLibrary per thread rather than sharing one
+// behind a lock; FreeType's own documentation recommends the same. *
+// ztypesetFaceRenderGlyph returns pixels the FACE owns, copied out of that
+// shared slot. They are valid until the next ztypesetFaceRenderGlyph on the
+// same face, and nothing else invalidates them -- not a call on a sibling face,
+// not shaping, not measuring. Copying is what buys that; see the note on
+// ZtypesetGlyphBitmap. * A ZtypesetShaper holds scratch for one shaping call at
+// a time. Give each thread its own; they are cheap. * ZtypesetParagraph does
+// not touch FreeType at all. Once created it is immutable and may be read from
+// several threads.
 //
-// The allocator installed by ztextSetAllocator is process-wide (HarfBuzz's
+// The allocator installed by ztypesetSetAllocator is process-wide (HarfBuzz's
 // seam is compile-time, so it cannot be otherwise) and must therefore be
-// thread-safe if ztext is used from more than one thread.
+// thread-safe if ztypeset is used from more than one thread.
 //
-// ztextSetAllocator and ztextRegisterAllocator are SETUP, not operations.
+// ztypesetSetAllocator and ztypesetRegisterAllocator are SETUP, not operations.
 // They mutate a process-wide registry without synchronisation and must be
-// called before any other thread is using ztext -- once, at start-up, the way
-// a host installs its allocator. That restriction is theirs alone: everything
-// ztext keeps process-wide and writes AFTER start-up -- the face generation
-// counter and SheenBidi's one-time allocator install -- is atomic, so the
-// per-library rule above is the only one the drawing path imposes.
+// called before any other thread is using ztypeset -- once, at start-up, the
+// way a host installs its allocator. That restriction is theirs alone:
+// everything ztypeset keeps process-wide and writes AFTER start-up -- the face
+// generation counter and SheenBidi's one-time allocator install -- is atomic,
+// so the per-library rule above is the only one the drawing path imposes.
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//
 // Version
 //===----------------------------------------------------------------------===//
 
-#define ZTEXT_VERSION_MAJOR 0
-#define ZTEXT_VERSION_MINOR 2
-#define ZTEXT_VERSION_PATCH 0
+#define ZTYPESET_VERSION_MAJOR 0
+#define ZTYPESET_VERSION_MINOR 2
+#define ZTYPESET_VERSION_PATCH 0
 
-/// Version of the ztext binding, packed as (major<<16)|(minor<<8)|patch.
-/// Compare against the ZTEXT_VERSION_* macros to detect a header/library skew.
+/// Version of the ztypeset binding, packed as (major<<16)|(minor<<8)|patch.
+/// Compare against the ZTYPESET_VERSION_* macros to detect a header/library
+/// skew.
 ///
 /// What a bump of each position promises -- and what an ABI change is
 /// required to do -- is in CHANGELOG.md, which is also where the three homes
 /// of this number are named. ci/measurements.sh --check gates them.
-ZTEXT_API uint32_t ztextVersion(void);
+ZTYPESET_API uint32_t ztypesetVersion(void);
 
 /// Versions of the vendored upstreams, same packing. These report what was
 /// actually compiled in, not what UPSTREAM.md claims.
-ZTEXT_API uint32_t ztextFreetypeVersion(void);
-ZTEXT_API uint32_t ztextHarfbuzzVersion(void);
-ZTEXT_API uint32_t ztextSheenbidiVersion(void);
-ZTEXT_API uint32_t ztextUnibreakVersion(void);
+ZTYPESET_API uint32_t ztypesetFreetypeVersion(void);
+ZTYPESET_API uint32_t ztypesetHarfbuzzVersion(void);
+ZTYPESET_API uint32_t ztypesetSheenbidiVersion(void);
+ZTYPESET_API uint32_t ztypesetUnibreakVersion(void);
 
 /// Packs four characters into an OpenType tag, big-endian as the specs write
-/// them: ZTEXT_TAG('l','i','g','a').
-#define ZTEXT_TAG(a, b, c, d)                                       \
+/// them: ZTYPESET_TAG('l','i','g','a').
+#define ZTYPESET_TAG(a, b, c, d)                                       \
   ((uint32_t)(((uint32_t)(a) << 24) | ((uint32_t)(b) << 16) |       \
               ((uint32_t)(c) << 8) | (uint32_t)(d)))
 
@@ -179,50 +180,50 @@ ZTEXT_API uint32_t ztextUnibreakVersion(void);
 // Results
 //===----------------------------------------------------------------------===//
 
-typedef enum ZtextResult {
-  ZTEXT_RESULT_OK = 0,
+typedef enum ZtypesetResult {
+  ZTYPESET_RESULT_OK = 0,
   /// The allocator returned NULL, or an upstream reported an allocation
   /// failure of its own.
-  ZTEXT_RESULT_OUT_OF_MEMORY = 1,
+  ZTYPESET_RESULT_OUT_OF_MEMORY = 1,
   /// A NULL handle, a zero-length buffer, an out-of-range index, or a
   /// non-finite scalar.
-  ZTEXT_RESULT_INVALID_ARGUMENT = 2,
-  /// The text was not well-formed in the ZtextEncoding it was passed with.
-  /// Checked by ztext before any of it reaches HarfBuzz or SheenBidi.
-  ZTEXT_RESULT_INVALID_TEXT = 3,
+  ZTYPESET_RESULT_INVALID_ARGUMENT = 2,
+  /// The text was not well-formed in the ZtypesetEncoding it was passed with.
+  /// Checked by ztypeset before any of it reaches HarfBuzz or SheenBidi.
+  ZTYPESET_RESULT_INVALID_TEXT = 3,
   /// FreeType refused the bytes: not a font, truncated, or structurally
   /// broken.
-  ZTEXT_RESULT_BAD_FONT = 4,
+  ZTYPESET_RESULT_BAD_FONT = 4,
   /// A recognisable font in a format this build does not compile support for
   /// -- WOFF, WOFF2, Type 1, bitmap-only formats. See UPSTREAM.md.
-  ZTEXT_RESULT_UNSUPPORTED = 5,
+  ZTYPESET_RESULT_UNSUPPORTED = 5,
   /// The glyph index is not present in the face.
-  ZTEXT_RESULT_GLYPH_NOT_FOUND = 6,
+  ZTYPESET_RESULT_GLYPH_NOT_FOUND = 6,
   /// FreeType loaded the glyph but could not rasterise it.
-  ZTEXT_RESULT_RENDER_FAILED = 7,
+  ZTYPESET_RESULT_RENDER_FAILED = 7,
   /// HarfBuzz could not shape the run.
-  ZTEXT_RESULT_SHAPE_FAILED = 8,
+  ZTYPESET_RESULT_SHAPE_FAILED = 8,
   /// SheenBidi could not analyse the paragraph.
-  ZTEXT_RESULT_BIDI_FAILED = 9,
+  ZTYPESET_RESULT_BIDI_FAILED = 9,
   /// A caller-provided output buffer was too small.
-  ZTEXT_RESULT_BUFFER_TOO_SMALL = 10,
-} ZtextResult;
+  ZTYPESET_RESULT_BUFFER_TOO_SMALL = 10,
+} ZtypesetResult;
 
 /// Static, never-NULL description of a result code. Borrowed; do not free.
-ZTEXT_API const char* ztextResultName(ZtextResult result);
+ZTYPESET_API const char* ztypesetResultName(ZtypesetResult result);
 
 /// The last message an upstream produced ON THIS THREAD, or "" if there was
 /// none.
 ///
-/// ztext's result enum is flat by design, which loses detail FreeType has and
-/// ztext does not: "unknown file format" and "invalid table" both arrive as
-/// ZTEXT_RESULT_BAD_FONT. This returns FreeType's own string for the most
+/// ztypeset's result enum is flat by design, which loses detail FreeType has
+/// and ztypeset does not: "unknown file format" and "invalid table" both arrive
+/// as ZTYPESET_RESULT_BAD_FONT. This returns FreeType's own string for the most
 /// recent failure so a log line can say which.
 ///
 /// The storage is thread-local, so it must be read on the thread that got the
 /// error -- a logger running elsewhere sees "". Borrowed, overwritten by the
 /// next failing call, and for diagnostics only: never branch on it.
-ZTEXT_API const char* ztextLastErrorDetail(void);
+ZTYPESET_API const char* ztypesetLastErrorDetail(void);
 
 //===----------------------------------------------------------------------===//
 // Text
@@ -237,24 +238,24 @@ ZTEXT_API const char* ztextLastErrorDetail(void);
 // per algorithm, and hb_buffer_add_utf8/utf16/utf32. Transcoding on the way
 // in would cost a copy, an allocation and a second set of offsets to map
 // back, and would be paid by every host whose strings are UTF-16 -- which is
-// every Windows, Java, C# and JavaScript host. ztext transcodes nothing.
+// every Windows, Java, C# and JavaScript host. ztypeset transcodes nothing.
 //
 // Text is validated in its declared encoding before any of it reaches an
-// upstream, and malformed text is ZTEXT_RESULT_INVALID_TEXT rather than
+// upstream, and malformed text is ZTYPESET_RESULT_INVALID_TEXT rather than
 // U+FFFD: substituting a replacement character is a decision about a host's
 // data that a text engine is not in a position to make.
 //===----------------------------------------------------------------------===//
 
-typedef enum ZtextEncoding {
+typedef enum ZtypesetEncoding {
   /// `const char*`. One to four bytes per character.
-  ZTEXT_ENCODING_UTF8 = 0,
+  ZTYPESET_ENCODING_UTF8 = 0,
   /// `const uint16_t*`, native byte order, a surrogate PAIR per character
   /// above U+FFFF. An unpaired surrogate is not well-formed.
-  ZTEXT_ENCODING_UTF16 = 1,
+  ZTYPESET_ENCODING_UTF16 = 1,
   /// `const uint32_t*`, native byte order, one unit per character. A unit
   /// above U+10FFFF or inside the surrogate range is not well-formed.
-  ZTEXT_ENCODING_UTF32 = 2,
-} ZtextEncoding;
+  ZTYPESET_ENCODING_UTF32 = 2,
+} ZtypesetEncoding;
 
 //===----------------------------------------------------------------------===//
 // Allocator seam
@@ -263,27 +264,27 @@ typedef enum ZtextEncoding {
 // and all three do it differently. (libunibreak allocates nothing, so it has
 // no seam and needs none.)
 //
-//   FreeType   an FT_MemoryRec per FT_Library. ztext captures the installed
-//              allocator when a ZtextLibrary is created, so FreeType memory is
-//              genuinely per-library rather than global.
+//   FreeType   an FT_MemoryRec per FT_Library. ztypeset captures the
+//              installed allocator when a ZtypesetLibrary is created, so
+//              FreeType memory is genuinely per-library rather than global.
 //   SheenBidi  a global default allocator object (its creation functions take
 //              no allocator argument).
 //   HarfBuzz   compile-time only: four macros resolved when the library is
 //              built. Necessarily process-wide.
 //
-// HarfBuzz is the binding constraint, so ztextSetAllocator is process-wide.
+// HarfBuzz is the binding constraint, so ztypesetSetAllocator is process-wide.
 // That is surfaced here rather than hidden behind a per-object parameter that
 // could not be honoured.
 //
 // All three also free without a size -- FT_Free_Func, hb_free_impl and
 // SBAllocatorDeallocateBlockFunc each receive only a pointer. Rather than push
-// that asymmetry onto every host, ztext records the size and alignment in a
+// that asymmetry onto every host, ztypeset records the size and alignment in a
 // header ahead of each block and hands them back on deallocate. A host with a
 // sized allocator (Zig's std.mem.Allocator, a pool, an arena with accounting)
 // therefore needs no bookkeeping of its own.
 //===----------------------------------------------------------------------===//
 
-typedef struct ZtextAllocator {
+typedef struct ZtypesetAllocator {
   /// Must return a block of at least `size` bytes aligned to `alignment`
   /// (always a power of two), or NULL on failure. `size` is never 0.
   void* (*allocate)(void* user, size_t size, size_t alignment);
@@ -292,10 +293,10 @@ typedef struct ZtextAllocator {
   /// is not forced through a copy.
   ///
   /// Return NULL to decline -- because the block cannot grow in place, or
-  /// because there is no memory. ztext does not distinguish the two: it falls
-  /// back to allocate, copy, deallocate either way, and only then reports
-  /// failure. `block` must be left valid and untouched when declining, which
-  /// is what makes that fallback safe.
+  /// because there is no memory. ztypeset does not distinguish the two: it
+  /// falls back to allocate, copy, deallocate either way, and only then reports
+  /// failure. `block` must be left valid and untouched when declining, which is
+  /// what makes that fallback safe.
   ///
   /// Declining is expected, not exceptional: Zig's std.mem.Allocator only
   /// ever resizes in place and declines the moment a block would have to
@@ -309,24 +310,24 @@ typedef struct ZtextAllocator {
 
   /// Opaque host pointer, passed back unmodified.
   void* user;
-} ZtextAllocator;
+} ZtypesetAllocator;
 
-/// Exit code ztext uses when it stops the process because a block reached the
-/// wrong allocator; see ztextSetAllocator. Fixed so a test harness can assert
-/// on it rather than on a platform's abort convention.
-#define ZTEXT_EXIT_ALLOCATOR_MISMATCH 70
+/// Exit code ztypeset uses when it stops the process because a block reached
+/// the wrong allocator; see ztypesetSetAllocator. Fixed so a test harness can
+/// assert on it rather than on a platform's abort convention.
+#define ZTYPESET_EXIT_ALLOCATOR_MISMATCH 70
 
-/// Installs a process-wide allocator for all subsequent ztext allocation.
+/// Installs a process-wide allocator for all subsequent ztypeset allocation.
 ///
 /// `alloc` is copied by value; the caller need not keep the struct alive, but
 /// `user` must outlive every handle allocated through it. Passing NULL
 /// restores malloc/free.
 ///
-/// Calls ztextWarmup() first, so the upstreams' process-lifetime caches are
+/// Calls ztypesetWarmup() first, so the upstreams' process-lifetime caches are
 /// charged to whatever was installed BEFORE this call rather than to the
 /// allocator arriving now. Those caches are never freed, so an allocator that
 /// paid for one can never report a balanced heap -- and the host would have
-/// had to know to warm up first to avoid it. See ztextWarmup for the two
+/// had to know to warm up first to avoid it. See ztypesetWarmup for the two
 /// caches this cannot reach, which need a face and so belong to the host.
 ///
 /// EVERY BLOCK IS FREED THROUGH THE ALLOCATOR THAT MADE IT, BY CONSTRUCTION
@@ -345,12 +346,12 @@ typedef struct ZtextAllocator {
 /// WHICH allocator makes a block is the other half of the rule, and it has
 /// two cases because the upstreams offer two kinds of seam:
 ///
-///   * Everything ztext and FreeType allocate FOR A HANDLE comes from the
+///   * Everything ztypeset and FreeType allocate FOR A HANDLE comes from the
 ///     allocator that issued the handle. A font's struct, its axis arrays, a
 ///     face's FT_Size, and the buffer a face keeps its rendered glyph in are
 ///     all their library's memory -- whatever is installed at the moment they
 ///     are first created or grown. FreeType's seam takes an FT_Memory per
-///     library, and ztext's own takes the allocator read back from the
+///     library, and ztypeset's own takes the allocator read back from the
 ///     handle's own block header, so neither depends on the current global.
 ///   * Everything HARFBUZZ allocates comes from whatever is installed when it
 ///     asks. Its seam is a compile-time pair of functions with no context
@@ -358,27 +359,27 @@ typedef struct ZtextAllocator {
 ///     hb_font_t built after a swap belongs to the new allocator, and is
 ///     freed back to it. SheenBidi's seam is the same shape.
 ///
-/// A ZtextShaper, ZtextParagraph and ZtextLine own no library, so the first
-/// rule places their memory too -- with the allocator that issued the handle
-/// simply being the one installed at the time.
+/// A ZtypesetShaper, ZtypesetParagraph and ZtypesetLine own no library, so the
+/// first rule places their memory too -- with the allocator that issued the
+/// handle simply being the one installed at the time.
 ///
 /// The consequence worth stating: a host that gives each of its subsystems an
-/// allocator gets a font's FreeType and ztext memory attributed to the
+/// allocator gets a font's FreeType and ztypeset memory attributed to the
 /// subsystem that made the LIBRARY, and its HarfBuzz memory attributed to
 /// whichever subsystem happened to make the face.
 ///
-/// Installing the same allocator twice reuses its entry. A distinct one costs
-/// a single ZtextAllocator, allocated with malloc and never freed, because it
-/// must outlive the last block it issued. That is the only allocation ztext
+/// Installing the same allocator twice reuses its entry. A distinct one costs a
+/// single ZtypesetAllocator, allocated with malloc and never freed, because it
+/// must outlive the last block it issued. That is the only allocation ztypeset
 /// makes outside the installed allocator.
 ///
-/// If ztext itself ever names the wrong owner for a block -- an internal
+/// If ztypeset itself ever names the wrong owner for a block -- an internal
 /// mistake, not something a host can cause -- it does NOT free the block
 /// (leaking one block is recoverable; handing a pointer to a heap that never
-/// issued it is not), writes a line naming both allocators to stderr, and
-/// exits with ZTEXT_EXIT_ALLOCATOR_MISMATCH. There is no way to continue: the
-/// deallocate callback has no error channel, because FreeType's, HarfBuzz's
-/// and SheenBidi's have none.
+/// issued it is not), writes a line naming both allocators to stderr, and exits
+/// with ZTYPESET_EXIT_ALLOCATOR_MISMATCH. There is no way to continue: the
+/// deallocate callback has no error channel, because FreeType's, HarfBuzz's and
+/// SheenBidi's have none.
 ///
 /// The header check is a detector, not a checksum: sixteen bytes leave no room
 /// for a magic number, so a prefix overrun into values that happen to be in
@@ -386,11 +387,13 @@ typedef struct ZtextAllocator {
 /// the end of the registry and an alignment that is not a power of two at or
 /// below max_align_t's.
 ///
-/// Returns ZTEXT_RESULT_INVALID_ARGUMENT if `allocate` or `deallocate` is NULL,
-/// in which case the previously installed allocator is left untouched. Returns
-/// ZTEXT_RESULT_OUT_OF_MEMORY if the registry entry cannot be allocated, in
-/// which case the previously installed allocator is likewise left untouched.
-ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
+/// Returns ZTYPESET_RESULT_INVALID_ARGUMENT if `allocate` or `deallocate` is
+/// NULL, in which case the previously installed allocator is left untouched.
+/// Returns ZTYPESET_RESULT_OUT_OF_MEMORY if the registry entry cannot be
+/// allocated, in which case the previously installed allocator is likewise left
+/// untouched.
+ZTYPESET_API ZtypesetResult ztypesetSetAllocator(const ZtypesetAllocator*
+                                                 alloc);
 
 /// Populates the process-global caches the upstreams never free before exit,
 /// so a host can install a tracking allocator afterwards and still see a
@@ -408,7 +411,7 @@ ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 /// compile-time constant here, not the machine's locale.
 ///
 /// None of the HarfBuzz ones are freed at exit in this build. Upstream frees
-/// them from an atexit handler only where HAVE_ATEXIT is defined; ztext does
+/// them from an atexit handler only where HAVE_ATEXIT is defined; ztypeset does
 /// not define it and passes -DHB_NO_ATEXIT to make that a decision rather than
 /// an omission, so hb_atexit expands to nothing. An atexit handler calling a
 /// host's allocator after the host has torn it down is worse than a bounded,
@@ -417,7 +420,7 @@ ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 /// Without this call, those allocations are attributed to whichever allocator
 /// happened to be installed when something first touched them -- which is
 /// usually the host's tracking one, and shows up as an unbalanced heap that no
-/// amount of correct ztext use will fix. All of them are bounded and small;
+/// amount of correct ztypeset use will fix. All of them are bounded and small;
 /// see UPSTREAM.md.
 ///
 /// Two such caches are out of its reach, because both are built from a real
@@ -428,25 +431,28 @@ ZTEXT_API ZtextResult ztextSetAllocator(const ZtextAllocator* alloc);
 /// host that audits and uses either can warm them by shaping one throwaway run
 /// before installing its allocator.
 ///
-/// ztextSetAllocator calls this before it installs anything, so a host that
+/// ztypesetSetAllocator calls this before it installs anything, so a host that
 /// audits its heap does not have to know to. Call it directly only to warm the
 /// caches earlier than that -- or to warm the two above that need a face, by
 /// shaping a throwaway run. Safe to call more than once, and safe never to
 /// call.
-ZTEXT_API void ztextWarmup(void);
+ZTYPESET_API void ztypesetWarmup(void);
 
 //===----------------------------------------------------------------------===//
 // Library, fonts and faces
 //
 // Three handles, because there are three lifetimes:
 //
-//   ZtextLibrary   FreeType's modules and the allocator they were built with.
-//   ZtextFont      one font image, parsed once. Its only mutable state is
-//                  its variation axes, which are per-font because FreeType
-//                  keeps them on the FT_Face; see "Variable fonts".
-//   ZtextFace      that font at one size. Cheap; make one per size you draw.
+//   ZtypesetLibrary   FreeType's modules and the allocator they were built
+//                     with.
+//   ZtypesetFont      one font image, parsed once. Its only mutable state
+//                     is its variation axes, which are per-font because
+//                     FreeType keeps them on the FT_Face; see "Variable
+//                     fonts".
+//   ZtypesetFace      that font at one size. Cheap; make one per size you
+//                     draw.
 //
-// The split is not decoration. A ZtextFace used to carry its own FT_Face and
+// The split is not decoration. A ZtypesetFace used to carry its own FT_Face and
 // its own hb_face_t, so four sizes of one font meant four full parses --
 // measured at 47 KB per additional size. Sharing what does not depend on the
 // size costs a face 296 bytes of HarfBuzz instead of ~14 KB, and about 5 KB
@@ -461,26 +467,26 @@ ZTEXT_API void ztextWarmup(void);
 
 /// Owns an FT_Library and the FreeType modules registered in it. Not
 /// thread-safe; see "Thread safety".
-typedef struct ZtextLibrary ZtextLibrary;
+typedef struct ZtypesetLibrary ZtypesetLibrary;
 
 /// One parsed font image, shared by every face made from it.
 ///
 /// Immutable apart from its variation axes, which live here rather than on a
 /// face because FreeType keeps them on the shared FT_Face.
-typedef struct ZtextFont ZtextFont;
+typedef struct ZtypesetFont ZtypesetFont;
 
 /// One font at one pixel size. Everything that depends on the size, and
 /// nothing that does not.
-typedef struct ZtextFace ZtextFace;
+typedef struct ZtypesetFace ZtypesetFace;
 
-ZTEXT_API ZtextResult ztextLibraryCreate(ZtextLibrary** out);
+ZTYPESET_API ZtypesetResult ztypesetLibraryCreate(ZtypesetLibrary** out);
 
 /// Releases the caller's claim on the library. Its memory goes when the last
 /// font made from it does, so this may be called in any order against them.
 ///
 /// Call it exactly once. The flag this sets is read by the release path, not
 /// by a second call to this function -- by then the handle is freed.
-ZTEXT_API void ztextLibraryDestroy(ZtextLibrary* library);
+ZTYPESET_API void ztypesetLibraryDestroy(ZtypesetLibrary* library);
 
 /// Creates a font from an image already in memory.
 ///
@@ -491,31 +497,32 @@ ZTEXT_API void ztextLibraryDestroy(ZtextLibrary* library);
 ///
 /// `data` is BORROWED, not copied: FreeType and HarfBuzz both read tables out
 /// of it lazily for as long as the font is alive. The buffer must outlive the
-/// ZtextFont and every face made from it, and must not move or be written to
+/// ZtypesetFont and every face made from it, and must not move or be written to
 /// in the meantime. This is FreeType's contract for FT_New_Memory_Face and
-/// ztext passes it through rather than hiding a copy the caller did not ask
+/// ztypeset passes it through rather than hiding a copy the caller did not ask
 /// for.
 ///
 /// `face_index` selects a face inside a collection (.ttc); use 0 otherwise.
-/// ztextLibraryCountFaces says how many there are.
-ZTEXT_API ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library,
+/// ztypesetLibraryCountFaces says how many there are.
+ZTYPESET_API ZtypesetResult ztypesetFontCreateFromMemory(ZtypesetLibrary*
+                                                         library,
                                                 const void* data, size_t size,
                                                 uint32_t face_index,
-                                                ZtextFont** out);
+                                                ZtypesetFont** out);
 
 /// Releases the caller's claim on the font.
 ///
 /// The font's memory goes when its last face does, so this may be called
-/// before or after ztextFaceDestroy with the same result. Faces created from
-/// it stay fully usable; only ztextFaceCreate stops working.
+/// before or after ztypesetFaceDestroy with the same result. Faces created from
+/// it stay fully usable; only ztypesetFaceCreate stops working.
 ///
-/// Call it exactly once, for the same reason ztextLibraryDestroy must be.
-ZTEXT_API void ztextFontDestroy(ZtextFont* font);
+/// Call it exactly once, for the same reason ztypesetLibraryDestroy must be.
+ZTYPESET_API void ztypesetFontDestroy(ZtypesetFont* font);
 
 /// Borrowed family and style names, "" when the font does not name itself.
 /// Valid while the font is alive.
-ZTEXT_API const char* ztextFontFamilyName(const ZtextFont* font);
-ZTEXT_API const char* ztextFontStyleName(const ZtextFont* font);
+ZTYPESET_API const char* ztypesetFontFamilyName(const ZtypesetFont* font);
+ZTYPESET_API const char* ztypesetFontStyleName(const ZtypesetFont* font);
 
 /// Glyph index for a character in the font's SELECTED character map, or 0
 /// (.notdef) if it has none. Shaping does its own mapping; this is for callers
@@ -524,86 +531,89 @@ ZTEXT_API const char* ztextFontStyleName(const ZtextFont* font);
 /// The argument is a Unicode scalar for as long as a Unicode charmap is
 /// selected, which is the default and what almost every font wants. Select a
 /// non-Unicode one -- an icon font's MS Symbol map, say -- and the argument is
-/// a code in THAT encoding instead; see ztextFontSelectCharmap.
-ZTEXT_API uint32_t ztextFontGlyphIndex(const ZtextFont* font,
+/// a code in THAT encoding instead; see ztypesetFontSelectCharmap.
+ZTYPESET_API uint32_t ztypesetFontGlyphIndex(const ZtypesetFont* font,
                                        uint32_t codepoint);
 
 //===----------------------------------------------------------------------===//
 // Character maps
 //
 // A font may carry several, and which one is selected decides what
-// ztextFontGlyphIndex and ztextFontCoveredPrefix answer. FreeType selects a
-// Unicode one when it opens the font, so a caller who never touches this gets
+// ztypesetFontGlyphIndex and ztypesetFontCoveredPrefix answer. FreeType selects
+// a Unicode one when it opens the font, so a caller who never touches this gets
 // Unicode -- but an icon font whose glyphs live only in a (3, 0) MS Symbol map
 // has no Unicode map to select, and without a way to say so its glyphs are
 // reachable by index alone.
 //
 // Shaping is NOT affected: HarfBuzz does its own Unicode mapping from the same
-// tables and never consults FreeType's selection. That is a property of the
-// two upstreams rather than a choice ztext made, and it is why this is a font
+// tables and never consults FreeType's selection. That is a property of the two
+// upstreams rather than a choice ztypeset made, and it is why this is a font
 // operation rather than a face one.
 //===----------------------------------------------------------------------===//
 
 /// FreeType's reading of a (platform, encoding) pair, as a four-character tag.
 /// These are FT_Encoding's own values, republished so a consumer need not
 /// include FreeType's headers to name one.
-#define ZTEXT_CHARMAP_NONE 0u
-#define ZTEXT_CHARMAP_MS_SYMBOL ZTEXT_TAG('s', 'y', 'm', 'b')
-#define ZTEXT_CHARMAP_UNICODE ZTEXT_TAG('u', 'n', 'i', 'c')
-#define ZTEXT_CHARMAP_SJIS ZTEXT_TAG('s', 'j', 'i', 's')
-#define ZTEXT_CHARMAP_PRC ZTEXT_TAG('g', 'b', ' ', ' ')
-#define ZTEXT_CHARMAP_BIG5 ZTEXT_TAG('b', 'i', 'g', '5')
-#define ZTEXT_CHARMAP_WANSUNG ZTEXT_TAG('w', 'a', 'n', 's')
-#define ZTEXT_CHARMAP_JOHAB ZTEXT_TAG('j', 'o', 'h', 'a')
-#define ZTEXT_CHARMAP_ADOBE_STANDARD ZTEXT_TAG('A', 'D', 'O', 'B')
-#define ZTEXT_CHARMAP_ADOBE_EXPERT ZTEXT_TAG('A', 'D', 'B', 'E')
-#define ZTEXT_CHARMAP_ADOBE_CUSTOM ZTEXT_TAG('A', 'D', 'B', 'C')
-#define ZTEXT_CHARMAP_ADOBE_LATIN_1 ZTEXT_TAG('l', 'a', 't', '1')
-#define ZTEXT_CHARMAP_OLD_LATIN_2 ZTEXT_TAG('l', 'a', 't', '2')
-#define ZTEXT_CHARMAP_APPLE_ROMAN ZTEXT_TAG('a', 'r', 'm', 'n')
+#define ZTYPESET_CHARMAP_NONE 0u
+#define ZTYPESET_CHARMAP_MS_SYMBOL ZTYPESET_TAG('s', 'y', 'm', 'b')
+#define ZTYPESET_CHARMAP_UNICODE ZTYPESET_TAG('u', 'n', 'i', 'c')
+#define ZTYPESET_CHARMAP_SJIS ZTYPESET_TAG('s', 'j', 'i', 's')
+#define ZTYPESET_CHARMAP_PRC ZTYPESET_TAG('g', 'b', ' ', ' ')
+#define ZTYPESET_CHARMAP_BIG5 ZTYPESET_TAG('b', 'i', 'g', '5')
+#define ZTYPESET_CHARMAP_WANSUNG ZTYPESET_TAG('w', 'a', 'n', 's')
+#define ZTYPESET_CHARMAP_JOHAB ZTYPESET_TAG('j', 'o', 'h', 'a')
+#define ZTYPESET_CHARMAP_ADOBE_STANDARD ZTYPESET_TAG('A', 'D', 'O', 'B')
+#define ZTYPESET_CHARMAP_ADOBE_EXPERT ZTYPESET_TAG('A', 'D', 'B', 'E')
+#define ZTYPESET_CHARMAP_ADOBE_CUSTOM ZTYPESET_TAG('A', 'D', 'B', 'C')
+#define ZTYPESET_CHARMAP_ADOBE_LATIN_1 ZTYPESET_TAG('l', 'a', 't', '1')
+#define ZTYPESET_CHARMAP_OLD_LATIN_2 ZTYPESET_TAG('l', 'a', 't', '2')
+#define ZTYPESET_CHARMAP_APPLE_ROMAN ZTYPESET_TAG('a', 'r', 'm', 'n')
 
-/// The index no charmap has, answered by ztextFontActiveCharmap for a font
+/// The index no charmap has, answered by ztypesetFontActiveCharmap for a font
 /// with none selected -- which is a state FreeType allows and a font with no
 /// character map at all is in.
-#define ZTEXT_CHARMAP_INDEX_NONE 0xFFFFFFFFu
+#define ZTYPESET_CHARMAP_INDEX_NONE 0xFFFFFFFFu
 
-typedef struct ZtextCharmap {
+typedef struct ZtypesetCharmap {
   /// The pair exactly as the font's `cmap` records it, unfiltered: (3, 1) is
   /// Windows Unicode BMP, (3, 0) is Windows Symbol, (0, x) is Apple Unicode.
   uint16_t platform_id;
   uint16_t encoding_id;
-  /// What FreeType makes of that pair: one of ZTEXT_CHARMAP_* above, or
-  /// ZTEXT_CHARMAP_NONE for a pair it has no name for. Two records can share
+  /// What FreeType makes of that pair: one of ZTYPESET_CHARMAP_* above, or
+  /// ZTYPESET_CHARMAP_NONE for a pair it has no name for. Two records can share
   /// one encoding, and two encodings can name the same subtable, so this is
   /// the value to select by and the pair above is the value to display.
   uint32_t encoding;
-} ZtextCharmap;
+} ZtypesetCharmap;
 
 /// How many character maps this font declares, and what the one at `index`
 /// is. `index` must be below the count; anything else is
-/// ZTEXT_RESULT_INVALID_ARGUMENT, and `out` is zeroed either way.
-ZTEXT_API uint32_t ztextFontCharmapCount(const ZtextFont* font);
-ZTEXT_API ZtextResult ztextFontCharmap(const ZtextFont* font, uint32_t index,
-                                       ZtextCharmap* out);
+/// ZTYPESET_RESULT_INVALID_ARGUMENT, and `out` is zeroed either way.
+ZTYPESET_API uint32_t ztypesetFontCharmapCount(const ZtypesetFont* font);
+ZTYPESET_API ZtypesetResult ztypesetFontCharmap(const ZtypesetFont* font,
+                                                uint32_t index,
+                                       ZtypesetCharmap* out);
 
 /// Which one is selected, as an index into the same list, or
-/// ZTEXT_CHARMAP_INDEX_NONE when none is.
-ZTEXT_API uint32_t ztextFontActiveCharmap(const ZtextFont* font);
+/// ZTYPESET_CHARMAP_INDEX_NONE when none is.
+ZTYPESET_API uint32_t ztypesetFontActiveCharmap(const ZtypesetFont* font);
 
 /// Selects one, by index or by encoding.
 ///
 /// By ENCODING is the form to reach for: a font's records are in its own
 /// order, so an index is only meaningful next to the list it came from, while
-/// ZTEXT_CHARMAP_MS_SYMBOL means the same thing in every font. Selecting an
+/// ZTYPESET_CHARMAP_MS_SYMBOL means the same thing in every font. Selecting an
 /// encoding no charmap of this font carries is
-/// ZTEXT_RESULT_INVALID_ARGUMENT, so "this font has a symbol map" is a
+/// ZTYPESET_RESULT_INVALID_ARGUMENT, so "this font has a symbol map" is a
 /// question this answers rather than one the caller has to walk the list for.
 ///
 /// The selection belongs to the FONT, so every face built from it sees it, and
 /// it changes nothing about a run already shaped -- shaping never went through
 /// here.
-ZTEXT_API ZtextResult ztextFontSelectCharmap(ZtextFont* font, uint32_t index);
-ZTEXT_API ZtextResult ztextFontSelectCharmapEncoding(ZtextFont* font,
+ZTYPESET_API ZtypesetResult ztypesetFontSelectCharmap(ZtypesetFont* font,
+                                                      uint32_t index);
+ZTYPESET_API ZtypesetResult ztypesetFontSelectCharmapEncoding(ZtypesetFont*
+                                                              font,
                                                      uint32_t encoding);
 
 /// Glyph index for a base character followed by a VARIATION SELECTOR, or 0 if
@@ -626,21 +636,21 @@ ZTEXT_API ZtextResult ztextFontSelectCharmapEncoding(ZtextFont* font,
 /// and 0 for all three ways it does not: no format-14 subtable, no record for
 /// that selector, and a selector whose tables do not list that base
 /// character.
-ZTEXT_API uint32_t ztextFontVariantGlyphIndex(const ZtextFont* font,
+ZTYPESET_API uint32_t ztypesetFontVariantGlyphIndex(const ZtypesetFont* font,
                                               uint32_t codepoint,
                                               uint32_t variation_selector);
 
 /// Number of glyphs, and design units per em. The latter is 0 for a font with
 /// no scalable outlines.
-ZTEXT_API uint32_t ztextFontGlyphCount(const ZtextFont* font);
-ZTEXT_API uint32_t ztextFontUnitsPerEm(const ZtextFont* font);
+ZTYPESET_API uint32_t ztypesetFontGlyphCount(const ZtypesetFont* font);
+ZTYPESET_API uint32_t ztypesetFontUnitsPerEm(const ZtypesetFont* font);
 
 /// How many leading code units of `text` this font can draw, for a host
 /// walking its own fallback list.
 ///
-/// ztext does not own that list, because which font to fall back to is a
+/// ztypeset does not own that list, because which font to fall back to is a
 /// policy question -- a UI's answer differs from a document reader's, and both
-/// differ from a game's. What ztext owns is the part that is not a policy
+/// differ from a game's. What ztypeset owns is the part that is not a policy
 /// question and is easy to get wrong:
 ///
 ///   * The prefix never ends in the middle of a cluster. A combining mark can
@@ -657,11 +667,11 @@ ZTEXT_API uint32_t ztextFontUnitsPerEm(const ZtextFont* font);
 /// means this font cannot start the text at all -- move on. It is never
 /// partial through a character.
 ///
-/// Rejects malformed text with ZTEXT_RESULT_INVALID_TEXT, like everything
+/// Rejects malformed text with ZTYPESET_RESULT_INVALID_TEXT, like everything
 /// else that takes text. `length` and `*out` are in `encoding`'s code units.
-ZTEXT_API ZtextResult ztextFontCoveredPrefix(const ZtextFont* font,
+ZTYPESET_API ZtypesetResult ztypesetFontCoveredPrefix(const ZtypesetFont* font,
                                              const void* text, size_t length,
-                                             ZtextEncoding encoding,
+                                             ZtypesetEncoding encoding,
                                              size_t* out);
 
 // Variable fonts.
@@ -672,7 +682,7 @@ ZTEXT_API ZtextResult ztextFontCoveredPrefix(const ZtextFont* font,
 // that continuum, which is what the four functions below do.
 //
 // The setting belongs to the FONT, not to a face, and that is FreeType's
-// arrangement rather than a choice ztext made: FT_Set_Var_Design_Coordinates
+// arrangement rather than a choice ztypeset made: FT_Set_Var_Design_Coordinates
 // takes an FT_Face, and every face of a font shares one of those. So setting
 // an axis moves every face of the font at once. A per-face API would read
 // correctly right up to the moment a second size existed, which is a worse
@@ -684,41 +694,42 @@ ZTEXT_API ZtextResult ztextFontCoveredPrefix(const ZtextFont* font,
 // describing one instance and rasterisation another -- advances from a regular
 // weight under the outlines of a bold one. Nothing reports an error; the text
 // simply spaces wrongly, which is the class of defect this package exists to
-// make unreachable. ztextFontSetVariations updates FreeType and the HarfBuzz
+// make unreachable. ztypesetFontSetVariations updates FreeType and the HarfBuzz
 // font of every live face in one call, so the two cannot come apart.
 //
 // Values are DESIGN coordinates -- the numbers `fvar` itself names, 400 for a
 // regular weight and 700 for a bold one -- not the normalised -1..1 the
 // OpenType internals work in. A value outside an axis's range is refused
-// rather than clamped, the same bargain ztextLibrarySetSdfSpread makes, so a
+// rather than clamped, the same bargain ztypesetLibrarySetSdfSpread makes, so a
 // caller asking for a weight the font does not have finds out.
 
 /// One variable axis, in design units.
-typedef struct ZtextVariationAxis {
+typedef struct ZtypesetVariationAxis {
   /// Four-character tag: 'wght', 'wdth', 'slnt', 'opsz', 'ital'. Build one
-  /// with ZTEXT_TAG.
+  /// with ZTYPESET_TAG.
   uint32_t tag;
   float min_value;
   float default_value;
   float max_value;
-} ZtextVariationAxis;
+} ZtypesetVariationAxis;
 
 /// One axis set to one value.
-typedef struct ZtextVariation {
+typedef struct ZtypesetVariation {
   uint32_t tag;
   float value;
-} ZtextVariation;
+} ZtypesetVariation;
 
 /// Number of variable axes, or 0 for a static font -- which is not an error,
 /// just the answer.
-ZTEXT_API uint32_t ztextFontAxisCount(const ZtextFont* font);
+ZTYPESET_API uint32_t ztypesetFontAxisCount(const ZtypesetFont* font);
 
-/// Describes axis `index`, which must be below ztextFontAxisCount.
+/// Describes axis `index`, which must be below ztypesetFontAxisCount.
 ///
 /// The axes are in the font's own order, and that order is what
-/// ztextFontVariation indexes too.
-ZTEXT_API ZtextResult ztextFontAxis(const ZtextFont* font, uint32_t index,
-                                    ZtextVariationAxis* out);
+/// ztypesetFontVariation indexes too.
+ZTYPESET_API ZtypesetResult ztypesetFontAxis(const ZtypesetFont* font,
+                                             uint32_t index,
+                                    ZtypesetVariationAxis* out);
 
 /// Moves the named axes, leaving every axis not named where it already was.
 ///
@@ -731,7 +742,7 @@ ZTEXT_API ZtextResult ztextFontAxis(const ZtextFont* font, uint32_t index,
 ///   * a tag that is not an axis of this font -- silently ignoring it would
 ///     make a typo in a four-character constant invisible;
 ///   * a value outside the axis's [min, max], or one that is not finite --
-///     FreeType clamps such a value, ztext refuses it, exactly as with the
+///     FreeType clamps such a value, ztypeset refuses it, exactly as with the
 ///     SDF spread;
 ///   * a font with no axes at all.
 ///
@@ -741,12 +752,13 @@ ZTEXT_API ZtextResult ztextFontAxis(const ZtextFont* font, uint32_t index,
 /// This invalidates every run already measured against a face of this font:
 /// HVAR moves the advances and MVAR can move the ascender, so a run measured
 /// before the change is not one that can be laid out after it.
-ZTEXT_API ZtextResult ztextFontSetVariations(ZtextFont* font,
-                                             const ZtextVariation* values,
+ZTYPESET_API ZtypesetResult ztypesetFontSetVariations(ZtypesetFont* font,
+                                             const ZtypesetVariation* values,
                                              size_t count);
 
 /// Current design value of axis `index`, which starts at the axis default.
-ZTEXT_API ZtextResult ztextFontVariation(const ZtextFont* font, uint32_t index,
+ZTYPESET_API ZtypesetResult ztypesetFontVariation(const ZtypesetFont* font,
+                                                  uint32_t index,
                                          float* out);
 
 /// Number of NAMED INSTANCES the font declares -- the entries a font's own
@@ -757,17 +769,18 @@ ZTEXT_API ZtextResult ztextFontVariation(const ZtextFont* font, uint32_t index,
 /// A variable font is a continuous space and a picker needs the points in it
 /// that someone chose deliberately; deriving them from the axes is not
 /// possible, because they are data rather than a rule.
-ZTEXT_API uint32_t ztextFontNamedInstanceCount(const ZtextFont* font);
+ZTYPESET_API uint32_t ztypesetFontNamedInstanceCount(const ZtypesetFont* font);
 
 /// Design coordinates of one named instance, one per axis, in the order
-/// ztextFontAxis reports them.
+/// ztypesetFontAxis reports them.
 ///
 /// `*count` is the capacity of `values` on the way in and the number written
 /// on the way out. Pass `values = NULL` to ask only for the count, which is
-/// always ztextFontAxisCount. A buffer too small is
-/// ZTEXT_RESULT_BUFFER_TOO_SMALL with `*count` set to what is needed, and
+/// always ztypesetFontAxisCount. A buffer too small is
+/// ZTYPESET_RESULT_BUFFER_TOO_SMALL with `*count` set to what is needed, and
 /// nothing written.
-ZTEXT_API ZtextResult ztextFontNamedInstanceCoords(const ZtextFont* font,
+ZTYPESET_API ZtypesetResult ztypesetFontNamedInstanceCoords(const ZtypesetFont*
+                                                            font,
                                                    uint32_t index,
                                                    float* values,
                                                    size_t* count);
@@ -777,53 +790,54 @@ ZTEXT_API ZtextResult ztextFontNamedInstanceCoords(const ZtextFont* font,
 /// `*size` is the capacity of `buffer` in bytes on the way in and the length
 /// written EXCLUDING the NUL on the way out. Pass `buffer = NULL` to ask for
 /// the length first; `*size` then comes back as the length a buffer must hold
-/// beyond its NUL. Too small a buffer is ZTEXT_RESULT_BUFFER_TOO_SMALL with
+/// beyond its NUL. Too small a buffer is ZTYPESET_RESULT_BUFFER_TOO_SMALL with
 /// `*size` set to what is needed, and nothing written.
 ///
 /// The name comes from the font's `name` table through HarfBuzz, which
 /// decodes the platform encoding -- usually UTF-16BE -- so a caller never
 /// meets one.
 ///
-/// ZTEXT_RESULT_UNSUPPORTED when the lookup yields nothing, which covers two
+/// ZTYPESET_RESULT_UNSUPPORTED when the lookup yields nothing, which covers two
 /// cases HarfBuzz does not distinguish: an instance whose `name` id the table
 /// does not carry, and one whose name is the empty string. Both are
 /// malformed fonts, and neither gives a picker anything to show.
-ZTEXT_API ZtextResult ztextFontNamedInstanceName(const ZtextFont* font,
+ZTYPESET_API ZtypesetResult ztypesetFontNamedInstanceName(const ZtypesetFont*
+                                                          font,
                                                  uint32_t index, char* buffer,
                                                  size_t* size);
 
 /// Moves every axis to the named instance's coordinates, in one step.
 ///
 /// Equivalent to reading the coordinates and passing all of them to
-/// ztextFontSetVariations, and subject to the same rule: it invalidates every
-/// face of this font for measurement, because a run measured before the
+/// ztypesetFontSetVariations, and subject to the same rule: it invalidates
+/// every face of this font for measurement, because a run measured before the
 /// change is not one that can be laid out after it.
-ZTEXT_API ZtextResult ztextFontSetNamedInstance(ZtextFont* font,
+ZTYPESET_API ZtypesetResult ztypesetFontSetNamedInstance(ZtypesetFont* font,
                                                 uint32_t index);
 
 /// Creates a face: this font, at this size.
 ///
 /// A face is never sizeless -- the size is part of what it is -- so there is
 /// no state in which measuring or rendering has to be refused for want of one.
-/// See ztextFaceSetPixelSize for what the size arguments accept.
+/// See ztypesetFaceSetPixelSize for what the size arguments accept.
 ///
 /// Faces of one font share its FT_Face, and therefore its single glyph slot
 /// and its one thread. They do not share a size, a HarfBuzz font, or a glyph
 /// bitmap.
-ZTEXT_API ZtextResult ztextFaceCreate(ZtextFont* font, float width,
-                                      float height, ZtextFace** out);
+ZTYPESET_API ZtypesetResult ztypesetFaceCreate(ZtypesetFont* font, float width,
+                                      float height, ZtypesetFace** out);
 
 /// Destroys the face, which nothing else is waiting on: its memory is
 /// released here rather than deferred. Call it exactly once.
-ZTEXT_API void ztextFaceDestroy(ZtextFace* face);
+ZTYPESET_API void ztypesetFaceDestroy(ZtypesetFace* face);
 
 /// The font this face was made from, borrowed. Never NULL for a live face.
-ZTEXT_API ZtextFont* ztextFaceFont(const ZtextFace* face);
+ZTYPESET_API ZtypesetFont* ztypesetFaceFont(const ZtypesetFace* face);
 
 /// Changes this face's size in pixels. Passing 0 for one axis copies the
 /// other.
 ///
-/// A face already has a size from ztextFaceCreate; this is for a face that
+/// A face already has a size from ztypesetFaceCreate; this is for a face that
 /// follows a changing scale factor, and it invalidates any run measured
 /// against the face.
 ///
@@ -831,11 +845,12 @@ ZTEXT_API ZtextFont* ztextFaceFont(const ZtextFace* face);
 /// 18.75 px, and a UI that rounds that to 19 drifts against every other
 /// element on the same scaled layout. The value is quantised to 1/64 px, which
 /// is FreeType's own resolution, and anything that would quantise to zero is
-/// ZTEXT_RESULT_INVALID_ARGUMENT rather than a face that renders nothing.
+/// ZTYPESET_RESULT_INVALID_ARGUMENT rather than a face that renders nothing.
 ///
 /// Non-finite values are refused. So is anything above 16384 px, which is a
 /// caller error long before it is a FreeType one.
-ZTEXT_API ZtextResult ztextFaceSetPixelSize(ZtextFace* face, float width,
+ZTYPESET_API ZtypesetResult ztypesetFaceSetPixelSize(ZtypesetFace* face,
+                                                     float width,
                                             float height);
 
 /// Scaled face-wide metrics.
@@ -848,7 +863,7 @@ ZTEXT_API ZtextResult ztextFaceSetPixelSize(ZtextFace* face, float width,
 /// GRID_FIT_METRICS that is defined unconditionally rather than by a build
 /// option), passed through rather than smoothed over. A host that wants a
 /// fractional leading should compute it from `units_per_em` itself.
-typedef struct ZtextFaceMetrics {
+typedef struct ZtypesetFaceMetrics {
   /// Distance from the baseline to the top of the typical glyph, in pixels,
   /// positive upward. Grid-fitted; see above.
   float ascender;
@@ -864,7 +879,7 @@ typedef struct ZtextFaceMetrics {
   float underline_thickness;
   /// Design units per em, and the glyph count. Both are properties of the
   /// font rather than of this size; they are repeated here because a caller
-  /// deciding a layout wants them in the same answer, and are on ZtextFont
+  /// deciding a layout wants them in the same answer, and are on ZtypesetFont
   /// too for a caller that has no face yet.
   uint32_t units_per_em;
   uint32_t num_glyphs;
@@ -887,50 +902,48 @@ typedef struct ZtextFaceMetrics {
   /// Nonzero when the four fields above are read from the font's own
   /// vhea/vmtx tables rather than synthesised.
   uint32_t has_vertical_metrics;
-} ZtextFaceMetrics;
+} ZtypesetFaceMetrics;
 
-ZTEXT_API ZtextResult ztextFaceMetrics(const ZtextFace* face,
-                                       ZtextFaceMetrics* out);
+ZTYPESET_API ZtypesetResult ztypesetFaceMetrics(const ZtypesetFace* face,
+                                       ZtypesetFaceMetrics* out);
 
 /// One metric from the font's own tables, named as OpenType names it.
 ///
-/// ZtextFaceMetrics above is what a line of text needs and comes from
+/// ZtypesetFaceMetrics above is what a line of text needs and comes from
 /// FreeType, which reads `hhea`. This is the rest of what OpenType defines,
 /// read through HarfBuzz -- and the two do not always agree, which is the
 /// point rather than an inconsistency:
 ///
-///   * ZTEXT_METRIC_HORIZONTAL_ASCENDER prefers OS/2's sTypoAscender when the
-///     font sets the USE_TYPO_METRICS bit in fsSelection, and falls back to
-///     `hhea` otherwise (libs/harfbuzz/src/hb-ot-metrics.cc). That is the
-///     rule modern text stacks follow. ZtextFaceMetrics::ascender is `hhea`
-///     unconditionally, because that is what FreeType scales onto the
-///     FT_Size. A font that sets the bit and disagrees between the two tables
-///     will report two different ascenders here, and both are correct answers
-///     to different questions.
-///   * ZTEXT_METRIC_UNDERLINE_OFFSET is `post`'s own number, which is the
-///     TOP edge of the stroke. ZtextFaceMetrics::underline_position is the
-///     CENTRE: FreeType subtracts half the thickness to convert the
-///     TrueType meaning to its own (libs/freetype/src/sfnt/sfobjs.c). The
-///     two differ by half the underline thickness in every TrueType font,
-///     and a caller drawing a rectangle wants to know which edge it has.
-///   * Every value is in pixels at this face's current size, positive upward,
-///     with the font's own sign conventions kept: a descender is negative,
-///     and a strikeout offset is the distance ABOVE the baseline.
-///   * Variations are applied. Moving an axis moves these.
+/// * ZTYPESET_METRIC_HORIZONTAL_ASCENDER prefers OS/2's sTypoAscender when the
+/// font sets the USE_TYPO_METRICS bit in fsSelection, and falls back to `hhea`
+/// otherwise (libs/harfbuzz/src/hb-ot-metrics.cc). That is the rule modern text
+/// stacks follow. ZtypesetFaceMetrics::ascender is `hhea` unconditionally,
+/// because that is what FreeType scales onto the FT_Size. A font that sets the
+/// bit and disagrees between the two tables will report two different ascenders
+/// here, and both are correct answers to different questions. *
+/// ZTYPESET_METRIC_UNDERLINE_OFFSET is `post`'s own number, which is the TOP
+/// edge of the stroke. ZtypesetFaceMetrics::underline_position is the CENTRE:
+/// FreeType subtracts half the thickness to convert the TrueType meaning to its
+/// own (libs/freetype/src/sfnt/sfobjs.c). The two differ by half the underline
+/// thickness in every TrueType font, and a caller drawing a rectangle wants to
+/// know which edge it has. * Every value is in pixels at this face's current
+/// size, positive upward, with the font's own sign conventions kept: a
+/// descender is negative, and a strikeout offset is the distance ABOVE the
+/// baseline. * Variations are applied. Moving an axis moves these.
 ///
 /// The values are HarfBuzz's own tags, so a reader who knows
-/// hb_ot_metrics_tag_t already knows this enum; ffi/ztext_abi.c asserts each
+/// hb_ot_metrics_tag_t already knows this enum; ffi/ztypeset_abi.c asserts each
 /// one equal to its HB_OT_METRICS_TAG_ counterpart, so the two cannot drift.
-/// Every metric ztext names, written once.
+/// Every metric ztypeset names, written once.
 ///
-/// This list expands three ways: into ZtextMetric below, into the check
-/// ztextFaceMetric applies to the metric it is handed, and into the static
-/// assertions in ffi/ztext_abi.c that tie each name to HarfBuzz's own
+/// This list expands three ways: into ZtypesetMetric below, into the check
+/// ztypesetFaceMetric applies to the metric it is handed, and into the static
+/// assertions in ffi/ztypeset_abi.c that tie each name to HarfBuzz's own
 /// HB_OT_METRICS_TAG_ counterpart. A metric reaches all three or none of
 /// them, so there is no second list to fall behind -- which is also why
-/// ZtextAbiLayout reports metric_count from this list rather than a number
+/// ZtypesetAbiLayout reports metric_count from this list rather than a number
 /// written down beside it.
-#define ZTEXT_METRIC_LIST(X)                                                 \
+#define ZTYPESET_METRIC_LIST(X)                                                \
   X(HORIZONTAL_ASCENDER, 'h', 'a', 's', 'c')                                  \
   X(HORIZONTAL_DESCENDER, 'h', 'd', 's', 'c')                                 \
   X(HORIZONTAL_LINE_GAP, 'h', 'l', 'g', 'p')                                  \
@@ -960,38 +973,39 @@ ZTEXT_API ZtextResult ztextFaceMetrics(const ZtextFace* face,
   X(UNDERLINE_SIZE, 'u', 'n', 'd', 's')                                       \
   X(UNDERLINE_OFFSET, 'u', 'n', 'd', 'o')
 
-typedef enum ZtextMetric {
-#define ZTEXT_METRIC_ENUMERATOR(name, a, b, c, d) \
-  ZTEXT_METRIC_##name = ZTEXT_TAG(a, b, c, d),
-  ZTEXT_METRIC_LIST(ZTEXT_METRIC_ENUMERATOR)
-#undef ZTEXT_METRIC_ENUMERATOR
-} ZtextMetric;
+typedef enum ZtypesetMetric {
+#define ZTYPESET_METRIC_ENUMERATOR(name, a, b, c, d) \
+  ZTYPESET_METRIC_##name = ZTYPESET_TAG(a, b, c, d),
+  ZTYPESET_METRIC_LIST(ZTYPESET_METRIC_ENUMERATOR)
+#undef ZTYPESET_METRIC_ENUMERATOR
+} ZtypesetMetric;
 
 /// Reads one metric, and says whether the font declares it.
 ///
-/// ZTEXT_RESULT_UNSUPPORTED, with `*out` set to 0, when the font's tables do
+/// ZTYPESET_RESULT_UNSUPPORTED, with `*out` set to 0, when the font's tables do
 /// not carry it -- which is the common case for x-height and cap-height in
 /// older fonts, and for every vertical metric in a font with no `vhea`. That
 /// is a real answer, not a failure: 0 on its own could not be told from a
 /// font that declares a zero.
 ///
-/// A `metric` this header does not name is ZTEXT_RESULT_INVALID_ARGUMENT
+/// A `metric` this header does not name is ZTYPESET_RESULT_INVALID_ARGUMENT
 /// rather than an unsupported metric, so a caller casting an integer in finds
 /// out.
-ZTEXT_API ZtextResult ztextFaceMetric(const ZtextFace* face,
-                                      ZtextMetric metric, float* out);
+ZTYPESET_API ZtypesetResult ztypesetFaceMetric(const ZtypesetFace* face,
+                                      ZtypesetMetric metric, float* out);
 
 /// The same, with a value synthesised when the font declares none.
 ///
 /// HarfBuzz's own fallbacks (hb_ot_metrics_get_position_with_fallback): an
 /// absent x-height or cap-height is estimated from the ink of a
 /// representative glyph, an absent strikeout or underline from the em, and so
-/// on. Never ZTEXT_RESULT_UNSUPPORTED -- there is always an answer, and the
+/// on. Never ZTYPESET_RESULT_UNSUPPORTED -- there is always an answer, and the
 /// price is that a caller cannot tell a designed value from an estimate. Use
-/// ztextFaceMetric when that distinction matters, this when a number is
+/// ztypesetFaceMetric when that distinction matters, this when a number is
 /// needed and any reasonable one will do.
-ZTEXT_API ZtextResult ztextFaceMetricWithFallback(const ZtextFace* face,
-                                                  ZtextMetric metric,
+ZTYPESET_API ZtypesetResult ztypesetFaceMetricWithFallback(const ZtypesetFace*
+                                                           face,
+                                                  ZtypesetMetric metric,
                                                   float* out);
 
 //===----------------------------------------------------------------------===//
@@ -1004,139 +1018,139 @@ ZTEXT_API ZtextResult ztextFaceMetricWithFallback(const ZtextFace* face,
 /// A user interface shapes the same strings every frame, so the buffer is
 /// owned by a handle the caller keeps rather than allocated per call. After
 /// the first few calls a steady-state shape allocates nothing.
-typedef struct ZtextShaper ZtextShaper;
+typedef struct ZtypesetShaper ZtypesetShaper;
 
-typedef enum ZtextDirection {
+typedef enum ZtypesetDirection {
   /// Let HarfBuzz infer it from the script. Prefer passing the direction from
   /// bidi analysis instead: inference is per-script and cannot know that this
   /// run sits inside an RTL paragraph.
-  ZTEXT_DIRECTION_AUTO = 0,
-  ZTEXT_DIRECTION_LTR = 1,
-  ZTEXT_DIRECTION_RTL = 2,
-  ZTEXT_DIRECTION_TTB = 3,
-  ZTEXT_DIRECTION_BTT = 4,
-} ZtextDirection;
+  ZTYPESET_DIRECTION_AUTO = 0,
+  ZTYPESET_DIRECTION_LTR = 1,
+  ZTYPESET_DIRECTION_RTL = 2,
+  ZTYPESET_DIRECTION_TTB = 3,
+  ZTYPESET_DIRECTION_BTT = 4,
+} ZtypesetDirection;
 
 /// How finely clusters are allowed to be split. The default merges a base and
 /// its combining marks into one cluster, which is what a caret and a selection
 /// highlight want.
-typedef enum ZtextClusterLevel {
-  ZTEXT_CLUSTER_LEVEL_MONOTONE_GRAPHEMES = 0,
-  ZTEXT_CLUSTER_LEVEL_MONOTONE_CHARACTERS = 1,
-  ZTEXT_CLUSTER_LEVEL_CHARACTERS = 2,
+typedef enum ZtypesetClusterLevel {
+  ZTYPESET_CLUSTER_LEVEL_MONOTONE_GRAPHEMES = 0,
+  ZTYPESET_CLUSTER_LEVEL_MONOTONE_CHARACTERS = 1,
+  ZTYPESET_CLUSTER_LEVEL_CHARACTERS = 2,
   /// Group by grapheme without forcing monotone order. Useful when you intend
   /// to reorder glyphs yourself and want the grouping without the constraint.
-  ZTEXT_CLUSTER_LEVEL_GRAPHEMES = 3,
-} ZtextClusterLevel;
+  ZTYPESET_CLUSTER_LEVEL_GRAPHEMES = 3,
+} ZtypesetClusterLevel;
 
 /// One OpenType feature setting. `start`/`end` are code-unit offsets into the
-/// run the feature applies to; use 0 and ZTEXT_FEATURE_GLOBAL for the whole
+/// run the feature applies to; use 0 and ZTYPESET_FEATURE_GLOBAL for the whole
 /// run.
-typedef struct ZtextFeature {
-  /// ZTEXT_TAG('l','i','g','a') and friends.
+typedef struct ZtypesetFeature {
+  /// ZTYPESET_TAG('l','i','g','a') and friends.
   uint32_t tag;
   /// 0 disables, 1 enables, higher values select an alternate where the
   /// feature takes one.
   uint32_t value;
   uint32_t start;
   uint32_t end;
-} ZtextFeature;
+} ZtypesetFeature;
 
-#define ZTEXT_FEATURE_GLOBAL ((uint32_t)0xFFFFFFFFu)
+#define ZTYPESET_FEATURE_GLOBAL ((uint32_t)0xFFFFFFFFu)
 
-typedef struct ZtextShapeParams {
-  ZtextDirection direction;
-  /// ISO 15924 script as a tag -- ZTEXT_TAG('A','r','a','b'). 0 asks HarfBuzz
-  /// to guess from the text.
+typedef struct ZtypesetShapeParams {
+  ZtypesetDirection direction;
+  /// ISO 15924 script as a tag -- ZTYPESET_TAG('A','r','a','b'). 0 asks
+  /// HarfBuzz to guess from the text.
   uint32_t script;
   /// BCP 47 language tag, NULL for none. Affects language-specific features
   /// such as Turkish dotless i.
   const char* language;
-  const ZtextFeature* features;
+  const ZtypesetFeature* features;
   size_t feature_count;
-  ZtextClusterLevel cluster_level;
+  ZtypesetClusterLevel cluster_level;
   /// 0 (default) takes metrics from HarfBuzz's own OpenType table reader:
   /// advances scale linearly from design units, so layout does not shift when
   /// hinting changes, and the shaping font is immutable.
   ///
   /// 1 takes them from FreeType instead, computed from the same face that
   /// will rasterise, with hinting on -- so advances match a hinted raster at
-  /// the cost of hinting-dependent layout. Pair it with ZTEXT_HINTING_NORMAL
+  /// the cost of hinting-dependent layout. Pair it with ZTYPESET_HINTING_NORMAL
   /// when rendering; mixing hinted advances with an unhinted raster, or the
   /// reverse, is what makes text drift.
   ///
-  /// The two sources are close but not identical: ztext's suite measures the
+  /// The two sources are close but not identical: ztypeset's suite measures the
   /// gap over a 15-glyph run and asserts it stays under one pixel.
   int use_freetype_metrics;
-} ZtextShapeParams;
+} ZtypesetShapeParams;
 
 /// What shaping learned about the text around one glyph, as a bit mask in
-/// ZtextGlyph::flags.
+/// ZtypesetGlyph::flags.
 ///
 /// Singular because each enumerator is ONE flag; the field holds any OR of
-/// them. The values are HarfBuzz's own, and ztext_abi.c carries a static
+/// them. The values are HarfBuzz's own, and ztypeset_abi.c carries a static
 /// assertion per flag tying each to its HB_GLYPH_FLAG_ counterpart -- so this
 /// is a rename of upstream's contract, not a re-encoding of it, and a
 /// re-vendor that renumbered a flag would fail the build rather than shift
 /// every line break by one.
 ///
-/// ztext always asks HarfBuzz to produce all three. Upstream leaves two of
+/// ztypeset always asks HarfBuzz to produce all three. Upstream leaves two of
 /// them off by default because computing them costs something, but a flag
 /// that is present on some builds and absent on others is worse than either
 /// answer: a consumer cannot tell "not set" from "not computed", and the only
 /// safe reading of that ambiguity is to assume the worst -- which throws away
 /// the entire optimisation the flags exist for. The cost is measured in
 /// README.md rather than assumed.
-typedef enum ZtextGlyphFlag {
+typedef enum ZtypesetGlyphFlag {
   /// Breaking the text at the start of this glyph's cluster may change the
   /// shaping of BOTH sides, so both would have to be re-shaped. Its ABSENCE
   /// is the useful half: a line broken only at unflagged clusters is
   /// identical to the same text shaped in one piece, so no re-shape is
   /// needed after line breaking.
-  ZTEXT_GLYPH_FLAG_UNSAFE_TO_BREAK = 0x00000001,
+  ZTYPESET_GLYPH_FLAG_UNSAFE_TO_BREAK = 0x00000001,
   /// Changing the text on one side of this glyph's cluster may change the
   /// shaping on the other. Absence alone does not make a concatenation safe:
   /// both pieces being joined have to be clear of it.
-  ZTEXT_GLYPH_FLAG_UNSAFE_TO_CONCAT = 0x00000002,
+  ZTYPESET_GLYPH_FLAG_UNSAFE_TO_CONCAT = 0x00000002,
   /// U+0640 TATWEEL may be inserted before this cluster to elongate the line
   /// without disturbing shaping. Whether elongating THERE is typographically
   /// right is a decision this does not make.
-  ZTEXT_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL = 0x00000004,
+  ZTYPESET_GLYPH_FLAG_SAFE_TO_INSERT_TATWEEL = 0x00000004,
   /// Every flag this version defines. A consumer that masks with this ignores
-  /// bits a newer ztext may add, rather than mistaking one for another flag.
-  ZTEXT_GLYPH_FLAG_DEFINED = 0x00000007,
-} ZtextGlyphFlag;
+  /// bits a newer ztypeset may add, rather than mistaking one for another flag.
+  ZTYPESET_GLYPH_FLAG_DEFINED = 0x00000007,
+} ZtypesetGlyphFlag;
 
 /// One positioned glyph. Advances and offsets are in pixels at the face's
 /// current size, y-up.
-typedef struct ZtextGlyph {
+typedef struct ZtypesetGlyph {
   uint32_t glyph_id;
-  /// Code-unit offset into the text passed to ztextShaperShape, in that
+  /// Code-unit offset into the text passed to ztypesetShaperShape, in that
   /// text's own encoding -- not a codepoint index. Several glyphs may share a
   /// cluster (one character decomposing) and several characters may share one
   /// (a ligature).
   uint32_t cluster;
-  /// An OR of ZtextGlyphFlag, 0 when none of them applies. Always produced;
-  /// see ZtextGlyphFlag for why "always" is part of the contract.
+  /// An OR of ZtypesetGlyphFlag, 0 when none of them applies. Always produced;
+  /// see ZtypesetGlyphFlag for why "always" is part of the contract.
   uint32_t flags;
   float x_advance;
   float y_advance;
   float x_offset;
   float y_offset;
-} ZtextGlyph;
+} ZtypesetGlyph;
 
-ZTEXT_API ZtextResult ztextShaperCreate(ZtextShaper** out);
+ZTYPESET_API ZtypesetResult ztypesetShaperCreate(ZtypesetShaper** out);
 
 /// Destroys the shaper and the buffers it grew. Call it exactly once.
-ZTEXT_API void ztextShaperDestroy(ZtextShaper* shaper);
+ZTYPESET_API void ztypesetShaperDestroy(ZtypesetShaper* shaper);
 
 /// Shapes one run of text with one face, one direction and one script.
 ///
 /// This is a run shaper, not a paragraph shaper: it does not itemise. Split
-/// text into runs with ztextParagraph* first, then call this once per run.
+/// text into runs with ztypesetParagraph* first, then call this once per run.
 ///
 /// The text is validated in `encoding` before HarfBuzz sees it and rejected
-/// with ZTEXT_RESULT_INVALID_TEXT if it is malformed, rather than silently
+/// with ZTYPESET_RESULT_INVALID_TEXT if it is malformed, rather than silently
 /// substituting replacement characters.
 ///
 /// Results replace whatever the shaper held before.
@@ -1145,46 +1159,50 @@ ZTEXT_API void ztextShaperDestroy(ZtextShaper* shaper);
 /// they ARE seen -- which is the difference between correct and nearly correct
 /// at a run boundary.
 ///
-/// This matters the moment a host splits a word, which ztextFontCoveredPrefix
-/// invites it to do. Shaping the two halves of an Arabic word separately gives
-/// the letter before the split a final form and the letter after it an initial
-/// form, when both should be medial: five letters of "marhaba" split in the
-/// middle come back with two wrong glyphs, silently, in a run that otherwise
-/// looks fine. Handing over the surrounding text costs nothing and removes the
-/// whole class.
+/// This matters the moment a host splits a word, which
+/// ztypesetFontCoveredPrefix invites it to do. Shaping the two halves of an
+/// Arabic word separately gives the letter before the split a final form and
+/// the letter after it an initial form, when both should be medial: five
+/// letters of "marhaba" split in the middle come back with two wrong glyphs,
+/// silently, in a run that otherwise looks fine. Handing over the surrounding
+/// text costs nothing and removes the whole class.
 ///
 /// To shape a standalone string, pass 0 and `length`.
 ///
 /// The whole `text` is validated on every call, not just the run: it is
-/// borrowed, and ztext has no way to know it is the same buffer it saw last
-/// time. For runs that came out of a ZtextParagraph use ztextShaperShapeRun,
-/// which walks nothing.
+/// borrowed, and ztypeset has no way to know it is the same buffer it saw last
+/// time. For runs that came out of a ZtypesetParagraph use
+/// ztypesetShaperShapeRun, which walks nothing.
 ///
 /// `length`, `run_offset`, `run_length` and every cluster value are in
 /// `encoding`'s code units. Cluster values index `text` -- the whole buffer,
-/// not the run -- so they index the same slice a ZtextShapingRun's offsets do.
-ZTEXT_API ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
+/// not the run -- so they index the same slice a ZtypesetShapingRun's offsets
+/// do.
+ZTYPESET_API ZtypesetResult ztypesetShaperShape(ZtypesetShaper* shaper,
+                                                ZtypesetFace* face,
                                        const void* text, size_t length,
-                                       ZtextEncoding encoding,
+                                       ZtypesetEncoding encoding,
                                        size_t run_offset, size_t run_length,
-                                       const ZtextShapeParams* params);
+                                       const ZtypesetShapeParams* params);
 
 /// Number of glyphs from the last successful shape.
-ZTEXT_API size_t ztextShaperGlyphCount(const ZtextShaper* shaper);
+ZTYPESET_API size_t ztypesetShaperGlyphCount(const ZtypesetShaper* shaper);
 
 /// Borrowed glyph array in visual order. Valid until the next shape on this
 /// shaper, or its destruction.
 ///
 /// NULL when nothing has been shaped -- and also when the last shape succeeded
 /// but produced no glyphs, as shaping empty text does. Use
-/// ztextShaperGlyphCount to tell those apart; it is the count that is
+/// ztypesetShaperGlyphCount to tell those apart; it is the count that is
 /// authoritative.
-ZTEXT_API const ZtextGlyph* ztextShaperGlyphs(const ZtextShaper* shaper);
+ZTYPESET_API const ZtypesetGlyph* ztypesetShaperGlyphs(const ZtypesetShaper*
+                                                       shaper);
 
 /// Direction actually used, which is what AUTO resolved to.
-ZTEXT_API ZtextDirection ztextShaperDirection(const ZtextShaper* shaper);
+ZTYPESET_API ZtypesetDirection ztypesetShaperDirection(const ZtypesetShaper*
+                                                       shaper);
 
-typedef struct ZtextExtents {
+typedef struct ZtypesetExtents {
   /// Ink bounds relative to the run origin, in pixels, y-up. Empty runs and
   /// runs of blank glyphs report x_min == x_max.
   float x_min;
@@ -1195,7 +1213,7 @@ typedef struct ZtextExtents {
   /// same as the ink width.
   float x_advance;
   float y_advance;
-} ZtextExtents;
+} ZtypesetExtents;
 
 /// Extents of the last successful shape.
 ///
@@ -1203,8 +1221,8 @@ typedef struct ZtextExtents {
 /// shaped at. It is a parameter rather than something the shaper remembers on
 /// your behalf, deliberately: a stored face pointer would dangle the moment
 /// the face was destroyed, and the compiler would never mention it. Passing it
-/// makes the dependency part of the call, and ztext checks it -- a different
-/// face, or the same face resized since, is ZTEXT_RESULT_INVALID_ARGUMENT
+/// makes the dependency part of the call, and ztypeset checks it -- a different
+/// face, or the same face resized since, is ZTYPESET_RESULT_INVALID_ARGUMENT
 /// rather than a plausible mixture of one font's ink and another's advances.
 ///
 /// Metrics come from whichever source the shape used, so extents and advances
@@ -1212,8 +1230,9 @@ typedef struct ZtextExtents {
 ///
 /// Costs one glyph-extents query per glyph, so cache the result rather than
 /// asking every frame.
-ZTEXT_API ZtextResult ztextShaperExtents(const ZtextShaper* shaper,
-                                         ZtextFace* face, ZtextExtents* out);
+ZTYPESET_API ZtypesetResult ztypesetShaperExtents(const ZtypesetShaper* shaper,
+                                         ZtypesetFace* face,
+    ZtypesetExtents* out);
 
 //===----------------------------------------------------------------------===//
 // Bidi and script itemisation
@@ -1224,39 +1243,39 @@ ZTEXT_API ZtextResult ztextShaperExtents(const ZtextShaper* shaper,
 // text must be split before shaping because HarfBuzz shapes one script at a
 // time.
 //
-// ztext stops at runs. Line breaking, justification and where those runs end
+// ztypeset stops at runs. Line breaking, justification and where those runs end
 // up on screen are a layout engine's job, not this package's.
 //===----------------------------------------------------------------------===//
 
 /// One analysed paragraph. Immutable once created, and independent of any
 /// face, library or thread.
-typedef struct ZtextParagraph ZtextParagraph;
+typedef struct ZtypesetParagraph ZtypesetParagraph;
 
-typedef enum ZtextBaseDirection {
+typedef enum ZtypesetBaseDirection {
   /// Derive the base level from the first strong character, per rule P2/P3.
-  ZTEXT_BASE_DIRECTION_AUTO = 0,
-  ZTEXT_BASE_DIRECTION_LTR = 1,
-  ZTEXT_BASE_DIRECTION_RTL = 2,
-} ZtextBaseDirection;
+  ZTYPESET_BASE_DIRECTION_AUTO = 0,
+  ZTYPESET_BASE_DIRECTION_LTR = 1,
+  ZTYPESET_BASE_DIRECTION_RTL = 2,
+} ZtypesetBaseDirection;
 
 /// A maximal span of one embedding level, in VISUAL order: run 0 is leftmost
 /// for an LTR base, rightmost for RTL. Offsets are code-unit offsets into the
 /// paragraph text, in the paragraph's own encoding.
-typedef struct ZtextVisualRun {
+typedef struct ZtypesetVisualRun {
   uint32_t offset;
   uint32_t length;
   /// Even levels run left-to-right, odd right-to-left.
   uint8_t level;
-} ZtextVisualRun;
+} ZtypesetVisualRun;
 
 /// A maximal span of one script, in LOGICAL order. Offsets are code-unit
 /// offsets, in the paragraph's own encoding.
-typedef struct ZtextScriptRun {
+typedef struct ZtypesetScriptRun {
   uint32_t offset;
   uint32_t length;
-  /// ISO 15924 as a tag, ready to hand to ZtextShapeParams::script.
+  /// ISO 15924 as a tag, ready to hand to ZtypesetShapeParams::script.
   uint32_t script;
-} ZtextScriptRun;
+} ZtypesetScriptRun;
 
 /// A span ready to hand to the shaper: one direction, one script.
 ///
@@ -1269,74 +1288,75 @@ typedef struct ZtextScriptRun {
 ///
 /// Iterate these, shape each with `direction` from `level` and `script` as
 /// given, and lay the results out left to right.
-typedef struct ZtextShapingRun {
+typedef struct ZtypesetShapingRun {
   uint32_t offset;
   uint32_t length;
-  /// ISO 15924 as a tag, for ZtextShapeParams::script.
+  /// ISO 15924 as a tag, for ZtypesetShapeParams::script.
   uint32_t script;
   /// Even runs left-to-right, odd right-to-left.
   uint8_t level;
-} ZtextShapingRun;
+} ZtypesetShapingRun;
 
 /// Which segmentation passes a paragraph runs. An OR of these, and a
-/// parameter of ztextParagraphCreate.
+/// parameter of ztypesetParagraphCreate.
 ///
-/// Singular for the same reason as ZtextGlyphFlag: the parameter holds any OR
-/// of these, not one of them.
+/// Singular for the same reason as ZtypesetGlyphFlag: the parameter holds any
+/// OR of these, not one of them.
 ///
 /// Each pass costs one walk of libunibreak over the text and one byte per
 /// code unit, kept for the paragraph's lifetime -- which for a long paragraph
 /// is more memory than the text and the embedding levels together. A pass not
 /// asked for is not run, allocates nothing, and its accessor answers NULL.
-/// ZTEXT_SEGMENTATION_ALL is what a caller that has not thought about it
+/// ZTYPESET_SEGMENTATION_ALL is what a caller that has not thought about it
 /// should pass.
 ///
 /// The choice is made here rather than on first access because a built
 /// paragraph is immutable and readable from several threads; filling an array
 /// in lazily would trade that away.
-typedef enum ZtextSegmentation {
-  ZTEXT_SEGMENTATION_NONE = 0x00000000,
+typedef enum ZtypesetSegmentation {
+  ZTYPESET_SEGMENTATION_NONE = 0x00000000,
   /// UAX #14: where a line MAY break.
-  ZTEXT_SEGMENTATION_LINES = 0x00000001,
+  ZTYPESET_SEGMENTATION_LINES = 0x00000001,
   /// UAX #29: where a grapheme cluster ends -- caret movement, backspace.
-  ZTEXT_SEGMENTATION_GRAPHEMES = 0x00000002,
+  ZTYPESET_SEGMENTATION_GRAPHEMES = 0x00000002,
   /// UAX #29: where a word ends -- double-click selection.
-  ZTEXT_SEGMENTATION_WORDS = 0x00000004,
+  ZTYPESET_SEGMENTATION_WORDS = 0x00000004,
   /// The OR of every pass above.
-  ZTEXT_SEGMENTATION_ALL = 0x00000007,
-} ZtextSegmentation;
+  ZTYPESET_SEGMENTATION_ALL = 0x00000007,
+} ZtypesetSegmentation;
 
 /// Analyses one paragraph of text.
 ///
 /// `length` is in `encoding`'s code units, and so is every offset the
 /// paragraph reports afterwards.
 ///
-/// `segmentation` is an OR of ZtextSegmentation saying which break arrays to
-/// build. A bit this build has no name for is ZTEXT_RESULT_INVALID_ARGUMENT.
+/// `segmentation` is an OR of ZtypesetSegmentation saying which break arrays to
+/// build. A bit this build has no name for is ZTYPESET_RESULT_INVALID_ARGUMENT.
 ///
 /// `text` is read during the call only; the paragraph copies what it needs and
-/// does not borrow the buffer. That differs from ztextFontCreateFromMemory on
-/// purpose -- a paragraph is small and copying it removes a lifetime the
+/// does not borrow the buffer. That differs from ztypesetFontCreateFromMemory
+/// on purpose -- a paragraph is small and copying it removes a lifetime the
 /// caller would otherwise have to track.
 ///
-/// Rejects malformed text with ZTEXT_RESULT_INVALID_TEXT. Text containing a
+/// Rejects malformed text with ZTYPESET_RESULT_INVALID_TEXT. Text containing a
 /// paragraph separator is analysed as a single paragraph up to the first one;
 /// split beforehand if that is not what you want.
-ZTEXT_API ZtextResult ztextParagraphCreate(const void* text, size_t length,
-                                           ZtextEncoding encoding,
-                                           ZtextBaseDirection base,
+ZTYPESET_API ZtypesetResult ztypesetParagraphCreate(const void* text,
+                                                    size_t length,
+                                           ZtypesetEncoding encoding,
+                                           ZtypesetBaseDirection base,
                                            uint32_t segmentation,
-                                           ZtextParagraph** out);
+                                           ZtypesetParagraph** out);
 
 /// Destroys the paragraph, the copy of the text it took and the arrays it
 /// built. Call it exactly once. Lines made from it may outlive it and are
 /// destroyed separately.
-ZTEXT_API void ztextParagraphDestroy(ZtextParagraph* paragraph);
+ZTYPESET_API void ztypesetParagraphDestroy(ZtypesetParagraph* paragraph);
 
 /// Length actually analysed, in the paragraph's own code units, which is at
 /// most the `length` passed in -- less if the text contained a paragraph
 /// separator.
-ZTEXT_API size_t ztextParagraphLength(const ZtextParagraph* paragraph);
+ZTYPESET_API size_t ztypesetParagraphLength(const ZtypesetParagraph* paragraph);
 
 /// The encoding this paragraph was created with, which is the unit every
 /// offset and length it reports is counted in.
@@ -1344,30 +1364,32 @@ ZTEXT_API size_t ztextParagraphLength(const ZtextParagraph* paragraph);
 /// Reported rather than remembered by the caller: a run list outlives the call
 /// that made it and is routinely passed on alone, and reading a UTF-16
 /// paragraph's offsets as bytes indexes half a character.
-ZTEXT_API ZtextEncoding ztextParagraphEncoding(
-    const ZtextParagraph* paragraph);
+ZTYPESET_API ZtypesetEncoding ztypesetParagraphEncoding(
+    const ZtypesetParagraph* paragraph);
 
 /// The segmentation passes this paragraph ran, as they were asked for.
 ///
 /// Reported for the same reason as the encoding: a paragraph outlives the
 /// call that made it, and an empty break array is otherwise indistinguishable
 /// from a pass that was never run.
-ZTEXT_API uint32_t ztextParagraphSegmentation(const ZtextParagraph* paragraph);
+ZTYPESET_API uint32_t ztypesetParagraphSegmentation(const ZtypesetParagraph*
+                                                    paragraph);
 
 /// Resolved base embedding level: even for LTR, odd for RTL.
-ZTEXT_API uint8_t ztextParagraphBaseLevel(const ZtextParagraph* paragraph);
+ZTYPESET_API uint8_t ztypesetParagraphBaseLevel(const ZtypesetParagraph*
+                                                paragraph);
 
 /// Borrowed per-code-unit embedding levels, one entry per unit of
-/// ztextParagraphLength. Every unit of a multi-unit character carries the same
-/// level as its first.
+/// ztypesetParagraphLength. Every unit of a multi-unit character carries the
+/// same level as its first.
 ///
 /// These are the levels UAX #9 resolves over the PARAGRAPH, before rule L1
 /// resets trailing whitespace for a particular line. Where the two differ, a
-/// line's own visual runs are the authority -- see ztextLineCreate.
+/// line's own visual runs are the authority -- see ztypesetLineCreate.
 ///
 /// Valid until the paragraph is destroyed.
-ZTEXT_API const uint8_t* ztextParagraphLevels(
-    const ZtextParagraph* paragraph);
+ZTYPESET_API const uint8_t* ztypesetParagraphLevels(
+    const ZtypesetParagraph* paragraph);
 
 //===----------------------------------------------------------------------===//
 // Segmentation
@@ -1375,16 +1397,16 @@ ZTEXT_API const uint8_t* ztextParagraphLevels(
 // Where a line may break, where a grapheme cluster ends, where a word ends.
 //
 // These are here for the same reason bidi is: they are pure functions of the
-// text and the Unicode character database, not decisions about layout. ztext
+// text and the Unicode character database, not decisions about layout. ztypeset
 // already owns UAX #9; owning that and not UAX #14 and #29 would be an
-// arbitrary line, and it would leave ztextLineCreate -- which takes a unit
+// arbitrary line, and it would leave ztypesetLineCreate -- which takes a unit
 // range -- with no way for a caller to find one.
 //
-// The division of labour is the same as everywhere else here. ztext says where
-// a break is PERMITTED; the host decides where one HAPPENS, because that needs
-// a width, and a width is not a property of text. Concretely: walk the allowed
-// positions, measure with ztextShaperExtents until the next one would not fit,
-// and hand the range you chose to ztextLineCreate.
+// The division of labour is the same as everywhere else here. ztypeset says
+// where a break is PERMITTED; the host decides where one HAPPENS, because that
+// needs a width, and a width is not a property of text. Concretely: walk the
+// allowed positions, measure with ztypesetShaperExtents until the next one
+// would not fit, and hand the range you chose to ztypesetLineCreate.
 //
 // From libunibreak, which allocates nothing and keeps no global state -- so
 // unlike the other three upstreams there is no allocator seam and no
@@ -1400,57 +1422,60 @@ ZTEXT_API const uint8_t* ztextParagraphLevels(
 ///
 /// No boundary here. Also what a code unit inside a multi-unit character
 /// reports, since a break there is never a break.
-#define ZTEXT_BREAK_NONE 0u
+#define ZTYPESET_BREAK_NONE 0u
 /// A boundary is permitted here.
-#define ZTEXT_BREAK_ALLOWED 1u
+#define ZTYPESET_BREAK_ALLOWED 1u
 /// A boundary is REQUIRED here. Line breaks only -- a paragraph's last code
 /// unit is always mandatory, and so is a U+2028 LINE SEPARATOR within it.
-#define ZTEXT_BREAK_MANDATORY 2u
+#define ZTYPESET_BREAK_MANDATORY 2u
 
-/// Borrowed, one ZTEXT_BREAK_* value per code unit of ztextParagraphLength,
-/// describing the boundary AFTER that unit. NULL for an empty paragraph, and
-/// NULL if ZTEXT_SEGMENTATION_LINES was not asked for.
+/// Borrowed, one ZTYPESET_BREAK_* value per code unit of
+/// ztypesetParagraphLength, describing the boundary AFTER that unit. NULL for
+/// an empty paragraph, and NULL if ZTYPESET_SEGMENTATION_LINES was not asked
+/// for.
 ///
 /// So a line may run from `start` to `i + 1` whenever `line_breaks[i]` is not
-/// ZTEXT_BREAK_NONE. Valid until the paragraph is destroyed.
+/// ZTYPESET_BREAK_NONE. Valid until the paragraph is destroyed.
 ///
 /// Language tailoring is not exposed: these are the untailored rules. That
 /// matters mainly for strict Japanese and Korean line breaking, and adding it
 /// later is a parameter rather than a redesign.
-ZTEXT_API const uint8_t* ztextParagraphLineBreaks(
-    const ZtextParagraph* paragraph);
+ZTYPESET_API const uint8_t* ztypesetParagraphLineBreaks(
+    const ZtypesetParagraph* paragraph);
 
 /// Grapheme cluster boundaries -- what a caret moves by and what backspace
-/// deletes. Never ZTEXT_BREAK_MANDATORY. NULL unless
-/// ZTEXT_SEGMENTATION_GRAPHEMES was asked for.
+/// deletes. Never ZTYPESET_BREAK_MANDATORY. NULL unless
+/// ZTYPESET_SEGMENTATION_GRAPHEMES was asked for.
 ///
 /// This is emphatically not the same as a character: a base plus its combining
 /// marks is one grapheme, and so is a regional-indicator pair or an emoji
 /// joined with U+200D. Moving a caret by character puts it inside one.
-ZTEXT_API const uint8_t* ztextParagraphGraphemeBreaks(
-    const ZtextParagraph* paragraph);
+ZTYPESET_API const uint8_t* ztypesetParagraphGraphemeBreaks(
+    const ZtypesetParagraph* paragraph);
 
 /// Word boundaries -- double-click selection, and word-wise caret movement.
-/// Never ZTEXT_BREAK_MANDATORY. NULL unless ZTEXT_SEGMENTATION_WORDS was
+/// Never ZTYPESET_BREAK_MANDATORY. NULL unless ZTYPESET_SEGMENTATION_WORDS was
 /// asked for.
-ZTEXT_API const uint8_t* ztextParagraphWordBreaks(
-    const ZtextParagraph* paragraph);
+ZTYPESET_API const uint8_t* ztypesetParagraphWordBreaks(
+    const ZtypesetParagraph* paragraph);
 
 /// The next and previous grapheme boundary from `offset`, for moving a caret.
 ///
-/// `ztextParagraphNextGrapheme(p, length)` is `length`, and
-/// `ztextParagraphPreviousGrapheme(p, 0)` is 0, so a caret walked off either
+/// `ztypesetParagraphNextGrapheme(p, length)` is `length`, and
+/// `ztypesetParagraphPreviousGrapheme(p, 0)` is 0, so a caret walked off either
 /// end stays put rather than wrapping or going out of range. An `offset` that
 /// is not itself a boundary is snapped outward to one. Without
-/// ZTEXT_SEGMENTATION_GRAPHEMES there are no boundaries at all, and both
+/// ZTYPESET_SEGMENTATION_GRAPHEMES there are no boundaries at all, and both
 /// return `offset` unchanged.
 ///
 /// Written as functions rather than left to the caller because the loop is
 /// three lines and everyone writes it slightly differently -- usually by
 /// stepping a character at a time, which is the bug these exist to prevent.
-ZTEXT_API size_t ztextParagraphNextGrapheme(const ZtextParagraph* paragraph,
+ZTYPESET_API size_t ztypesetParagraphNextGrapheme(const ZtypesetParagraph*
+                                                  paragraph,
                                             size_t offset);
-ZTEXT_API size_t ztextParagraphPreviousGrapheme(const ZtextParagraph* paragraph,
+ZTYPESET_API size_t ztypesetParagraphPreviousGrapheme(const ZtypesetParagraph*
+                                                      paragraph,
                                                 size_t offset);
 
 /// The paragraph laid out as ONE line.
@@ -1458,31 +1483,34 @@ ZTEXT_API size_t ztextParagraphPreviousGrapheme(const ZtextParagraph* paragraph,
 /// Correct whenever the text fits on one, which is most labels, most buttons
 /// and every single-line field -- and wrong the moment it wraps. Rules L1 and
 /// L2 of UAX #9 are defined over a line, not a paragraph, so where the text
-/// breaks changes the answer. Use ztextLineCreate for anything that wraps; see
-/// the note there for what actually differs.
-ZTEXT_API size_t ztextParagraphVisualRunCount(const ZtextParagraph* paragraph);
-ZTEXT_API const ZtextVisualRun* ztextParagraphVisualRuns(
-    const ZtextParagraph* paragraph);
+/// breaks changes the answer. Use ztypesetLineCreate for anything that wraps;
+/// see the note there for what actually differs.
+ZTYPESET_API size_t ztypesetParagraphVisualRunCount(const ZtypesetParagraph*
+                                                    paragraph);
+ZTYPESET_API const ZtypesetVisualRun* ztypesetParagraphVisualRuns(
+    const ZtypesetParagraph* paragraph);
 
 /// Script runs are a property of the text, so unlike the runs above they do
 /// not change when it wraps. A line reuses these.
-ZTEXT_API size_t ztextParagraphScriptRunCount(const ZtextParagraph* paragraph);
-ZTEXT_API const ZtextScriptRun* ztextParagraphScriptRuns(
-    const ZtextParagraph* paragraph);
+ZTYPESET_API size_t ztypesetParagraphScriptRunCount(const ZtypesetParagraph*
+                                                    paragraph);
+ZTYPESET_API const ZtypesetScriptRun* ztypesetParagraphScriptRuns(
+    const ZtypesetParagraph* paragraph);
 
 /// Visual runs intersected with script runs: what to actually shape, for the
-/// paragraph laid out as one line. Same caveat as ztextParagraphVisualRuns.
-ZTEXT_API size_t ztextParagraphShapingRunCount(const ZtextParagraph* paragraph);
-ZTEXT_API const ZtextShapingRun* ztextParagraphShapingRuns(
-    const ZtextParagraph* paragraph);
+/// paragraph laid out as one line. Same caveat as ztypesetParagraphVisualRuns.
+ZTYPESET_API size_t ztypesetParagraphShapingRunCount(const ZtypesetParagraph*
+                                                     paragraph);
+ZTYPESET_API const ZtypesetShapingRun* ztypesetParagraphShapingRuns(
+    const ZtypesetParagraph* paragraph);
 
 /// Shapes one run of a paragraph, with the paragraph as its own context.
 ///
-/// Declared here rather than beside ztextShaperShape because it needs both
+/// Declared here rather than beside ztypesetShaperShape because it needs both
 /// halves: it is the call that joins a paragraph's itemisation to the shaper.
 ///
-/// Prefer it over ztextShaperShape for anything a ZtextParagraph or a
-/// ZtextLine produced, for three reasons, in the order they will bite:
+/// Prefer it over ztypesetShaperShape for anything a ZtypesetParagraph or a
+/// ZtypesetLine produced, for three reasons, in the order they will bite:
 ///
 ///  1. The text cannot be the wrong text. `run`'s offsets are the paragraph's
 ///     own, and the paragraph is where the text comes from -- so the classic
@@ -1491,22 +1519,23 @@ ZTEXT_API const ZtextShapingRun* ztextParagraphShapingRuns(
 ///  2. `params->direction` and `params->script` must be AUTO and 0: the run
 ///     carries both, and a second source for one fact means a silent loser.
 ///     A run's level decides LTR against RTL. For vertical text, which no
-///     run list describes, call ztextShaperShape.
-///  3. The text is NOT revalidated. ztextParagraphCreate validated it and
-///     copied it, so it cannot have changed since -- while ztextShaperShape
+///     run list describes, call ztypesetShaperShape.
+///  3. The text is NOT revalidated. ztypesetParagraphCreate validated it and
+///     copied it, so it cannot have changed since -- while ztypesetShaperShape
 ///     borrows a buffer it has never seen and must walk all of it, on every
-///     call. Iterating an N-unit paragraph's R runs through ztextShaperShape
+///     call. Iterating an N-unit paragraph's R runs through ztypesetShaperShape
 ///     therefore costs R walks of N; this costs none. Measured in README.md.
 ///
-/// A ZtextLine's shaping runs index the same paragraph text, so they are
+/// A ZtypesetLine's shaping runs index the same paragraph text, so they are
 /// passed here with the paragraph they came from.
 ///
 /// Everything else -- features, cluster level, language, the FreeType-metrics
 /// switch -- still comes from `params`.
-ZTEXT_API ZtextResult ztextShaperShapeRun(ZtextShaper* shaper, ZtextFace* face,
-                                          const ZtextParagraph* paragraph,
-                                          const ZtextShapingRun* run,
-                                          const ZtextShapeParams* params);
+ZTYPESET_API ZtypesetResult ztypesetShaperShapeRun(ZtypesetShaper* shaper,
+                                                   ZtypesetFace* face,
+                                          const ZtypesetParagraph* paragraph,
+                                          const ZtypesetShapingRun* run,
+                                          const ZtypesetShapeParams* params);
 
 //===----------------------------------------------------------------------===//
 // Lines
@@ -1527,11 +1556,11 @@ ZTEXT_API ZtextResult ztextShaperShapeRun(ZtextShaper* shaper, ZtextFace* face,
 // on the wrong side -- subtly, only when it wraps, and only in the second
 // language a product ships.
 //
-// ztext does not decide where the breaks go: see the README on UAX #14. It
+// ztypeset does not decide where the breaks go: see the README on UAX #14. It
 // takes the ranges a host has already chosen and reorders each correctly.
 //===----------------------------------------------------------------------===//
 
-typedef struct ZtextLine ZtextLine;
+typedef struct ZtypesetLine ZtypesetLine;
 
 /// Reorders `paragraph`'s units `[offset, offset + length)` as one line.
 ///
@@ -1540,42 +1569,48 @@ typedef struct ZtextLine ZtextLine;
 /// line-relative -- so they index the same buffer the caller already has.
 ///
 /// A zero-length line is legal and has no runs. A range that ends past
-/// ztextParagraphLength, or that starts or ends in the middle of a character,
-/// is ZTEXT_RESULT_INVALID_ARGUMENT rather than a silent half-character.
+/// ztypesetParagraphLength, or that starts or ends in the middle of a
+/// character, is ZTYPESET_RESULT_INVALID_ARGUMENT rather than a silent
+/// half-character.
 ///
 /// The line copies what it needs, so it holds no reference to the paragraph
 /// and may outlive it.
-ZTEXT_API ZtextResult ztextLineCreate(const ZtextParagraph* paragraph,
+ZTYPESET_API ZtypesetResult ztypesetLineCreate(const ZtypesetParagraph*
+                                               paragraph,
                                       size_t offset, size_t length,
-                                      ZtextLine** out);
+                                      ZtypesetLine** out);
 
 /// Destroys the line. Call it exactly once.
-ZTEXT_API void ztextLineDestroy(ZtextLine* line);
+ZTYPESET_API void ztypesetLineDestroy(ZtypesetLine* line);
 
-ZTEXT_API size_t ztextLineOffset(const ZtextLine* line);
-ZTEXT_API size_t ztextLineLength(const ZtextLine* line);
+ZTYPESET_API size_t ztypesetLineOffset(const ZtypesetLine* line);
+ZTYPESET_API size_t ztypesetLineLength(const ZtypesetLine* line);
 
 /// Runs of one embedding level, in visual order, with L1 and L2 applied over
 /// this line's range.
-ZTEXT_API size_t ztextLineVisualRunCount(const ZtextLine* line);
-ZTEXT_API const ZtextVisualRun* ztextLineVisualRuns(const ZtextLine* line);
+ZTYPESET_API size_t ztypesetLineVisualRunCount(const ZtypesetLine* line);
+ZTYPESET_API const ZtypesetVisualRun* ztypesetLineVisualRuns(const
+                                                             ZtypesetLine*
+                                                             line);
 
 /// This line's visual runs intersected with the paragraph's script runs: what
 /// to actually shape.
-ZTEXT_API size_t ztextLineShapingRunCount(const ZtextLine* line);
-ZTEXT_API const ZtextShapingRun* ztextLineShapingRuns(const ZtextLine* line);
+ZTYPESET_API size_t ztypesetLineShapingRunCount(const ZtypesetLine* line);
+ZTYPESET_API const ZtypesetShapingRun* ztypesetLineShapingRuns(const
+                                                               ZtypesetLine*
+                                                               line);
 
 //===----------------------------------------------------------------------===//
 // Rasterisation
 //===----------------------------------------------------------------------===//
 
-typedef enum ZtextRenderMode {
+typedef enum ZtypesetRenderMode {
   /// 8-bit coverage, one byte per pixel, 0 = uncovered.
-  ZTEXT_RENDER_MODE_A8 = 0,
+  ZTYPESET_RENDER_MODE_A8 = 0,
   /// FreeType's native signed distance field, 8-bit, 128 at the outline and
   /// rising inside. See README for what it costs and what it is good for --
   /// measured, not assumed.
-  ZTEXT_RENDER_MODE_SDF = 1,
+  ZTYPESET_RENDER_MODE_SDF = 1,
   /// Subpixel coverage for an LCD whose stripes run horizontally: three bytes
   /// per pixel, one per stripe, in the panel's own left-to-right order.
   ///
@@ -1584,49 +1619,49 @@ typedef enum ZtextRenderMode {
   /// -- because FT_CONFIG_OPTION_SUBPIXEL_RENDERING is off, which is
   /// upstream's default. Harmony needs no filter to be chosen and produces no
   /// colour fringing of its own; the alternative is a COMPILE-time FreeType
-  /// option and not a runtime one, so it is not a choice ztext could offer
-  /// both of. See ffi/ztext_ftoption.h.
+  /// option and not a runtime one, so it is not a choice ztypeset could offer
+  /// both of. See ffi/ztypeset_ftoption.h.
   ///
-  /// Which stripe order a panel has is the consumer's to know: ztext hands
+  /// Which stripe order a panel has is the consumer's to know: ztypeset hands
   /// back the three samples in geometric order and does not reverse them for
   /// a BGR panel, because it cannot know.
-  ZTEXT_RENDER_MODE_LCD = 2,
+  ZTYPESET_RENDER_MODE_LCD = 2,
   /// The same, for a panel whose stripes run vertically.
-  ZTEXT_RENDER_MODE_LCD_V = 3,
-} ZtextRenderMode;
+  ZTYPESET_RENDER_MODE_LCD_V = 3,
+} ZtypesetRenderMode;
 
-typedef enum ZtextHinting {
+typedef enum ZtypesetHinting {
   /// The face's own hinting where it has any, FreeType's autohinter where it
   /// does not.
-  ZTEXT_HINTING_NORMAL = 0,
+  ZTYPESET_HINTING_NORMAL = 0,
   /// Vertical hinting only -- crisp baselines, horizontal metrics left alone.
   /// The usual choice when advances come from unhinted shaping.
-  ZTEXT_HINTING_LIGHT = 1,
+  ZTYPESET_HINTING_LIGHT = 1,
   /// No hinting. Required for SDF, which wants unhinted outlines.
-  ZTEXT_HINTING_NONE = 2,
-} ZtextHinting;
+  ZTYPESET_HINTING_NONE = 2,
+} ZtypesetHinting;
 
 /// A 2x2 linear map applied to every glyph this face draws.
 ///
 /// x' = xx*x + xy*y and y' = yx*x + yy*y, with y UP, which is FreeType's
-/// convention and the one every coordinate ztext reports uses. The identity is
-/// { 1, 0, 0, 1 }, and a face is created with it.
+/// convention and the one every coordinate ztypeset reports uses. The identity
+/// is { 1, 0, 0, 1 }, and a face is created with it.
 ///
 /// There is deliberately no translation here. A glyph is shifted by
-/// ztextFaceRenderGlyph's offset_x and offset_y, which is where sub-pixel
+/// ztypesetFaceRenderGlyph's offset_x and offset_y, which is where sub-pixel
 /// positioning already lives; a second way to say the same thing is a second
 /// place for it to be said differently.
-typedef struct ZtextMatrix {
+typedef struct ZtypesetMatrix {
   float xx;
   float xy;
   float yx;
   float yy;
-} ZtextMatrix;
+} ZtypesetMatrix;
 
 /// Sets this face's transform, or clears it when `matrix` is NULL. Reading it
 /// back gives the identity for a face that has none.
 ///
-/// This is FreeType's FT_Set_Transform, applied where ztext can compose it
+/// This is FreeType's FT_Set_Transform, applied where ztypeset can compose it
 /// correctly: AFTER any synthetic bold or oblique, so emboldening stays
 /// isotropic in the font's own space instead of being stretched by whatever
 /// the caller is mapping into. Hinting still happens in the untransformed
@@ -1634,9 +1669,10 @@ typedef struct ZtextMatrix {
 /// this runs.
 ///
 /// It reaches the glyph IMAGE and nothing else, and that is a decision rather
-/// than an omission. ztextFaceGlyphExtents, ztextFaceRenderGlyph and
-/// ztextFaceDecomposeOutline agree on one transformed glyph; every ADVANCE --
-/// this face's, and every advance a shaped run reports -- stays in the text's
+/// than an omission. ztypesetFaceGlyphExtents, ztypesetFaceRenderGlyph and
+/// ztypesetFaceDecomposeOutline agree on one transformed glyph; every
+/// ADVANCE -- this face's, and every advance a shaped run reports -- stays
+/// in the text's
 /// own space. FreeType's FT_Set_Transform does transform the advance, but a
 /// shaped run's advances come from HarfBuzz, which has no matrix to be told
 /// about, so transforming one and not the other would make the two disagree
@@ -1647,33 +1683,33 @@ typedef struct ZtextMatrix {
 /// Nothing is validated beyond being finite. A singular matrix produces an
 /// empty glyph, which is what a collapsed transform means, and a mirrored one
 /// is a legitimate thing to ask for.
-ZTEXT_API ZtextResult ztextFaceSetTransform(ZtextFace* face,
-                                            const ZtextMatrix* matrix);
-ZTEXT_API ZtextResult ztextFaceTransform(const ZtextFace* face,
-                                         ZtextMatrix* out);
+ZTYPESET_API ZtypesetResult ztypesetFaceSetTransform(ZtypesetFace* face,
+                                            const ZtypesetMatrix* matrix);
+ZTYPESET_API ZtypesetResult ztypesetFaceTransform(const ZtypesetFace* face,
+                                         ZtypesetMatrix* out);
 
 /// FreeType's own reference emboldening: 0x0AAA/65536 of the em, which is
 /// what FT_GlyphSlot_Embolden applies. HarfBuzz documents 0.01 to 0.05 as the
 /// useful range for the same quantity, and this sits inside it.
-#define ZTEXT_SYNTHETIC_BOLD_DEFAULT 0.041656494f
+#define ZTYPESET_SYNTHETIC_BOLD_DEFAULT 0.041656494f
 /// FreeType's own reference slant: 0x0366A/65536, a shear of about 12
 /// degrees, which is what FT_GlyphSlot_Oblique applies.
-#define ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT 0.212554932f
+#define ZTYPESET_SYNTHETIC_OBLIQUE_DEFAULT 0.212554932f
 
 /// Fakes a bold or an italic on a face that has neither of its own, the way a
 /// production stack does.
 ///
 /// `strength` is a fraction of the EM, not a pixel count, so it holds across
-/// sizes: 0 is off, ZTEXT_SYNTHETIC_BOLD_DEFAULT is what FreeType and
+/// sizes: 0 is off, ZTYPESET_SYNTHETIC_BOLD_DEFAULT is what FreeType and
 /// HarfBuzz both use, and a negative value thins instead of thickens. `slant`
 /// is a shear factor -- the tangent of the angle -- with
-/// ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT the reference italic. Neither is clamped:
+/// ZTYPESET_SYNTHETIC_OBLIQUE_DEFAULT the reference italic. Neither is clamped:
 /// a display face at twice the reference weight is a legitimate thing to ask
 /// for, and only the caller knows what its text is for.
 ///
 /// Both reach every reader of this face. FreeType applies them at glyph
-/// LOADING, so ztextFaceGlyphExtents, ztextFaceRenderGlyph and
-/// ztextFaceDecomposeOutline agree on one widened, sheared glyph; and
+/// LOADING, so ztypesetFaceGlyphExtents, ztypesetFaceRenderGlyph and
+/// ztypesetFaceDecomposeOutline agree on one widened, sheared glyph; and
 /// HarfBuzz is told the same two numbers, so a SHAPED run's advances widen
 /// by the same fraction of the em rather than staying at the unstyled font's
 /// widths. A shaped run laid out with unwidened advances overlaps its own
@@ -1686,39 +1722,39 @@ ZTEXT_API ZtextResult ztextFaceTransform(const ZtextFace* face,
 /// extents are unaffected, and the face's generation moves, so extents taken
 /// for a run shaped before the change are refused rather than mixed.
 ///
-/// A strength that is not a finite number is ZTEXT_RESULT_INVALID_ARGUMENT.
-ZTEXT_API ZtextResult ztextFaceSetSyntheticBold(ZtextFace* face,
+/// A strength that is not a finite number is ZTYPESET_RESULT_INVALID_ARGUMENT.
+ZTYPESET_API ZtypesetResult ztypesetFaceSetSyntheticBold(ZtypesetFace* face,
                                                 float strength);
-ZTEXT_API ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face,
+ZTYPESET_API ZtypesetResult ztypesetFaceSetSyntheticOblique(ZtypesetFace* face,
                                                    float slant);
 
 /// How the two ends of an open path are finished. FreeType's
-/// FT_Stroker_LineCap, restated so a consumer switches on ztext's own enum.
+/// FT_Stroker_LineCap, restated so a consumer switches on ztypeset's own enum.
 ///
 /// A glyph contour is closed, so this is only reached where a contour is
 /// left open -- which FreeType's stroker does at a path it cannot close.
-typedef enum ZtextLineCap {
+typedef enum ZtypesetLineCap {
   /// Stop dead at the end point.
-  ZTEXT_LINE_CAP_BUTT = 0,
+  ZTYPESET_LINE_CAP_BUTT = 0,
   /// A half-disc of the pen's radius.
-  ZTEXT_LINE_CAP_ROUND = 1,
+  ZTYPESET_LINE_CAP_ROUND = 1,
   /// A half-square of the pen's radius.
-  ZTEXT_LINE_CAP_SQUARE = 2,
-} ZtextLineCap;
+  ZTYPESET_LINE_CAP_SQUARE = 2,
+} ZtypesetLineCap;
 
 /// How two segments meet at a corner. FreeType's FT_Stroker_LineJoin.
-typedef enum ZtextLineJoin {
+typedef enum ZtypesetLineJoin {
   /// An arc of the pen's radius. Never spikes, at any angle.
-  ZTEXT_LINE_JOIN_ROUND = 0,
+  ZTYPESET_LINE_JOIN_ROUND = 0,
   /// Cut straight across the corner.
-  ZTEXT_LINE_JOIN_BEVEL = 1,
+  ZTYPESET_LINE_JOIN_BEVEL = 1,
   /// A miter that falls back to a bevel past `miter_limit` -- the join XPS
   /// and PostScript specify, and FreeType's FT_STROKER_LINEJOIN_MITER.
-  ZTEXT_LINE_JOIN_MITER = 2,
+  ZTYPESET_LINE_JOIN_MITER = 2,
   /// A miter TRIMMED at `miter_limit` rather than dropped, which is what SVG
   /// and PDF specify. FreeType's FT_STROKER_LINEJOIN_MITER_FIXED.
-  ZTEXT_LINE_JOIN_MITER_FIXED = 3,
-} ZtextLineJoin;
+  ZTYPESET_LINE_JOIN_MITER_FIXED = 3,
+} ZtypesetLineJoin;
 
 /// Which of the three shapes a pen traced round a glyph is kept.
 ///
@@ -1731,7 +1767,7 @@ typedef enum ZtextLineJoin {
 ///
 /// The measurements quoted below are Noto Sans `H` at 128 px with a radius
 /// of 4, whose stems are several times the pen.
-typedef enum ZtextStrokeStyle {
+typedef enum ZtypesetStrokeStyle {
   /// The BAND the pen sweeps along the glyph's contour: 2R wide, centred on
   /// the outline, hollow in the middle. A genuinely outlined letter, in one
   /// pass. FreeType's FT_Glyph_Stroke.
@@ -1743,18 +1779,18 @@ typedef enum ZtextStrokeStyle {
   /// The hole closes when a stem is thinner than the pen, because the inward
   /// contour then turns itself inside out. At 32 px with the same radius --
   /// stems of about 3 px against a pen of 4 -- this band and
-  /// ZTEXT_STROKE_STYLE_GROWN measure identical, to the pixel.
-  ZTEXT_STROKE_STYLE_BAND = 0,
+  /// ZTYPESET_STROKE_STYLE_GROWN measure identical, to the pixel.
+  ZTYPESET_STROKE_STYLE_BAND = 0,
   /// The glyph GROWN by the radius, solid: the outward contour and everything
   /// inside it. FT_Glyph_StrokeBorder's outside border.
   ///
   /// This is the bottom layer of the two-pass outlined text every game UI
   /// draws -- render it in the outline's colour, then the unstroked glyph on
-  /// top -- and it is what `ztext.outline(radius)` selects.
+  /// top -- and it is what `ztypeset.outline(radius)` selects.
   ///
   /// Measured: ink box [-0.891, 24.578] against the glyph's [3.109, 20.578]
   /// at 32 px, exactly the radius on each side.
-  ZTEXT_STROKE_STYLE_GROWN = 1,
+  ZTYPESET_STROKE_STYLE_GROWN = 1,
   /// The glyph SHRUNK by the radius, solid: the inward contour and everything
   /// inside it. FT_Glyph_StrokeBorder's inside border.
   ///
@@ -1763,15 +1799,15 @@ typedef enum ZtextStrokeStyle {
   /// stem this contour cannot stay inside of, and FreeType does not clip it
   /// -- it self-intersects, and the box comes out WIDER than the glyph rather
   /// than narrower. That is the shape upstream produces, reported as it is.
-  ZTEXT_STROKE_STYLE_SHRUNK = 2,
-} ZtextStrokeStyle;
+  ZTYPESET_STROKE_STYLE_SHRUNK = 2,
+} ZtypesetStrokeStyle;
 
 /// A pen traced around every glyph this face draws.
-typedef struct ZtextStroke {
+typedef struct ZtypesetStroke {
   /// HALF the pen's width, in PIXELS at this face's current size. 0 or less
   /// turns stroking off, and is what a face is created with.
   ///
-  /// Pixels, where ztextFaceSetSyntheticBold takes a fraction of the em, and
+  /// Pixels, where ztypesetFaceSetSyntheticBold takes a fraction of the em, and
   /// the difference is the point rather than an inconsistency: synthetic bold
   /// fakes a WEIGHT, which is a property of the design and has to hold across
   /// sizes, while a stroke is an ornament drawn for a display -- a one-pixel
@@ -1781,23 +1817,24 @@ typedef struct ZtextStroke {
   /// ppem it asked for.
   float radius;
 
-  /// How far a miter join may run past the corner before ZTEXT_LINE_JOIN_MITER
-  /// gives up and bevels, or ZTEXT_LINE_JOIN_MITER_FIXED trims -- as a
-  /// multiple of `radius`. Ignored by the other two joins. 0 or less means
-  /// FreeType's own default of 4, which is also SVG's and PostScript's.
+  /// How far a miter join may run past the corner before
+  /// ZTYPESET_LINE_JOIN_MITER gives up and bevels, or
+  /// ZTYPESET_LINE_JOIN_MITER_FIXED trims -- as a multiple of `radius`. Ignored
+  /// by the other two joins. 0 or less means FreeType's own default of 4, which
+  /// is also SVG's and PostScript's.
   float miter_limit;
 
-  ZtextLineCap cap;
-  ZtextLineJoin join;
-  ZtextStrokeStyle style;
-} ZtextStroke;
+  ZtypesetLineCap cap;
+  ZtypesetLineJoin join;
+  ZtypesetStrokeStyle style;
+} ZtypesetStroke;
 
 /// Sets this face's stroke, or clears it when `stroke` is NULL or its radius
 /// is 0. Reading it back gives a zero radius for a face that has none.
 ///
 /// This is FreeType's stroker (FT_Stroker_ParseOutline and its exports) run
-/// at glyph LOADING, so ztextFaceGlyphExtents, ztextFaceRenderGlyph and
-/// ztextFaceDecomposeOutline all agree on one stroked glyph -- the outline
+/// at glyph LOADING, so ztypesetFaceGlyphExtents, ztypesetFaceRenderGlyph and
+/// ztypesetFaceDecomposeOutline all agree on one stroked glyph -- the outline
 /// that is measured is the outline that is drawn. Composition is fixed and
 /// stated once: synthetic bold and oblique first, because they are part of
 /// the font's design; then the pen; then the caller's matrix, which maps the
@@ -1814,73 +1851,74 @@ typedef struct ZtextStroke {
 ///
 /// Hinting happens before this, on the unstroked outline, as it does for the
 /// matrix. A radius that is not a finite number, or a `style`, `cap` or
-/// `join` this build does not name, is ZTEXT_RESULT_INVALID_ARGUMENT.
-ZTEXT_API ZtextResult ztextFaceSetStroke(ZtextFace* face,
-                                         const ZtextStroke* stroke);
-ZTEXT_API ZtextResult ztextFaceStroke(const ZtextFace* face, ZtextStroke* out);
+/// `join` this build does not name, is ZTYPESET_RESULT_INVALID_ARGUMENT.
+ZTYPESET_API ZtypesetResult ztypesetFaceSetStroke(ZtypesetFace* face,
+                                         const ZtypesetStroke* stroke);
+ZTYPESET_API ZtypesetResult ztypesetFaceStroke(const ZtypesetFace* face,
+                                               ZtypesetStroke* out);
 
-/// Callbacks for ztextFaceDecomposeOutline, one per outline command. Points
+/// Callbacks for ztypesetFaceDecomposeOutline, one per outline command. Points
 /// are in 26.6 fixed point, at this face's current size. Modelled on
-/// ZtextAllocator: `user` is passed back unmodified, and a callback other
-/// than ZTEXT_RESULT_OK aborts decomposition and becomes the result
-/// ztextFaceDecomposeOutline returns.
-typedef struct ZtextOutlineFuncs {
-  ZtextResult (*move_to)(void* user, int32_t x, int32_t y);
-  ZtextResult (*line_to)(void* user, int32_t x, int32_t y);
-  ZtextResult (*conic_to)(void* user, int32_t control_x, int32_t control_y,
+/// ZtypesetAllocator: `user` is passed back unmodified, and a callback other
+/// than ZTYPESET_RESULT_OK aborts decomposition and becomes the result
+/// ztypesetFaceDecomposeOutline returns.
+typedef struct ZtypesetOutlineFuncs {
+  ZtypesetResult (*move_to)(void* user, int32_t x, int32_t y);
+  ZtypesetResult (*line_to)(void* user, int32_t x, int32_t y);
+  ZtypesetResult (*conic_to)(void* user, int32_t control_x, int32_t control_y,
                           int32_t x, int32_t y);
-  ZtextResult (*cubic_to)(void* user, int32_t control1_x, int32_t control1_y,
+  ZtypesetResult (*cubic_to)(void* user, int32_t control1_x, int32_t control1_y,
                           int32_t control2_x, int32_t control2_y, int32_t x,
                           int32_t y);
   /// Emitted once a contour is complete, before the next move_to and after
   /// the last -- FT_Outline_Decompose itself has no such event, only an
   /// implicit line/conic/cubic back to the contour's start.
-  ZtextResult (*close)(void* user);
+  ZtypesetResult (*close)(void* user);
   void* user;
-} ZtextOutlineFuncs;
+} ZtypesetOutlineFuncs;
 
-/// How to read ZtextGlyphBitmap::pixels.
+/// How to read ZtypesetGlyphBitmap::pixels.
 ///
 /// The format travels WITH the pixels rather than being remembered by the
-/// caller from the ZtextRenderMode it passed. A8 coverage and an SDF are both
-/// one byte per pixel, so a field sampled as coverage does not fail -- it
+/// caller from the ZtypesetRenderMode it passed. A8 coverage and an SDF are
+/// both one byte per pixel, so a field sampled as coverage does not fail -- it
 /// produces a picture, a washed-out wrong one, which is the failure mode this
 /// package exists to refuse. Two independent enums rather than one shared with
-/// ZtextRenderMode, because what was asked for and what came back are
-/// different facts: a mode may one day be satisfied by more than one format,
-/// or by falling back to another.
+/// ZtypesetRenderMode, because what was asked for and what came back are
+/// different facts: a mode may one day be satisfied by more than one format, or
+/// by falling back to another.
 ///
 /// Forward compatibility: switch on this and REJECT a value this header does
 /// not name. New formats will be added. `pitch` is BYTES per row and
 /// `pitch * height` is the buffer size in every format, present or future, so
 /// a consumer that only copies pixels into an atlas never has to understand
 /// them.
-typedef enum ZtextBitmapFormat {
+typedef enum ZtypesetBitmapFormat {
   /// One byte per pixel: coverage, 0 for no ink and 255 for solid.
-  ZTEXT_BITMAP_FORMAT_A8 = 0,
+  ZTYPESET_BITMAP_FORMAT_A8 = 0,
   /// One byte per pixel: distance to the outline, biased so 128 is ON the
   /// outline and larger values are inside. The ramp's half-width in pixels is
-  /// the library's SDF spread -- see ztextLibrarySetSdfSpread.
-  ZTEXT_BITMAP_FORMAT_SDF = 1,
+  /// the library's SDF spread -- see ztypesetLibrarySetSdfSpread.
+  ZTYPESET_BITMAP_FORMAT_SDF = 1,
   /// Three bytes per pixel, side by side: the pixel at (x, y) is the three
   /// bytes at `pixels[y * pitch + 3 * x]`.
-  ZTEXT_BITMAP_FORMAT_LCD = 2,
+  ZTYPESET_BITMAP_FORMAT_LCD = 2,
   /// Three bytes per pixel, one above the other: the pixel at (x, y) is
   /// `pixels[y * pitch + k * width + x]` for k of 0, 1, 2. That is FreeType's
   /// own layout -- three sub-rows per pixel row -- restated rather than
   /// repacked, so no consumer pays for a shuffle it may not want.
-  ZTEXT_BITMAP_FORMAT_LCD_V = 3,
-} ZtextBitmapFormat;
+  ZTYPESET_BITMAP_FORMAT_LCD_V = 3,
+} ZtypesetBitmapFormat;
 
 /// Bytes per pixel in `format`: 1 for A8 and SDF, 3 for both LCD formats.
 ///
 /// A function rather than a table in this comment, because a consumer that
 /// switches on the format has a default branch this build's newest value would
 /// fall through. 0 for a value this build does not name.
-ZTEXT_API uint32_t ztextBitmapFormatChannels(ZtextBitmapFormat format);
+ZTYPESET_API uint32_t ztypesetBitmapFormatChannels(ZtypesetBitmapFormat format);
 
-typedef struct ZtextGlyphBitmap {
-  /// Owned by the FACE, and valid until the next ztextFaceRenderGlyph on it.
+typedef struct ZtypesetGlyphBitmap {
+  /// Owned by the FACE, and valid until the next ztypesetFaceRenderGlyph on it.
   ///
   /// Nothing else invalidates it: not shaping, not measuring, not a call on
   /// another face of the same font. That is the point of copying rather than
@@ -1901,7 +1939,7 @@ typedef struct ZtextGlyphBitmap {
   ///
   /// First after the pointer on purpose: it has to be read before the pixels
   /// it describes are interpreted.
-  ZtextBitmapFormat format;
+  ZtypesetBitmapFormat format;
   /// The glyph's size in PIXELS, in every format -- not in bytes and not in
   /// FreeType's rows, both of which are three times this for one of the LCD
   /// formats. `left` and `top` are in pixels too, so the three agree.
@@ -1918,7 +1956,7 @@ typedef struct ZtextGlyphBitmap {
   /// The glyph's own advance at this size, in pixels. For laying out a single
   /// glyph; a shaped run's advances come from shaping and may differ.
   float x_advance;
-} ZtextGlyphBitmap;
+} ZtypesetGlyphBitmap;
 
 /// Loads and rasterises one glyph by index.
 ///
@@ -1939,47 +1977,52 @@ typedef struct ZtextGlyphBitmap {
 /// sampled at any sub-pixel position later, so baking one in here would be
 /// wasted, unrecoverable work -- apply the offset where the field is sampled
 /// instead, the same way scale and rotation already are.
-ZTEXT_API ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
-                                           ZtextRenderMode mode,
-                                           ZtextHinting hinting,
+ZTYPESET_API ZtypesetResult ztypesetFaceRenderGlyph(ZtypesetFace* face,
+                                                    uint32_t glyph_id,
+                                           ZtypesetRenderMode mode,
+                                           ZtypesetHinting hinting,
                                            int32_t offset_x, int32_t offset_y,
-                                           ZtextGlyphBitmap* out);
+                                           ZtypesetGlyphBitmap* out);
 
 /// Metrics for one glyph without rasterising it.
 ///
-/// It loads the glyph, which invalidates any ZtextGlyphBitmap previously
+/// It loads the glyph, which invalidates any ZtypesetGlyphBitmap previously
 /// returned for this face -- so size an atlas entry with this BEFORE
 /// rasterising, not while holding pixels you still intend to read.
-ZTEXT_API ZtextResult ztextFaceGlyphExtents(ZtextFace* face, uint32_t glyph_id,
-                                            ZtextHinting hinting,
-                                            ZtextExtents* out);
+ZTYPESET_API ZtypesetResult ztypesetFaceGlyphExtents(ZtypesetFace* face,
+                                                     uint32_t glyph_id,
+                                            ZtypesetHinting hinting,
+                                            ZtypesetExtents* out);
 
 /// Walks one glyph's outline through `funcs`, for a host that fills its own
 /// shapes -- an offline SDF baker, a path-effect renderer -- rather than
 /// sampling a bitmap. A wrapper over FT_Outline_Decompose; see
-/// ZtextOutlineFuncs for the callback shape.
+/// ZtypesetOutlineFuncs for the callback shape.
 ///
 /// Subject to this face's synthetic bold and oblique settings, the same as
-/// ztextFaceRenderGlyph and ztextFaceGlyphExtents.
-ZTEXT_API ZtextResult ztextFaceDecomposeOutline(ZtextFace* face,
+/// ztypesetFaceRenderGlyph and ztypesetFaceGlyphExtents.
+ZTYPESET_API ZtypesetResult ztypesetFaceDecomposeOutline(ZtypesetFace* face,
                                                 uint32_t glyph_id,
-                                                ZtextHinting hinting,
-                                                const ZtextOutlineFuncs* funcs);
+                                                ZtypesetHinting hinting,
+                                                const ZtypesetOutlineFuncs*
+    funcs);
 
-/// Half-width of the distance field ramp, in pixels, for ZTEXT_RENDER_MODE_SDF.
+/// Half-width of the distance field ramp, in pixels, for
+/// ZTYPESET_RENDER_MODE_SDF.
 ///
 /// Accepts 2..32, which is the range FreeType supports; anything else is
-/// ZTEXT_RESULT_INVALID_ARGUMENT rather than a silent clamp. The default is 8.
-/// Applies to every face made from this library.
-ZTEXT_API ZtextResult ztextLibrarySetSdfSpread(ZtextLibrary* library,
+/// ZTYPESET_RESULT_INVALID_ARGUMENT rather than a silent clamp. The default is
+/// 8. Applies to every face made from this library.
+ZTYPESET_API ZtypesetResult ztypesetLibrarySetSdfSpread(ZtypesetLibrary*
+                                                        library,
                                                uint32_t spread);
 
 /// Number of faces inside a font image, which is 1 for a plain TTF or OTF and
 /// more for a TrueType collection (.ttc).
 ///
-/// Call it before ztextFontCreateFromMemory if you intend to iterate a
+/// Call it before ztypesetFontCreateFromMemory if you intend to iterate a
 /// collection; the index that function takes must be below this.
-ZTEXT_API ZtextResult ztextLibraryCountFaces(ZtextLibrary* library,
+ZTYPESET_API ZtypesetResult ztypesetLibraryCountFaces(ZtypesetLibrary* library,
                                              const void* data, size_t size,
                                              uint32_t* out);
 
@@ -1992,13 +2035,13 @@ ZTEXT_API ZtextResult ztextLibraryCountFaces(ZtextLibrary* library,
 // silent corruption, not a build error. The two functions below let a consumer
 // assert against what this library actually compiled to.
 //
-// ztext's own Zig wrapper additionally compares its externs against THIS
+// ztypeset's own Zig wrapper additionally compares its externs against THIS
 // HEADER at comptime (src/abi_check.zig), by reflection over every public
 // declaration, which is a stronger check on the axis it covers: it sees
 // function arity and per-parameter sizes, and every enumerator by name rather
 // than only the last. What it cannot see is a header preprocessed differently
 // from the library it is linked against -- and that is exactly what
-// ztextAbiProbe covers, so both exist.
+// ztypesetAbiProbe covers, so both exist.
 //
 // A consumer without a comptime view of this header has only what is below,
 // so it is a public API rather than a test fixture. It is not
@@ -2006,13 +2049,13 @@ ZTEXT_API ZtextResult ztextLibraryCountFaces(ZtextLibrary* library,
 // most likely to be mirrored, not as an exhaustive manifest.
 //
 // The upstream types are guarded differently and more strongly: static
-// assertions in ztext_abi.c fail the BUILD if a re-vendor changes the shape of
-// anything ztext casts to or from. That is the whole reason the upstream
+// assertions in ztypeset_abi.c fail the BUILD if a re-vendor changes the shape
+// of anything ztypeset casts to or from. That is the whole reason the upstream
 // structs stop at this boundary.
 //===----------------------------------------------------------------------===//
 
-typedef struct ZtextAbiLayout {
-  /// sizeof(ZtextAbiLayout). Read this first: if it disagrees with the
+typedef struct ZtypesetAbiLayout {
+  /// sizeof(ZtypesetAbiLayout). Read this first: if it disagrees with the
   /// consumer's own sizeof, the struct itself has changed and nothing below
   /// can be trusted.
   uint32_t layout_size;
@@ -2066,7 +2109,7 @@ typedef struct ZtextAbiLayout {
   uint32_t glyph_bitmap_offset_pitch;
   uint32_t glyph_bitmap_offset_x_advance;
 
-  /// Number of enumerators in ZtextResult, so a consumer can assert its own
+  /// Number of enumerators in ZtypesetResult, so a consumer can assert its own
   /// error mapping is exhaustive.
   uint32_t result_count;
 
@@ -2102,31 +2145,31 @@ typedef struct ZtextAbiLayout {
   uint32_t stroke_style_last;
   uint32_t encoding_size;
   uint32_t encoding_last;
-  /// ZtextSegmentation is a bit mask, so `segmentation_last` is
-  /// ZTEXT_SEGMENTATION_ALL -- the OR of every pass -- for the same reason as
-  /// `glyph_flag_last` below.
+  /// ZtypesetSegmentation is a bit mask, so `segmentation_last` is
+  /// ZTYPESET_SEGMENTATION_ALL -- the OR of every pass -- for the same reason
+  /// as `glyph_flag_last` below.
   uint32_t segmentation_size;
   uint32_t segmentation_last;
-  /// ZtextGlyphFlag is a bit mask, so `glyph_flag_last` is
-  /// ZTEXT_GLYPH_FLAG_DEFINED -- the OR of every flag -- rather than the
+  /// ZtypesetGlyphFlag is a bit mask, so `glyph_flag_last` is
+  /// ZTYPESET_GLYPH_FLAG_DEFINED -- the OR of every flag -- rather than the
   /// highest single flag. A consumer masking with the value it reads here
   /// therefore keeps exactly the bits this build can produce.
   uint32_t glyph_flag_size;
   uint32_t glyph_flag_last;
-  /// ZtextMetric's enumerators are OpenType TAGS, not an ordinal sequence, so
-  /// a "last value" would say nothing about the range. The COUNT is what a
+  /// ZtypesetMetric's enumerators are OpenType TAGS, not an ordinal sequence,
+  /// so a "last value" would say nothing about the range. The COUNT is what a
   /// consumer can act on: it says how many metrics this build names, and a
-  /// consumer that iterates its own list can tell that ztext knows more.
+  /// consumer that iterates its own list can tell that ztypeset knows more.
   uint32_t metric_size;
   uint32_t metric_count;
-} ZtextAbiLayout;
+} ZtypesetAbiLayout;
 
 /// Fills `out` with the layout the library was compiled with. Never fails.
-ZTEXT_API void ztextAbiLayout(ZtextAbiLayout* out);
+ZTYPESET_API void ztypesetAbiLayout(ZtypesetAbiLayout* out);
 
-/// Every plain-data type ztext hands across the boundary, in one struct.
+/// Every plain-data type ztypeset hands across the boundary, in one struct.
 ///
-/// `ztextAbiProbe` fills each field with a distinct value derived from its
+/// `ztypesetAbiProbe` fills each field with a distinct value derived from its
 /// position, and the Zig side asserts each field reads back the value meant
 /// for it. Sizes and alignments alone cannot catch two same-typed fields
 /// swapping places -- `ascender` and `descender` are both floats, and
@@ -2135,31 +2178,31 @@ ZTEXT_API void ztextAbiLayout(ZtextAbiLayout* out);
 ///
 /// This catches that, and catches a field changing type, with one function
 /// instead of an offset table that would have to grow a field at a time.
-typedef struct ZtextAbiProbe {
-  ZtextAllocator allocator;
-  ZtextFeature feature;
-  ZtextShapeParams shape_params;
-  ZtextGlyph glyph;
-  ZtextFaceMetrics face_metrics;
-  ZtextExtents extents;
-  ZtextVisualRun visual_run;
-  ZtextScriptRun script_run;
-  ZtextShapingRun shaping_run;
-  ZtextGlyphBitmap glyph_bitmap;
-  ZtextCharmap charmap;
-  ZtextVariationAxis variation_axis;
-  ZtextVariation variation;
-  ZtextMatrix matrix;
-  ZtextStroke stroke;
-  ZtextOutlineFuncs outline_funcs;
-} ZtextAbiProbe;
+typedef struct ZtypesetAbiProbe {
+  ZtypesetAllocator allocator;
+  ZtypesetFeature feature;
+  ZtypesetShapeParams shape_params;
+  ZtypesetGlyph glyph;
+  ZtypesetFaceMetrics face_metrics;
+  ZtypesetExtents extents;
+  ZtypesetVisualRun visual_run;
+  ZtypesetScriptRun script_run;
+  ZtypesetShapingRun shaping_run;
+  ZtypesetGlyphBitmap glyph_bitmap;
+  ZtypesetCharmap charmap;
+  ZtypesetVariationAxis variation_axis;
+  ZtypesetVariation variation;
+  ZtypesetMatrix matrix;
+  ZtypesetStroke stroke;
+  ZtypesetOutlineFuncs outline_funcs;
+} ZtypesetAbiProbe;
 
 /// Fills every field of every plain-data type with a distinct marker. Never
 /// fails.
-ZTEXT_API void ztextAbiProbe(ZtextAbiProbe* out);
+ZTYPESET_API void ztypesetAbiProbe(ZtypesetAbiProbe* out);
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // ZTEXT_H_
+#endif  // ZTYPESET_H_

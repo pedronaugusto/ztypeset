@@ -1,8 +1,8 @@
 # Licences and third-party notices
 
-ztext's own code is **MIT** — see [LICENSE](LICENSE). Everything below concerns
+ztypeset's own code is **MIT** — see [LICENSE](LICENSE). Everything below concerns
 the third-party code it vendors, and is written to be usable: if you ship a
-binary containing ztext, the "What you must ship" section is the work.
+binary containing ztypeset, the "What you must ship" section is the work.
 
 None of these licences requires you to publish your source, pay a royalty, or
 attribute anything on screen. All of them permit static linking into a closed
@@ -31,8 +31,8 @@ changes a licence turns this document red instead of leaving it quietly wrong.
 ## The FreeType election, stated
 
 FreeType is distributed under **either** the FreeType License **or** GPLv2, at
-the recipient's choice. **ztext elects the FreeType License.** GPLv2 does not
-apply to ztext or to anything that links it.
+the recipient's choice. **ztypeset elects the FreeType License.** GPLv2 does not
+apply to ztypeset or to anything that links it.
 
 This is recorded explicitly because an unmade election is an argument waiting
 to happen: a reader who finds only "dual licensed" can reasonably assert the
@@ -45,16 +45,16 @@ compatible to the GNU General Public License version 3, but not version 2",
 and "the FTL is incompatible with GPLv2 due to its advertisement clause". So:
 
 - Shipping a **proprietary** product, or one under a permissive licence: elect
-  the FTL, as ztext does. Nothing further follows.
+  the FTL, as ztypeset does. Nothing further follows.
 - Shipping **GPLv3** code: the FTL is compatible with it. The election stands.
 - Shipping **GPLv2** code that must combine with FreeType: the FTL election
   does not help you. You would have to elect GPLv2 for FreeType instead — the
-  election is each recipient's to make, and ztext making one for its own
+  election is each recipient's to make, and ztypeset making one for its own
   distribution does not bind yours. Note that electing GPLv2 for FreeType has
   consequences for everything linked with it, which is a decision about your
   whole product rather than about this package.
 
-ztext's own MIT licence is compatible with either branch.
+ztypeset's own MIT licence is compatible with either branch.
 
 ## FreeType is not one licence
 
@@ -66,10 +66,10 @@ that depends on whether the code reaches your binary:
 
 | Code | Its licence | Reaches your binary? |
 |---|---|---|
-| `src/base/fthash.c`, `include/freetype/internal/fthash.h` | X Window System style, inherited from the BDF driver | **Yes.** `fthash.c` is one of the eighteen sources `ftbase.c` includes, and ztext builds `ftbase.c`. |
-| `src/bdf/`, `src/pcf/` | X Window System style | No. Neither driver is in `build.zig`'s source list or `ffi/ztext_ftmodules.h`. |
-| `src/gzip/` | zlib | No. Not built; ztext reads no compressed PCF. |
-| `src/autofit/ft-hb.c`, `ft-hb-ft.c`, `ft-hb-decls.h`, `ft-hb-types.h`, `hb-script-list.h` | "Old MIT", taken from HarfBuzz | **Yes.** Their contents sit behind `FT_CONFIG_OPTION_USE_HARFBUZZ`, which `ffi/ztext_ftoption.h` defines: the autohinter takes its glyph coverage from GSUB, and these files are what call HarfBuzz to do it. `ci/measurements.sh --check` compares this cell against that macro. |
+| `src/base/fthash.c`, `include/freetype/internal/fthash.h` | X Window System style, inherited from the BDF driver | **Yes.** `fthash.c` is one of the eighteen sources `ftbase.c` includes, and ztypeset builds `ftbase.c`. |
+| `src/bdf/`, `src/pcf/` | X Window System style | No. Neither driver is in `build.zig`'s source list or `ffi/ztypeset_ftmodules.h`. |
+| `src/gzip/` | zlib | No. Not built; ztypeset reads no compressed PCF. |
+| `src/autofit/ft-hb.c`, `ft-hb-ft.c`, `ft-hb-decls.h`, `ft-hb-types.h`, `hb-script-list.h` | "Old MIT", taken from HarfBuzz | **Yes.** Their contents sit behind `FT_CONFIG_OPTION_USE_HARFBUZZ`, which `ffi/ztypeset_ftoption.h` defines: the autohinter takes its glyph coverage from GSUB, and these files are what call HarfBuzz to do it. `ci/measurements.sh --check` compares this cell against that macro. |
 | `src/base/md5.c` | Public domain | No. Included by `ftobjs.c` only under `FT_DEBUG_LEVEL_TRACE`, which this build does not define. |
 
 Two consequences, and they point in different directions:
@@ -83,7 +83,7 @@ Two consequences, and they point in different directions:
   already ship it for HarfBuzz itself, so it asks nothing of you that
   `libs/harfbuzz/COPYING` did not already ask.
 - **In a source distribution** — which is what a Zig package *is*: `libs/` is
-  in `build.zig.zon`'s `paths`, so a consumer fetching ztext receives every
+  in `build.zig.zon`'s `paths`, so a consumer fetching ztypeset receives every
   file above whether or not it compiles — you redistribute all four. Each
   carries its own notice in its own file, which is what those licences ask for,
   and `ci/verify-vendor.sh` proves those files are upstream's own bytes.
@@ -139,8 +139,8 @@ compliance.
 HarfBuzz's own `COPYING` points out that some subdirectories carry their own.
 One is vendored: `libs/harfbuzz/src/ms-use/COPYING` (Microsoft, MIT), covering
 the Universal Shaping Engine data files. **Nothing under it compiles** — the
-`.txt` files there are inputs to a generator ztext does not run — so it cannot
-reach your binary, though it does travel in a source distribution of ztext,
+`.txt` files there are inputs to a generator ztypeset does not run — so it cannot
+reach your binary, though it does travel in a source distribution of ztypeset,
 where its own file is its own notice.
 
 ### SheenBidi
@@ -152,14 +152,14 @@ changes if you make any. Copy `libs/sheenbidi/LICENSE` and this line:
 Copyright (C) 2014-2026 Muhammad Tayyab Akram
 ```
 
-ztext makes no changes to SheenBidi — `ci/verify-vendor.sh` proves that on
+ztypeset makes no changes to SheenBidi — `ci/verify-vendor.sh` proves that on
 every run — so there is nothing to declare under section 4(b).
 
 ### libunibreak
 
 zlib asks three things, and only the third can reach a binary: do not
 misrepresent the origin, mark altered versions as altered, and do not remove
-the notice from a source distribution. ztext alters nothing —
+the notice from a source distribution. ztypeset alters nothing —
 `ci/verify-vendor.sh` proves it — and ships the notice at
 `libs/libunibreak/LICENCE`.
 
@@ -176,13 +176,13 @@ This software uses libunibreak, copyright © Wu Yongwei and contributors.
 proprietary product; it matters only if you also ship something GPLv2 and need
 the combination to be distributable. Note that this is the *second* GPLv2
 obstacle on this page: the FTL is the first. A product that must be GPLv2 has
-work to do with both SheenBidi and FreeType, and neither is ztext's to solve.
+work to do with both SheenBidi and FreeType, and neither is ztypeset's to solve.
 
 **Subpixel rendering is off.** FreeType's LCD filter once sat near Microsoft's
 ClearType patents. Those have expired, so this is no longer a legal question —
-but the option is off regardless, because ztext produces A8 coverage and SDF,
+but the option is off regardless, because ztypeset produces A8 coverage and SDF,
 and an engine wanting LCD filtering wants it in its own shader against its own
-subpixel layout. See `ffi/ztext_ftoption.h`.
+subpixel layout. See `ffi/ztypeset_ftoption.h`.
 
 ## The texts this file summarises
 

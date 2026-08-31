@@ -39,7 +39,7 @@ pub fn view(text: anytype) View {
 }
 
 fn complaint(comptime T: type) []const u8 {
-    return "ztext: text must be a slice of u8 (UTF-8), u16 (UTF-16) or u32 " ++
+    return "ztypeset: text must be a slice of u8 (UTF-8), u16 (UTF-16) or u32 " ++
         "(UTF-32), or a pointer to an array of one of those; got " ++
         @typeName(T);
 }

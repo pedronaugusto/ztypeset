@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- the C sources stay ASCII, and within eighty columns.
+# ztypeset -- the C sources stay ASCII, and within eighty columns.
 #
 # The C has no formatter, so this is the one layout rule that is enforced
 # rather than hoped for. Eighty columns is not taste here: these files are read
@@ -10,7 +10,7 @@
 # It lives in its own file because ci/run.sh and the hosted workflow both need
 # it, and a rule with two implementations can disagree with itself.
 #
-# Two directories, not one. ffi/ is the library; tests/ is the rest of ztext's
+# Two directories, not one. ffi/ is the library; tests/ is the rest of ztypeset's
 # own C, written to the same standard and built with the same warnings, and it
 # had been outside this check for no stated reason -- which showed: twelve
 # lines had drifted past the limit there while ffi/ could not hold one.

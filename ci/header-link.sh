@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# ztext -- every installed header compiles, is reachable, and links.
+# ztypeset -- every installed header compiles, is reachable, and links.
 #
 # The rule this enforces: a header in the install prefix is a promise. A
 # consumer who includes it must be able to compile it, and every entry point it
-# declares must resolve against the libraries installed beside it. ztext builds
+# declares must resolve against the libraries installed beside it. ztypeset builds
 # a REDUCED configuration of four upstreams -- FreeType without several base
 # extensions, HarfBuzz without its subset, raster, vector and GPU libraries --
 # and upstream ships headers for all of it. Installing a header whose
@@ -74,7 +74,7 @@ DIM=$'\033[2m'
 OFF=$'\033[0m'
 if [ ! -t 1 ]; then RED=; GREEN=; DIM=; OFF=; fi
 
-work=$(mktemp -d 2>/dev/null || mktemp -d -t ztext-hdr)
+work=$(mktemp -d 2>/dev/null || mktemp -d -t ztypeset-hdr)
 prefix="$work/prefix"
 trap 'rm -rf "$work"' EXIT INT TERM
 
@@ -101,14 +101,14 @@ roots_tail=(
   linebreak.h
   graphemebreak.h
   wordbreak.h
-  ztext.h
+  ztypeset.h
 )
 
 # Installed headers that no root reaches, and why that is correct. An entry
 # here that turns out to BE reached fails the gate, so the list cannot outlive
 # its reason.
 unreached_by_design=(
-  "freetype/config/ftmodule.h|upstream's default module list, which ztext replaces at build time with ffi/ztext_ftmodules.h; installed because upstream installs it"
+  "freetype/config/ftmodule.h|upstream's default module list, which ztypeset replaces at build time with ffi/ztypeset_ftmodules.h; installed because upstream installs it"
   "freetype/ftchapters.h|documentation structure for FreeType's own doc generator; it declares nothing"
   "SheenBidi/SBConfig.h|SheenBidi's build configuration, read only by its internal Source/API/SBBase.h; build.zig defines no SB_CONFIG_* macro, so the installed file is the configuration the library was built with"
 )
@@ -236,10 +236,10 @@ untranslated=$(grep -c '@compileError' "$work/surface.zig")
 {
   cat "$work/surface.h"
   printf '#include <stdint.h>\n'
-  printf 'volatile uintptr_t ztext_header_link_sink;\n'
+  printf 'volatile uintptr_t ztypeset_header_link_sink;\n'
   printf 'int main(void) {\n'
   while IFS= read -r n; do
-    printf '  ztext_header_link_sink ^= (uintptr_t)(void *)&%s;\n' "$n"
+    printf '  ztypeset_header_link_sink ^= (uintptr_t)(void *)&%s;\n' "$n"
   done < "$work/ours.txt"
   printf '  return 0;\n}\n'
 } > "$work/probe.c"

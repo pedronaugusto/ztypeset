@@ -2,7 +2,7 @@
 //! facts**, and everything else derives from it.
 //!
 //! The pin used to be written in four places -- UPSTREAM.md's table, the
-//! `verify` calls in ci/verify-vendor.sh, the assertions in src/ztext.zig and
+//! `verify` calls in ci/verify-vendor.sh, the assertions in src/ztypeset.zig and
 //! the assertions in the downstream consumer -- with nothing comparing them.
 //! Three of the four could go stale without a single check going red, and the
 //! one assertion that existed checked a major version only: `harfbuzz.major

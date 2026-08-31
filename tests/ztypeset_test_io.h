@@ -13,8 +13,8 @@
 // is the shape that proves a consumer can do the same.
 //===----------------------------------------------------------------------===//
 
-#ifndef ZTEXT_TEST_IO_H_
-#define ZTEXT_TEST_IO_H_
+#ifndef ZTYPESET_TEST_IO_H_
+#define ZTYPESET_TEST_IO_H_
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -24,7 +24,7 @@
 /// Returns NULL on any failure -- unopenable, unseekable, empty, short read,
 /// or out of memory -- with nothing allocated and nothing left open. The
 /// caller frees the result with `free`.
-static unsigned char* ztextTestReadFile(const char* path, size_t* size_out) {
+static unsigned char* ztypesetTestReadFile(const char* path, size_t* size_out) {
   // `fopen` is ISO C11 7.21.5.3. Microsoft's UCRT marks it deprecated in
   // favour of `fopen_s`, which is Annex K -- an optional annex that neither
   // glibc nor musl implements -- so taking that advice would make these tests
@@ -66,4 +66,4 @@ static unsigned char* ztextTestReadFile(const char* path, size_t* size_out) {
   return buffer;
 }
 
-#endif  // ZTEXT_TEST_IO_H_
+#endif  // ZTYPESET_TEST_IO_H_

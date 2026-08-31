@@ -33,7 +33,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      # Only ztext's own sources: libs/ is vendored verbatim and reformatting
+      # Only ztypeset's own sources: libs/ is vendored verbatim and reformatting
       # it would make the next re-vendor an unreadable diff.
       - name: Formatting
         run: zig fmt --check src tests/fonts.zig build.zig tests/consumer
@@ -42,7 +42,7 @@ jobs:
       # a person happened to run it on. Running them on every host also proves
       # the scripts themselves are portable, which is not free: a shell script
       # that has only ever run on one OS is an untested program.
-      - name: Source — ztext's C is ASCII, within 80 columns
+      - name: Source — ztypeset's C is ASCII, within 80 columns
         shell: bash
         run: ci/check-columns.sh
 
@@ -70,8 +70,8 @@ jobs:
         run: ci/measurements.sh --check --with-build
 
       # The sanitizer is opt-in, because a library must not force its runtime
-      # into a consumer's link. ztext's own Debug run asks for it, and this is
-      # what would catch UB in ztext's own C.
+      # into a consumer's link. ztypeset's own Debug run asks for it, and this is
+      # what would catch UB in ztypeset's own C.
       - name: Test — Debug, sanitizer on
         run: zig build test -Doptimize=Debug -Dsanitize_c=true
 
@@ -96,7 +96,7 @@ jobs:
       - name: Test — C ABI, 200 runs
         run: ci/crash-loop.sh 200
 
-      # Consuming ztext as a dependency exercises a different code path from
+      # Consuming ztypeset as a dependency exercises a different code path from
       # building it -- artifact registration and installed-header spelling are
       # invisible to the in-repo suite. See tests/consumer/build.zig.
       - name: Test — as a downstream dependency

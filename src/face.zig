@@ -7,7 +7,7 @@
 //! size from costing a second full parse.
 //!
 //! Ordering: a `Font` and its faces must be destroyed before the `Library` they
-//! came from. That is FreeType's rule, not ztext's, and it cannot be checked --
+//! came from. That is FreeType's rule, not ztypeset's, and it cannot be checked --
 //! see `Library.deinit`. Between a font and its faces there is no order at all.
 
 const std = @import("std");
@@ -26,7 +26,7 @@ pub const Library = struct {
 
     pub fn init() err.Error!Library {
         var handle: *c.Library = undefined;
-        try err.check(c.ztextLibraryCreate(&handle));
+        try err.check(c.ztypesetLibraryCreate(&handle));
         return .{ .handle = handle };
     }
 
@@ -38,7 +38,7 @@ pub const Library = struct {
     /// `error.InvalidArgument`, not undefined behaviour.
     ///
     /// This is not FreeType's own rule -- `FT_Done_Library` destroys any face
-    /// still registered with it -- and it is why `ZtextLibrary` counts its
+    /// still registered with it -- and it is why `ZtypesetLibrary` counts its
     /// live fonts. A struct holding a library and a face can release them in
     /// field order without a comment explaining which comes first.
     /// Releases this library. Its memory goes when the last `Font` made from
@@ -47,9 +47,9 @@ pub const Library = struct {
     ///
     /// A handle is a copyable value, so nothing in the type system stops a
     /// second `deinit` on a copy, and nothing at runtime catches one either.
-    /// See `ffi/ztext.h`'s ownership rules for why no check is possible.
+    /// See `ffi/ztypeset.h`'s ownership rules for why no check is possible.
     pub fn deinit(self: Library) void {
-        c.ztextLibraryDestroy(self.handle);
+        c.ztypesetLibraryDestroy(self.handle);
     }
 
     /// Loads a font from an image already in memory.
@@ -57,11 +57,11 @@ pub const Library = struct {
     /// `bytes` is BORROWED: FreeType and HarfBuzz both read tables out of it
     /// for as long as the font is alive, so the slice must outlive the
     /// returned `Font` and every face made from it, and must not move or be
-    /// written to meanwhile. This is FreeType's own contract and ztext passes
+    /// written to meanwhile. This is FreeType's own contract and ztypeset passes
     /// it through rather than hiding a copy nobody asked for.
     pub fn createFont(self: Library, bytes: []const u8, face_index: u32) err.Error!Font {
         var handle: *c.Font = undefined;
-        try err.check(c.ztextFontCreateFromMemory(
+        try err.check(c.ztypesetFontCreateFromMemory(
             self.handle,
             bytes.ptr,
             bytes.len,
@@ -75,14 +75,14 @@ pub const Library = struct {
     /// FreeType accepts 2..32; anything else is `InvalidArgument` rather than
     /// a silent clamp.
     pub fn setSdfSpread(self: Library, spread: u32) err.Error!void {
-        try err.check(c.ztextLibrarySetSdfSpread(self.handle, spread));
+        try err.check(c.ztypesetLibrarySetSdfSpread(self.handle, spread));
     }
 
     /// Number of faces in a font image: 1 for a plain TTF or OTF, more for a
     /// TrueType collection. `createFont`'s index must be below this.
     pub fn countFaces(self: Library, bytes: []const u8) err.Error!u32 {
         var out: u32 = 0;
-        try err.check(c.ztextLibraryCountFaces(self.handle, bytes.ptr, bytes.len, &out));
+        try err.check(c.ztypesetLibraryCountFaces(self.handle, bytes.ptr, bytes.len, &out));
         return out;
     }
 };
@@ -109,32 +109,32 @@ pub const Font = struct {
     /// Releases this font. Its memory goes when the last `Face` made from it
     /// does. Call it exactly once.
     pub fn deinit(self: Font) void {
-        c.ztextFontDestroy(self.handle);
+        c.ztypesetFontDestroy(self.handle);
     }
 
     /// This font at one size. See `Face.setPixelSize` for what the arguments
     /// accept; passing 0 for one axis copies the other.
     pub fn face(self: Font, width: f32, height: f32) err.Error!Face {
         var handle: *c.Face = undefined;
-        try err.check(c.ztextFaceCreate(self.handle, width, height, &handle));
+        try err.check(c.ztypesetFaceCreate(self.handle, width, height, &handle));
         return .{ .handle = handle, .font = self };
     }
 
     /// Borrowed, valid while the font is alive. `""` when the font does not
     /// name itself.
     pub fn familyName(self: Font) [:0]const u8 {
-        return std.mem.span(c.ztextFontFamilyName(self.handle));
+        return std.mem.span(c.ztypesetFontFamilyName(self.handle));
     }
 
     pub fn styleName(self: Font) [:0]const u8 {
-        return std.mem.span(c.ztextFontStyleName(self.handle));
+        return std.mem.span(c.ztypesetFontStyleName(self.handle));
     }
 
     /// Glyph index for a Unicode scalar, or 0 (.notdef) when the font has no
     /// mapping for it. Shaping does its own mapping; this is for checking
     /// coverage before choosing a fallback font.
     pub fn glyphIndex(self: Font, codepoint: u21) u32 {
-        return c.ztextFontGlyphIndex(self.handle, codepoint);
+        return c.ztypesetFontGlyphIndex(self.handle, codepoint);
     }
 
     /// Glyph index for a base character followed by a VARIATION SELECTOR --
@@ -144,64 +144,64 @@ pub const Font = struct {
     /// Nonzero exactly when this font draws this exact pair -- including the
     /// case where the font records the pair as its default and the answer is
     /// the base character's own glyph. 0 for every way it does not; see
-    /// `ffi/ztext.h` for the three of them.
+    /// `ffi/ztypeset.h` for the three of them.
     pub fn variantGlyphIndex(self: Font, codepoint: u21, selector: u21) u32 {
-        return c.ztextFontVariantGlyphIndex(self.handle, codepoint, selector);
+        return c.ztypesetFontVariantGlyphIndex(self.handle, codepoint, selector);
     }
 
     /// How many character maps this font declares. Which one is selected
     /// decides what `glyphIndex` and `coveredPrefix` answer; shaping never
-    /// consults it. See `ffi/ztext.h` for why that is a property of the two
+    /// consults it. See `ffi/ztypeset.h` for why that is a property of the two
     /// upstreams rather than a choice.
     pub fn charmapCount(self: Font) u32 {
-        return c.ztextFontCharmapCount(self.handle);
+        return c.ztypesetFontCharmapCount(self.handle);
     }
 
     /// The character map at `index`, which must be below `charmapCount`.
     pub fn charmap(self: Font, index: u32) err.Error!types.Charmap {
         var out: types.Charmap = undefined;
-        try err.check(c.ztextFontCharmap(self.handle, index, &out));
+        try err.check(c.ztypesetFontCharmap(self.handle, index, &out));
         return out;
     }
 
     /// Which map is selected, or null when none is.
     pub fn activeCharmap(self: Font) ?u32 {
-        const index = c.ztextFontActiveCharmap(self.handle);
+        const index = c.ztypesetFontActiveCharmap(self.handle);
         return if (index == c.charmap_index_none) null else index;
     }
 
     /// Selects one by index.
     pub fn selectCharmap(self: Font, index: u32) err.Error!void {
-        try err.check(c.ztextFontSelectCharmap(self.handle, index));
+        try err.check(c.ztypesetFontSelectCharmap(self.handle, index));
     }
 
-    /// Selects one by encoding -- `ztext.charmap_ms_symbol` and friends.
+    /// Selects one by encoding -- `ztypeset.charmap_ms_symbol` and friends.
     /// `error.InvalidArgument` when this font carries no such map, which is
     /// how "does this font have a symbol map" is asked.
     pub fn selectCharmapEncoding(self: Font, encoding: u32) err.Error!void {
-        try err.check(c.ztextFontSelectCharmapEncoding(self.handle, encoding));
+        try err.check(c.ztypesetFontSelectCharmapEncoding(self.handle, encoding));
     }
 
     pub fn glyphCount(self: Font) u32 {
-        return c.ztextFontGlyphCount(self.handle);
+        return c.ztypesetFontGlyphCount(self.handle);
     }
 
     /// Design units per em, or 0 for a font with no scalable outlines.
     pub fn unitsPerEm(self: Font) u32 {
-        return c.ztextFontUnitsPerEm(self.handle);
+        return c.ztypesetFontUnitsPerEm(self.handle);
     }
 
     /// Number of variable axes this font declares, or 0 for a static one --
     /// which is an answer, not an error.
     pub fn axisCount(self: Font) u32 {
-        return c.ztextFontAxisCount(self.handle);
+        return c.ztypesetFontAxisCount(self.handle);
     }
 
     /// Describes one axis, in the font's own order. `index` must be below
     /// `axisCount`; anything else is `error.InvalidArgument`.
     pub fn axis(self: Font, index: u32) err.Error!types.VariationAxis {
         var out: types.VariationAxis = undefined;
-        try err.check(c.ztextFontAxis(self.handle, index, &out));
+        try err.check(c.ztypesetFontAxis(self.handle, index, &out));
         return out;
     }
 
@@ -224,7 +224,7 @@ pub const Font = struct {
     /// font: `Shaper.extents` on one is `error.InvalidArgument` afterwards
     /// rather than a mixture of the two instances.
     pub fn setVariations(self: Font, values: []const types.Variation) err.Error!void {
-        try err.check(c.ztextFontSetVariations(
+        try err.check(c.ztypesetFontSetVariations(
             self.handle,
             if (values.len == 0) null else values.ptr,
             values.len,
@@ -234,7 +234,7 @@ pub const Font = struct {
     /// Current design value of one axis, which starts at the axis default.
     pub fn variation(self: Font, index: u32) err.Error!f32 {
         var out: f32 = 0;
-        try err.check(c.ztextFontVariation(self.handle, index, &out));
+        try err.check(c.ztypesetFontVariation(self.handle, index, &out));
         return out;
     }
 
@@ -242,7 +242,7 @@ pub const Font = struct {
     /// space that its own designers named. 0 for a static font, and 0 for a
     /// variable font that names none.
     pub fn namedInstanceCount(self: Font) u32 {
-        return c.ztextFontNamedInstanceCount(self.handle);
+        return c.ztypesetFontNamedInstanceCount(self.handle);
     }
 
     /// Design coordinates of one named instance, one per axis, in `axis`
@@ -260,7 +260,7 @@ pub const Font = struct {
         // nothing -- a caller that ignored the returned slice would then be
         // reading whatever was already in its buffer.
         var count: usize = values.len;
-        try err.check(c.ztextFontNamedInstanceCoords(
+        try err.check(c.ztypesetFontNamedInstanceCoords(
             self.handle,
             index,
             values.ptr,
@@ -273,7 +273,7 @@ pub const Font = struct {
     /// NUL that `namedInstanceName` also writes.
     pub fn namedInstanceNameLen(self: Font, index: u32) err.Error!usize {
         var size: usize = 0;
-        try err.check(c.ztextFontNamedInstanceName(self.handle, index, null, &size));
+        try err.check(c.ztypesetFontNamedInstanceName(self.handle, index, null, &size));
         return size;
     }
 
@@ -283,14 +283,14 @@ pub const Font = struct {
     /// `buffer` must hold the name AND its NUL, so it needs
     /// `namedInstanceNameLen` + 1 bytes; anything less is
     /// `error.BufferTooSmall`. `error.Unsupported` when the lookup yields
-    /// nothing at all -- see `ffi/ztext.h` for the two ways that happens.
+    /// nothing at all -- see `ffi/ztypeset.h` for the two ways that happens.
     pub fn namedInstanceName(
         self: Font,
         index: u32,
         buffer: []u8,
     ) err.Error![]const u8 {
         var size: usize = buffer.len;
-        try err.check(c.ztextFontNamedInstanceName(
+        try err.check(c.ztypesetFontNamedInstanceName(
             self.handle,
             index,
             buffer.ptr,
@@ -305,7 +305,7 @@ pub const Font = struct {
     /// path: every face of this font moves with it, and every run already
     /// measured against one of them is refused afterwards.
     pub fn setNamedInstance(self: Font, index: u32) err.Error!void {
-        try err.check(c.ztextFontSetNamedInstance(self.handle, index));
+        try err.check(c.ztypesetFontSetNamedInstance(self.handle, index));
     }
 
     /// How many leading code units of `text` this font can draw, for a host
@@ -314,7 +314,7 @@ pub const Font = struct {
     /// `text` is a slice of `u8`, `u16` or `u32`; the answer is in the same
     /// units, so it slices the same value you passed.
     ///
-    /// ztext does not own the list -- which font to fall back to is a policy
+    /// ztypeset does not own the list -- which font to fall back to is a policy
     /// question -- but it owns the part that is not: the prefix never ends
     /// inside a cluster, so a base and its combining marks always go to the
     /// same font, and format characters like ZWJ never break a run.
@@ -323,7 +323,7 @@ pub const Font = struct {
     pub fn coveredPrefix(self: Font, text: anytype) err.Error!usize {
         const view = text_mod.view(text);
         var out: usize = 0;
-        try err.check(c.ztextFontCoveredPrefix(
+        try err.check(c.ztypesetFontCoveredPrefix(
             self.handle,
             view.ptr,
             view.len,
@@ -348,7 +348,7 @@ pub const Face = struct {
     /// Destroys this face, whose memory is released here rather than
     /// deferred. Call it exactly once.
     pub fn deinit(self: Face) void {
-        c.ztextFaceDestroy(self.handle);
+        c.ztypesetFaceDestroy(self.handle);
     }
 
     /// Changes this face's size in pixels. Passing 0 for one axis copies the
@@ -361,12 +361,12 @@ pub const Face = struct {
     /// resolution. Zero, negative, non-finite, above 16384, or so small it
     /// quantises to nothing is `error.InvalidArgument`.
     pub fn setPixelSize(self: Face, width: f32, height: f32) err.Error!void {
-        try err.check(c.ztextFaceSetPixelSize(self.handle, width, height));
+        try err.check(c.ztypesetFaceSetPixelSize(self.handle, width, height));
     }
 
     pub fn metrics(self: Face) err.Error!types.FaceMetrics {
         var out: types.FaceMetrics = undefined;
-        try err.check(c.ztextFaceMetrics(self.handle, &out));
+        try err.check(c.ztypesetFaceMetrics(self.handle, &out));
         return out;
     }
 
@@ -378,7 +378,7 @@ pub const Face = struct {
     /// USE_TYPO_METRICS bit and applies variations. The two disagree in two
     /// places on purpose -- the ascender for a font that sets that bit, and
     /// the underline offset, which is the stroke's top edge here and its
-    /// centre there -- and `ffi/ztext.h` says which question each answers.
+    /// centre there -- and `ffi/ztypeset.h` says which question each answers.
     ///
     /// `error.Unsupported` when the font's tables do not declare it -- which
     /// is common for x-height and cap-height in older fonts, and for every
@@ -386,7 +386,7 @@ pub const Face = struct {
     /// own could not be told from a font that declares zero.
     pub fn metric(self: Face, which: types.Metric) err.Error!f32 {
         var out: f32 = 0;
-        try err.check(c.ztextFaceMetric(self.handle, which, &out));
+        try err.check(c.ztypesetFaceMetric(self.handle, which, &out));
         return out;
     }
 
@@ -395,7 +395,7 @@ pub const Face = struct {
     /// a designed value from an estimate.
     pub fn metricWithFallback(self: Face, which: types.Metric) err.Error!f32 {
         var out: f32 = 0;
-        try err.check(c.ztextFaceMetricWithFallback(self.handle, which, &out));
+        try err.check(c.ztypesetFaceMetricWithFallback(self.handle, which, &out));
         return out;
     }
 
@@ -406,19 +406,19 @@ pub const Face = struct {
     /// caller's map. It reaches the glyph IMAGE and no advance at all --
     /// neither this face's nor a shaped run's -- so the model is the usual
     /// one: lay the run out in text space, then map pen positions and glyph
-    /// images together. `ffi/ztext.h` has why, at length.
+    /// images together. `ffi/ztypeset.h` has why, at length.
     pub fn setTransform(self: Face, matrix: ?types.Matrix) err.Error!void {
         if (matrix) |m| {
-            try err.check(c.ztextFaceSetTransform(self.handle, &m));
+            try err.check(c.ztypesetFaceSetTransform(self.handle, &m));
         } else {
-            try err.check(c.ztextFaceSetTransform(self.handle, null));
+            try err.check(c.ztypesetFaceSetTransform(self.handle, null));
         }
     }
 
     /// This face's transform, the identity for one that has none.
     pub fn transform(self: Face) err.Error!types.Matrix {
         var out: types.Matrix = undefined;
-        try err.check(c.ztextFaceTransform(self.handle, &out));
+        try err.check(c.ztypesetFaceTransform(self.handle, &out));
         return out;
     }
 
@@ -434,16 +434,16 @@ pub const Face = struct {
     /// `decomposeOutline` all see the one stroked outline.
     pub fn setStroke(self: Face, pen: ?types.Stroke) err.Error!void {
         if (pen) |s| {
-            try err.check(c.ztextFaceSetStroke(self.handle, &s));
+            try err.check(c.ztypesetFaceSetStroke(self.handle, &s));
         } else {
-            try err.check(c.ztextFaceSetStroke(self.handle, null));
+            try err.check(c.ztypesetFaceSetStroke(self.handle, null));
         }
     }
 
     /// This face's pen, `types.stroke_none` for one that has none.
     pub fn stroke(self: Face) err.Error!types.Stroke {
         var out: types.Stroke = undefined;
-        try err.check(c.ztextFaceStroke(self.handle, &out));
+        try err.check(c.ztypesetFaceStroke(self.handle, &out));
         return out;
     }
 
@@ -462,7 +462,7 @@ pub const Face = struct {
     /// face's generation, so extents for a run shaped before the change are
     /// refused rather than mixed.
     pub fn setSyntheticBold(self: Face, strength: f32) err.Error!void {
-        try err.check(c.ztextFaceSetSyntheticBold(self.handle, strength));
+        try err.check(c.ztypesetFaceSetSyntheticBold(self.handle, strength));
     }
 
     /// Fakes an italic by shearing the outline. `slant` is the tangent of the
@@ -471,7 +471,7 @@ pub const Face = struct {
     /// does not change how far the pen moves; the ink is not, so this moves
     /// the face's generation too. Same scope as `setSyntheticBold`.
     pub fn setSyntheticOblique(self: Face, slant: f32) err.Error!void {
-        try err.check(c.ztextFaceSetSyntheticOblique(self.handle, slant));
+        try err.check(c.ztypesetFaceSetSyntheticOblique(self.handle, slant));
     }
 
     /// Rasterises one glyph.
@@ -484,7 +484,7 @@ pub const Face = struct {
     /// 26.6 fixed point -- the unit shaping advances already come back in --
     /// so text laid out at a fractional x is not forced onto the pixel grid.
     /// `0, 0` renders identically to a caller with no notion of subpixel
-    /// placement. Ignored in `.sdf` mode: see `ffi/ztext.h`.
+    /// placement. Ignored in `.sdf` mode: see `ffi/ztypeset.h`.
     pub fn renderGlyph(
         self: Face,
         glyph_id: u32,
@@ -494,7 +494,7 @@ pub const Face = struct {
         offset_y: i32,
     ) err.Error!types.GlyphBitmap {
         var out: types.GlyphBitmap = undefined;
-        try err.check(c.ztextFaceRenderGlyph(
+        try err.check(c.ztypesetFaceRenderGlyph(
             self.handle,
             glyph_id,
             mode,
@@ -513,7 +513,7 @@ pub const Face = struct {
         hinting: types.Hinting,
     ) err.Error!types.Extents {
         var out: types.Extents = undefined;
-        try err.check(c.ztextFaceGlyphExtents(self.handle, glyph_id, hinting, &out));
+        try err.check(c.ztypesetFaceGlyphExtents(self.handle, glyph_id, hinting, &out));
         return out;
     }
 
@@ -530,7 +530,7 @@ pub const Face = struct {
         hinting: types.Hinting,
         funcs: *const types.OutlineFuncs,
     ) err.Error!void {
-        try err.check(c.ztextFaceDecomposeOutline(self.handle, glyph_id, hinting, funcs));
+        try err.check(c.ztypesetFaceDecomposeOutline(self.handle, glyph_id, hinting, funcs));
     }
 };
 
@@ -540,7 +540,7 @@ pub const Face = struct {
 ///
 /// The slice belongs to the face and dies with its next `renderGlyph`.
 ///
-/// The pitch check is defensive rather than reachable: ztext copies the glyph
+/// The pitch check is defensive rather than reachable: ztypeset copies the glyph
 /// out of FreeType's slot tightly packed and top-down, so `pitch` is always
 /// `width`. It stays because the day a colour format arrives is the day a
 /// slice computed from `width` alone would be wrong.

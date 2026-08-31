@@ -1,9 +1,9 @@
-//! Hand-written declarations mirroring `ffi/ztext.h`.
+//! Hand-written declarations mirroring `ffi/ztypeset.h`.
 //!
 //! Written by hand rather than produced by `@cImport` so the package stays
 //! translate-c-free and every type is exactly the shape the rest of the
 //! wrapper wants -- a `@cImport` of these headers would also leak translate-c
-//! types into ztext's public API and make every target depend on translate-c
+//! types into ztypeset's public API and make every target depend on translate-c
 //! behaving.
 //!
 //! The cost of hand-writing is drift: nothing in either compiler checks that
@@ -12,17 +12,17 @@
 //! describes a check over struct layouts as though it covered the surface:
 //!
 //!   * `src/abi_check.zig` pairs every public declaration here with the one a
-//!     `@cImport` of ztext.h produces, by naming convention, and sweeps in
+//!     `@cImport` of ztypeset.h produces, by naming convention, and sweeps in
 //!     both directions -- so a declaration on either side alone fails.
-//!   * `ztextAbiLayout` reports the size, alignment and field offsets the C
+//!   * `ztypesetAbiLayout` reports the size, alignment and field offsets the C
 //!     compiler chose, each checked against what this file computes, and each
 //!     expectation derived from the field's own name rather than from a list.
-//!   * `ztextAbiProbe` writes a distinct marker into every field of every
+//!   * `ztypesetAbiProbe` writes a distinct marker into every field of every
 //!     shared struct. It is the only one of the three that can see two
 //!     same-typed fields transposed, which changes no size, no alignment and
 //!     no offset.
 //!
-//! All three run as tests in `src/ztext.zig`, and a field that moves on either
+//! All three run as tests in `src/ztypeset.zig`, and a field that moves on either
 //! side fails loudly instead of corrupting memory quietly.
 
 const std = @import("std");
@@ -31,7 +31,7 @@ const std = @import("std");
 // Results
 //=============================================================================
 
-/// Non-exhaustive on purpose. ztext ships a `-Dshared=true` mode and the
+/// Non-exhaustive on purpose. ztypeset ships a `-Dshared=true` mode and the
 /// header warns about header/library skew, so a newer library really can
 /// return a code this build has never heard of. A closed enum would make that
 /// `panic: invalid enum value` in a safe build and undefined behaviour in a
@@ -52,8 +52,8 @@ pub const Result = enum(c_int) {
 };
 
 /// Which encoding a caller's text is in, and therefore what every offset and
-/// length beside it counts. See the "Text" section of `ffi/ztext.h`.
-/// One segmentation pass of `ztextParagraphCreate`'s `segmentation` mask.
+/// length beside it counts. See the "Text" section of `ffi/ztypeset.h`.
+/// One segmentation pass of `ztypesetParagraphCreate`'s `segmentation` mask.
 /// Singular for the same reason as `GlyphFlag`: the parameter holds any OR of
 /// these, not one of them.
 pub const Segmentation = enum(c_int) {
@@ -109,7 +109,7 @@ pub const Direction = enum(c_int) {
 /// of one byte per text byte; `types.Break` is the enum a caller reads them
 /// through. Declared here so the ABI cross-check pairs each with its macro.
 /// FreeType's own FT_Encoding values, as four-character tags; see
-/// `ffi/ztext.h`. The one home for each is the header -- these are compared
+/// `ffi/ztypeset.h`. The one home for each is the header -- these are compared
 /// against it, name by name, by `src/abi_check.zig`.
 pub const charmap_none: u32 = 0x00000000;
 pub const charmap_ms_symbol: u32 = 0x73796D62;
@@ -128,7 +128,7 @@ pub const charmap_apple_roman: u32 = 0x61726D6E;
 pub const charmap_index_none: u32 = 0xFFFFFFFF;
 
 /// FreeType's and HarfBuzz's own reference synthetic styles; see
-/// `ffi/ztext.h`. Fractions of the em, not pixels.
+/// `ffi/ztypeset.h`. Fractions of the em, not pixels.
 pub const synthetic_bold_default: f32 = 0.041656494;
 pub const synthetic_oblique_default: f32 = 0.212554932;
 
@@ -165,7 +165,7 @@ pub const BitmapFormat = enum(c_int) {
     lcd_v = 3,
 };
 
-/// One bit of `Glyph.flags`. Singular for the same reason as `ZtextGlyphFlag`
+/// One bit of `Glyph.flags`. Singular for the same reason as `ZtypesetGlyphFlag`
 /// in the header: the field holds any OR of these, not one of them.
 pub const GlyphFlag = enum(c_int) {
     unsafe_to_break = 0x1,
@@ -185,7 +185,7 @@ pub const Hinting = enum(c_int) {
 /// One OpenType metric, named by its own four-character tag.
 ///
 /// The values are HarfBuzz's `hb_ot_metrics_tag_t` values unchanged, which is
-/// what lets `ztextFaceMetric` pass one straight through; `ffi/ztext_abi.c`
+/// what lets `ztypesetFaceMetric` pass one straight through; `ffi/ztypeset_abi.c`
 /// asserts each against its `HB_OT_METRICS_TAG_` counterpart, so the two
 /// cannot drift apart.
 pub const Metric = enum(c_int) {
@@ -354,8 +354,8 @@ pub const GlyphBitmap = extern struct {
     x_advance: f32,
 };
 
-/// Mirrors `ZtextOutlineFuncs`: one callback per outline command, called
-/// synchronously from `ztextFaceDecomposeOutline`, plus an opaque `user`
+/// Mirrors `ZtypesetOutlineFuncs`: one callback per outline command, called
+/// synchronously from `ztypesetFaceDecomposeOutline`, plus an opaque `user`
 /// pointer passed back unmodified -- the same shape as `Allocator`.
 pub const OutlineFuncs = extern struct {
     move_to: ?*const fn (user: ?*anyopaque, x: i32, y: i32) callconv(.c) Result,
@@ -497,104 +497,104 @@ pub const Line = opaque {};
 // Entry points
 //=============================================================================
 
-pub extern fn ztextVersion() u32;
-pub extern fn ztextFreetypeVersion() u32;
-pub extern fn ztextHarfbuzzVersion() u32;
-pub extern fn ztextSheenbidiVersion() u32;
-pub extern fn ztextUnibreakVersion() u32;
-pub extern fn ztextResultName(result: Result) [*:0]const u8;
-pub extern fn ztextLastErrorDetail() [*:0]const u8;
-pub extern fn ztextSetAllocator(alloc: ?*const Allocator) Result;
-pub extern fn ztextWarmup() void;
-pub extern fn ztextAbiLayout(out: *AbiLayout) void;
-pub extern fn ztextAbiProbe(out: *AbiProbe) void;
+pub extern fn ztypesetVersion() u32;
+pub extern fn ztypesetFreetypeVersion() u32;
+pub extern fn ztypesetHarfbuzzVersion() u32;
+pub extern fn ztypesetSheenbidiVersion() u32;
+pub extern fn ztypesetUnibreakVersion() u32;
+pub extern fn ztypesetResultName(result: Result) [*:0]const u8;
+pub extern fn ztypesetLastErrorDetail() [*:0]const u8;
+pub extern fn ztypesetSetAllocator(alloc: ?*const Allocator) Result;
+pub extern fn ztypesetWarmup() void;
+pub extern fn ztypesetAbiLayout(out: *AbiLayout) void;
+pub extern fn ztypesetAbiProbe(out: *AbiProbe) void;
 
-pub extern fn ztextLibraryCreate(out: **Library) Result;
-pub extern fn ztextLibraryDestroy(library: ?*Library) void;
-pub extern fn ztextLibrarySetSdfSpread(library: *Library, spread: u32) Result;
-pub extern fn ztextLibraryCountFaces(library: *Library, data: [*]const u8, size: usize, out: *u32) Result;
+pub extern fn ztypesetLibraryCreate(out: **Library) Result;
+pub extern fn ztypesetLibraryDestroy(library: ?*Library) void;
+pub extern fn ztypesetLibrarySetSdfSpread(library: *Library, spread: u32) Result;
+pub extern fn ztypesetLibraryCountFaces(library: *Library, data: [*]const u8, size: usize, out: *u32) Result;
 
-pub extern fn ztextFontCreateFromMemory(
+pub extern fn ztypesetFontCreateFromMemory(
     library: *Library,
     data: [*]const u8,
     size: usize,
     face_index: u32,
     out: **Font,
 ) Result;
-pub extern fn ztextFontDestroy(font: ?*Font) void;
-pub extern fn ztextFontFamilyName(font: *const Font) [*:0]const u8;
-pub extern fn ztextFontStyleName(font: *const Font) [*:0]const u8;
-pub extern fn ztextFontGlyphIndex(font: *const Font, codepoint: u32) u32;
-pub extern fn ztextFontVariantGlyphIndex(
+pub extern fn ztypesetFontDestroy(font: ?*Font) void;
+pub extern fn ztypesetFontFamilyName(font: *const Font) [*:0]const u8;
+pub extern fn ztypesetFontStyleName(font: *const Font) [*:0]const u8;
+pub extern fn ztypesetFontGlyphIndex(font: *const Font, codepoint: u32) u32;
+pub extern fn ztypesetFontVariantGlyphIndex(
     font: *const Font,
     codepoint: u32,
     variation_selector: u32,
 ) u32;
-pub extern fn ztextFontCharmapCount(font: *const Font) u32;
-pub extern fn ztextFontCharmap(font: *const Font, index: u32, out: *Charmap) Result;
-pub extern fn ztextFontActiveCharmap(font: *const Font) u32;
-pub extern fn ztextFontSelectCharmap(font: *Font, index: u32) Result;
-pub extern fn ztextFontSelectCharmapEncoding(font: *Font, encoding: u32) Result;
-pub extern fn ztextFontGlyphCount(font: *const Font) u32;
-pub extern fn ztextFontUnitsPerEm(font: *const Font) u32;
-pub extern fn ztextFontCoveredPrefix(
+pub extern fn ztypesetFontCharmapCount(font: *const Font) u32;
+pub extern fn ztypesetFontCharmap(font: *const Font, index: u32, out: *Charmap) Result;
+pub extern fn ztypesetFontActiveCharmap(font: *const Font) u32;
+pub extern fn ztypesetFontSelectCharmap(font: *Font, index: u32) Result;
+pub extern fn ztypesetFontSelectCharmapEncoding(font: *Font, encoding: u32) Result;
+pub extern fn ztypesetFontGlyphCount(font: *const Font) u32;
+pub extern fn ztypesetFontUnitsPerEm(font: *const Font) u32;
+pub extern fn ztypesetFontCoveredPrefix(
     font: *const Font,
     text: ?*const anyopaque,
     length: usize,
     encoding: Encoding,
     out: *usize,
 ) Result;
-pub extern fn ztextFontAxisCount(font: *const Font) u32;
-pub extern fn ztextFontAxis(font: *const Font, index: u32, out: *VariationAxis) Result;
-pub extern fn ztextFontSetVariations(
+pub extern fn ztypesetFontAxisCount(font: *const Font) u32;
+pub extern fn ztypesetFontAxis(font: *const Font, index: u32, out: *VariationAxis) Result;
+pub extern fn ztypesetFontSetVariations(
     font: *Font,
     values: ?[*]const Variation,
     count: usize,
 ) Result;
-pub extern fn ztextFontVariation(font: *const Font, index: u32, out: *f32) Result;
-pub extern fn ztextFontNamedInstanceCount(font: *const Font) u32;
-pub extern fn ztextFontNamedInstanceCoords(
+pub extern fn ztypesetFontVariation(font: *const Font, index: u32, out: *f32) Result;
+pub extern fn ztypesetFontNamedInstanceCount(font: *const Font) u32;
+pub extern fn ztypesetFontNamedInstanceCoords(
     font: *const Font,
     index: u32,
     values: ?[*]f32,
     count: *usize,
 ) Result;
-pub extern fn ztextFontNamedInstanceName(
+pub extern fn ztypesetFontNamedInstanceName(
     font: *const Font,
     index: u32,
     buffer: ?[*]u8,
     size: *usize,
 ) Result;
-pub extern fn ztextFontSetNamedInstance(font: *Font, index: u32) Result;
+pub extern fn ztypesetFontSetNamedInstance(font: *Font, index: u32) Result;
 
-pub extern fn ztextFaceCreate(
+pub extern fn ztypesetFaceCreate(
     font: *Font,
     width: f32,
     height: f32,
     out: **Face,
 ) Result;
-pub extern fn ztextFaceDestroy(face: ?*Face) void;
-pub extern fn ztextFaceFont(face: *const Face) ?*Font;
-pub extern fn ztextFaceSetPixelSize(face: *Face, width: f32, height: f32) Result;
-pub extern fn ztextFaceMetrics(face: *const Face, out: *FaceMetrics) Result;
-pub extern fn ztextFaceMetric(
+pub extern fn ztypesetFaceDestroy(face: ?*Face) void;
+pub extern fn ztypesetFaceFont(face: *const Face) ?*Font;
+pub extern fn ztypesetFaceSetPixelSize(face: *Face, width: f32, height: f32) Result;
+pub extern fn ztypesetFaceMetrics(face: *const Face, out: *FaceMetrics) Result;
+pub extern fn ztypesetFaceMetric(
     face: *const Face,
     metric: Metric,
     out: *f32,
 ) Result;
-pub extern fn ztextFaceMetricWithFallback(
+pub extern fn ztypesetFaceMetricWithFallback(
     face: *const Face,
     metric: Metric,
     out: *f32,
 ) Result;
-pub extern fn ztextBitmapFormatChannels(format: BitmapFormat) u32;
-pub extern fn ztextFaceSetTransform(face: *Face, matrix: ?*const Matrix) Result;
-pub extern fn ztextFaceTransform(face: *const Face, out: *Matrix) Result;
-pub extern fn ztextFaceSetStroke(face: *Face, stroke: ?*const Stroke) Result;
-pub extern fn ztextFaceStroke(face: *const Face, out: *Stroke) Result;
-pub extern fn ztextFaceSetSyntheticBold(face: *Face, strength: f32) Result;
-pub extern fn ztextFaceSetSyntheticOblique(face: *Face, slant: f32) Result;
-pub extern fn ztextFaceRenderGlyph(
+pub extern fn ztypesetBitmapFormatChannels(format: BitmapFormat) u32;
+pub extern fn ztypesetFaceSetTransform(face: *Face, matrix: ?*const Matrix) Result;
+pub extern fn ztypesetFaceTransform(face: *const Face, out: *Matrix) Result;
+pub extern fn ztypesetFaceSetStroke(face: *Face, stroke: ?*const Stroke) Result;
+pub extern fn ztypesetFaceStroke(face: *const Face, out: *Stroke) Result;
+pub extern fn ztypesetFaceSetSyntheticBold(face: *Face, strength: f32) Result;
+pub extern fn ztypesetFaceSetSyntheticOblique(face: *Face, slant: f32) Result;
+pub extern fn ztypesetFaceRenderGlyph(
     face: *Face,
     glyph_id: u32,
     mode: RenderMode,
@@ -603,22 +603,22 @@ pub extern fn ztextFaceRenderGlyph(
     offset_y: i32,
     out: *GlyphBitmap,
 ) Result;
-pub extern fn ztextFaceGlyphExtents(
+pub extern fn ztypesetFaceGlyphExtents(
     face: *Face,
     glyph_id: u32,
     hinting: Hinting,
     out: *Extents,
 ) Result;
-pub extern fn ztextFaceDecomposeOutline(
+pub extern fn ztypesetFaceDecomposeOutline(
     face: *Face,
     glyph_id: u32,
     hinting: Hinting,
     funcs: *const OutlineFuncs,
 ) Result;
 
-pub extern fn ztextShaperCreate(out: **Shaper) Result;
-pub extern fn ztextShaperDestroy(shaper: ?*Shaper) void;
-pub extern fn ztextShaperShape(
+pub extern fn ztypesetShaperCreate(out: **Shaper) Result;
+pub extern fn ztypesetShaperDestroy(shaper: ?*Shaper) void;
+pub extern fn ztypesetShaperShape(
     shaper: *Shaper,
     face: *Face,
     text: ?*const anyopaque,
@@ -628,19 +628,19 @@ pub extern fn ztextShaperShape(
     run_length: usize,
     params: *const ShapeParams,
 ) Result;
-pub extern fn ztextShaperShapeRun(
+pub extern fn ztypesetShaperShapeRun(
     shaper: *Shaper,
     face: *Face,
     paragraph: *const Paragraph,
     run: *const ShapingRun,
     params: *const ShapeParams,
 ) Result;
-pub extern fn ztextShaperGlyphCount(shaper: *const Shaper) usize;
-pub extern fn ztextShaperGlyphs(shaper: *const Shaper) ?[*]const Glyph;
-pub extern fn ztextShaperDirection(shaper: *const Shaper) Direction;
-pub extern fn ztextShaperExtents(shaper: *const Shaper, face: *Face, out: *Extents) Result;
+pub extern fn ztypesetShaperGlyphCount(shaper: *const Shaper) usize;
+pub extern fn ztypesetShaperGlyphs(shaper: *const Shaper) ?[*]const Glyph;
+pub extern fn ztypesetShaperDirection(shaper: *const Shaper) Direction;
+pub extern fn ztypesetShaperExtents(shaper: *const Shaper, face: *Face, out: *Extents) Result;
 
-pub extern fn ztextParagraphCreate(
+pub extern fn ztypesetParagraphCreate(
     text: ?*const anyopaque,
     length: usize,
     encoding: Encoding,
@@ -648,34 +648,34 @@ pub extern fn ztextParagraphCreate(
     segmentation: u32,
     out: **Paragraph,
 ) Result;
-pub extern fn ztextParagraphDestroy(paragraph: ?*Paragraph) void;
-pub extern fn ztextParagraphLength(paragraph: *const Paragraph) usize;
-pub extern fn ztextParagraphEncoding(paragraph: *const Paragraph) Encoding;
-pub extern fn ztextParagraphBaseLevel(paragraph: *const Paragraph) u8;
-pub extern fn ztextParagraphLevels(paragraph: *const Paragraph) ?[*]const u8;
-pub extern fn ztextParagraphSegmentation(paragraph: *const Paragraph) u32;
-pub extern fn ztextParagraphLineBreaks(paragraph: *const Paragraph) ?[*]const u8;
-pub extern fn ztextParagraphGraphemeBreaks(paragraph: *const Paragraph) ?[*]const u8;
-pub extern fn ztextParagraphWordBreaks(paragraph: *const Paragraph) ?[*]const u8;
-pub extern fn ztextParagraphNextGrapheme(paragraph: *const Paragraph, offset: usize) usize;
-pub extern fn ztextParagraphPreviousGrapheme(paragraph: *const Paragraph, offset: usize) usize;
-pub extern fn ztextParagraphVisualRunCount(paragraph: *const Paragraph) usize;
-pub extern fn ztextParagraphVisualRuns(paragraph: *const Paragraph) ?[*]const VisualRun;
-pub extern fn ztextParagraphScriptRunCount(paragraph: *const Paragraph) usize;
-pub extern fn ztextParagraphScriptRuns(paragraph: *const Paragraph) ?[*]const ScriptRun;
-pub extern fn ztextParagraphShapingRunCount(paragraph: *const Paragraph) usize;
-pub extern fn ztextParagraphShapingRuns(paragraph: *const Paragraph) ?[*]const ShapingRun;
+pub extern fn ztypesetParagraphDestroy(paragraph: ?*Paragraph) void;
+pub extern fn ztypesetParagraphLength(paragraph: *const Paragraph) usize;
+pub extern fn ztypesetParagraphEncoding(paragraph: *const Paragraph) Encoding;
+pub extern fn ztypesetParagraphBaseLevel(paragraph: *const Paragraph) u8;
+pub extern fn ztypesetParagraphLevels(paragraph: *const Paragraph) ?[*]const u8;
+pub extern fn ztypesetParagraphSegmentation(paragraph: *const Paragraph) u32;
+pub extern fn ztypesetParagraphLineBreaks(paragraph: *const Paragraph) ?[*]const u8;
+pub extern fn ztypesetParagraphGraphemeBreaks(paragraph: *const Paragraph) ?[*]const u8;
+pub extern fn ztypesetParagraphWordBreaks(paragraph: *const Paragraph) ?[*]const u8;
+pub extern fn ztypesetParagraphNextGrapheme(paragraph: *const Paragraph, offset: usize) usize;
+pub extern fn ztypesetParagraphPreviousGrapheme(paragraph: *const Paragraph, offset: usize) usize;
+pub extern fn ztypesetParagraphVisualRunCount(paragraph: *const Paragraph) usize;
+pub extern fn ztypesetParagraphVisualRuns(paragraph: *const Paragraph) ?[*]const VisualRun;
+pub extern fn ztypesetParagraphScriptRunCount(paragraph: *const Paragraph) usize;
+pub extern fn ztypesetParagraphScriptRuns(paragraph: *const Paragraph) ?[*]const ScriptRun;
+pub extern fn ztypesetParagraphShapingRunCount(paragraph: *const Paragraph) usize;
+pub extern fn ztypesetParagraphShapingRuns(paragraph: *const Paragraph) ?[*]const ShapingRun;
 
-pub extern fn ztextLineCreate(
+pub extern fn ztypesetLineCreate(
     paragraph: *const Paragraph,
     offset: usize,
     length: usize,
     out: **Line,
 ) Result;
-pub extern fn ztextLineDestroy(line: ?*Line) void;
-pub extern fn ztextLineOffset(line: *const Line) usize;
-pub extern fn ztextLineLength(line: *const Line) usize;
-pub extern fn ztextLineVisualRunCount(line: *const Line) usize;
-pub extern fn ztextLineVisualRuns(line: *const Line) ?[*]const VisualRun;
-pub extern fn ztextLineShapingRunCount(line: *const Line) usize;
-pub extern fn ztextLineShapingRuns(line: *const Line) ?[*]const ShapingRun;
+pub extern fn ztypesetLineDestroy(line: ?*Line) void;
+pub extern fn ztypesetLineOffset(line: *const Line) usize;
+pub extern fn ztypesetLineLength(line: *const Line) usize;
+pub extern fn ztypesetLineVisualRunCount(line: *const Line) usize;
+pub extern fn ztypesetLineVisualRuns(line: *const Line) ?[*]const VisualRun;
+pub extern fn ztypesetLineShapingRunCount(line: *const Line) usize;
+pub extern fn ztypesetLineShapingRuns(line: *const Line) ?[*]const ShapingRun;

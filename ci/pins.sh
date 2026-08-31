@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- reading src/pins.zig from a shell script. SOURCED, not executed.
+# ztypeset -- reading src/pins.zig from a shell script. SOURCED, not executed.
 #
 # src/pins.zig is the one home for what libs/ holds. Two scripts need those
 # values -- ci/verify-vendor.sh fetches the pinned commits, ci/measurements.sh

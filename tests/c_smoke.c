@@ -1,12 +1,12 @@
 //===----------------------------------------------------------------------===//
-// ztext -- the C boundary on its own.
+// ztypeset -- the C boundary on its own.
 //
-// Nothing here is Zig. That is the point: ztext.h has to be a real C contract
-// that a plain C host can use, and the allocator seam has to be genuinely in
-// use rather than a parameter nobody passes. This asserts both, and asserts
-// that every byte handed out comes back.
+// Nothing here is Zig. That is the point: ztypeset.h has to be a real C
+// contract that a plain C host can use, and the allocator seam has to be
+// genuinely in use rather than a parameter nobody passes. This asserts both,
+// and asserts that every byte handed out comes back.
 //
-// Usage: ztext-c-smoke <path-to-font.ttf>
+// Usage: ztypeset-c-smoke <path-to-font.ttf>
 //===----------------------------------------------------------------------===//
 
 #include <math.h>
@@ -18,20 +18,20 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
-#define ZTEXT_SMOKE_WRITE(fd, buf, len) \
+#define ZTYPESET_SMOKE_WRITE(fd, buf, len) \
   (void)_write((fd), (buf), (unsigned)(len))
 #else
 #include <unistd.h>
-#define ZTEXT_SMOKE_WRITE(fd, buf, len) (void)write((fd), (buf), (len))
+#define ZTYPESET_SMOKE_WRITE(fd, buf, len) (void)write((fd), (buf), (len))
 #endif
 
-#include "ztext.h"
-#include "ztext_test_io.h"
+#include "ztypeset.h"
+#include "ztypeset_test_io.h"
 
 /// Exit code this test uses when the process faults. Distinct from 1 (a
 /// check failed) and from 2 (it could not start), so a harness can tell a
 /// memory fault from a wrong answer without parsing anything.
-#define ZTEXT_SMOKE_EXIT_FAULT 86
+#define ZTYPESET_SMOKE_EXIT_FAULT 86
 
 static int failures = 0;
 
@@ -47,9 +47,9 @@ static int failures = 0;
 
 #define CHECK_OK(expression)                                      \
   do {                                                            \
-    ZtextResult result_ = (expression);                           \
-    CHECK(result_ == ZTEXT_RESULT_OK, "%s -> %s (%s)", #expression,      \
-          ztextResultName(result_), ztextLastErrorDetail());       \
+    ZtypesetResult result_ = (expression);                           \
+    CHECK(result_ == ZTYPESET_RESULT_OK, "%s -> %s (%s)", #expression,      \
+          ztypesetResultName(result_), ztypesetLastErrorDetail());       \
   } while (0)
 
 //===----------------------------------------------------------------------===//
@@ -103,7 +103,7 @@ static void phaseAt(const char* name, long index) {
 //===----------------------------------------------------------------------===//
 
 static void emit(const char* text) {
-  ZTEXT_SMOKE_WRITE(2, text, strlen(text));
+  ZTYPESET_SMOKE_WRITE(2, text, strlen(text));
 }
 
 static void reportFault(const char* what) {
@@ -112,7 +112,7 @@ static void reportFault(const char* what) {
   emit(") during phase: ");
   emit(g_phase);
   emit("\n");
-  _Exit(ZTEXT_SMOKE_EXIT_FAULT);
+  _Exit(ZTYPESET_SMOKE_EXIT_FAULT);
 }
 
 static void onSignal(int sig) {
@@ -147,7 +147,7 @@ static void installFaultReporter(void) {
 //===----------------------------------------------------------------------===//
 // A counting allocator, so the seam is measurably in use.
 //
-// Deliberately does NOT provide `reallocate`, which exercises ztext's
+// Deliberately does NOT provide `reallocate`, which exercises ztypeset's
 // allocate-copy-deallocate fallback path. The Zig side covers the other case.
 //===----------------------------------------------------------------------===//
 
@@ -159,7 +159,7 @@ typedef struct Counters {
 
 static void* countingAllocate(void* user, size_t size, size_t alignment) {
   Counters* counters = (Counters*)user;
-  // Every alignment ztext asks for is at most max_align_t's, which is what
+  // Every alignment ztypeset asks for is at most max_align_t's, which is what
   // malloc already guarantees; assert rather than silently mis-serve it.
   if (alignment > _Alignof(max_align_t)) return NULL;
   void* block = malloc(size);
@@ -174,7 +174,7 @@ static void countingDeallocate(void* user, void* block, size_t size,
                                size_t alignment) {
   Counters* counters = (Counters*)user;
   (void)alignment;
-  // The size comes back from ztext, which is the whole point of the seam
+  // The size comes back from ztypeset, which is the whole point of the seam
   // carrying one -- a plain C host with a pool or an arena can use it.
   counters->live_bytes -= size;
   counters->live_blocks -= 1u;
@@ -184,13 +184,13 @@ static void countingDeallocate(void* user, void* block, size_t size,
 //===----------------------------------------------------------------------===//
 // Proof that FreeType's allocation really is per-library.
 //
-// ztext.h claims a ZtextLibrary captures the allocator installed when it was
-// created, and that FreeType memory follows that copy rather than the
+// ztypeset.h claims a ZtypesetLibrary captures the allocator installed when it
+// was created, and that FreeType memory follows that copy rather than the
 // process-wide one. That claim was false once -- the callbacks ignored their
 // FT_Memory and dispatched through the global -- and nothing noticed, because
 // every test installed one allocator and kept it.
 //
-// ztextLibraryCountFaces is the lever: it opens and closes an FT_Face and
+// ztypesetLibraryCountFaces is the lever: it opens and closes an FT_Face and
 // touches nothing else, so it is pure FreeType traffic. Run it after swapping
 // the process-wide allocator and watch which allocator sees the work.
 //===----------------------------------------------------------------------===//
@@ -202,16 +202,16 @@ static int checkPerLibraryAllocator(const unsigned char* font,
   memset(&first, 0, sizeof(first));
   memset(&second, 0, sizeof(second));
 
-  ZtextAllocator a = {countingAllocate, NULL, countingDeallocate, &first};
-  ZtextAllocator b = {countingAllocate, NULL, countingDeallocate, &second};
+  ZtypesetAllocator a = {countingAllocate, NULL, countingDeallocate, &first};
+  ZtypesetAllocator b = {countingAllocate, NULL, countingDeallocate, &second};
 
-  ZtextLibrary* library = NULL;
-  ZtextFont* the_font = NULL;
+  ZtypesetLibrary* library = NULL;
+  ZtypesetFont* the_font = NULL;
   int failed = 0;
   size_t first_used = 0u;
 
-  ztextSetAllocator(&a);
-  if (ztextLibraryCreate(&library) != ZTEXT_RESULT_OK) {
+  ztypesetSetAllocator(&a);
+  if (ztypesetLibraryCreate(&library) != ZTYPESET_RESULT_OK) {
     printf("  FAIL per-library: could not create a library\n");
     failed = 1;
   }
@@ -219,21 +219,21 @@ static int checkPerLibraryAllocator(const unsigned char* font,
   // its FreeType memory is the library's, but its hb_face_t comes from the
   // process-wide seam, which HarfBuzz makes compile-time and therefore
   // unswitchable. Both have to come back to `a` below.
-  if (!failed && ztextFontCreateFromMemory(library, font, font_size, 0,
-                                           &the_font) != ZTEXT_RESULT_OK) {
+  if (!failed && ztypesetFontCreateFromMemory(library, font, font_size, 0,
+                                           &the_font) != ZTYPESET_RESULT_OK) {
     printf("  FAIL per-library: could not create a font\n");
     failed = 1;
   }
 
   if (!failed) {
     // Everything from here on is nominally the second allocator's.
-    ztextSetAllocator(&b);
+    ztypesetSetAllocator(&b);
     const size_t second_before = second.total_allocations;
     const size_t first_before = first.total_allocations;
 
     uint32_t faces = 0;
-    if (ztextLibraryCountFaces(library, font, font_size, &faces) !=
-        ZTEXT_RESULT_OK) {
+    if (ztypesetLibraryCountFaces(library, font, font_size, &faces) !=
+        ZTYPESET_RESULT_OK) {
       printf("  FAIL per-library: counting faces failed\n");
       failed = 1;
     } else {
@@ -258,9 +258,9 @@ static int checkPerLibraryAllocator(const unsigned char* font,
   // because the library recorded its allocator, and the HarfBuzz memory
   // because the block itself did. Getting the second one wrong is what a
   // reviewer found and what the block header now makes impossible.
-  ztextFontDestroy(the_font);
-  ztextLibraryDestroy(library);
-  ztextSetAllocator(NULL);
+  ztypesetFontDestroy(the_font);
+  ztypesetLibraryDestroy(library);
+  ztypesetSetAllocator(NULL);
 
   if (!failed && (first.live_blocks != 0 || first.live_bytes != 0)) {
     printf("  FAIL per-library: %zu blocks / %zu bytes never returned to the "
@@ -294,43 +294,43 @@ static int checkSteadyStateAllocations(const unsigned char* font,
                                        size_t font_size) {
   Counters counters;
   memset(&counters, 0, sizeof(counters));
-  ZtextAllocator allocator = {countingAllocate, NULL, countingDeallocate,
+  ZtypesetAllocator allocator = {countingAllocate, NULL, countingDeallocate,
                               &counters};
-  ztextSetAllocator(&allocator);
+  ztypesetSetAllocator(&allocator);
 
-  ZtextLibrary* library = NULL;
-  ZtextFont* ffont = NULL;
-  ZtextFace* face = NULL;
-  ZtextShaper* shaper = NULL;
+  ZtypesetLibrary* library = NULL;
+  ZtypesetFont* ffont = NULL;
+  ZtypesetFace* face = NULL;
+  ZtypesetShaper* shaper = NULL;
   int failed = 0;
 
   // Every path below this point falls through to the single teardown at the
   // end: a `return` here would leave a stack allocator installed and a stack
   // Counters registered under it, and the next allocation through either
   // would be writing into a frame that no longer exists.
-  if (ztextLibraryCreate(&library) != ZTEXT_RESULT_OK ||
-      ztextFontCreateFromMemory(library, font, font_size, 0, &ffont) !=
-          ZTEXT_RESULT_OK ||
-      ztextFaceCreate(ffont, 0, 18, &face) != ZTEXT_RESULT_OK ||
-      ztextShaperCreate(&shaper) != ZTEXT_RESULT_OK) {
+  if (ztypesetLibraryCreate(&library) != ZTYPESET_RESULT_OK ||
+      ztypesetFontCreateFromMemory(library, font, font_size, 0, &ffont) !=
+          ZTYPESET_RESULT_OK ||
+      ztypesetFaceCreate(ffont, 0, 18, &face) != ZTYPESET_RESULT_OK ||
+      ztypesetShaperCreate(&shaper) != ZTYPESET_RESULT_OK) {
     printf("  FAIL steady-state: set-up failed\n");
     failed = 1;
   }
 
   if (!failed) {
-    ZtextShapeParams params;
+    ZtypesetShapeParams params;
     memset(&params, 0, sizeof(params));
-    params.direction = ZTEXT_DIRECTION_RTL;
-    params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
+    params.direction = ZTYPESET_DIRECTION_RTL;
+    params.script = ZTYPESET_TAG('H', 'e', 'b', 'r');
     const char* text =
         "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d \xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d";
     const size_t length = strlen(text);
 
     // Warm: let every buffer reach its high-water mark.
     for (int i = 0; i < 8; i++) {
-      if (ztextShaperShape(shaper, face, text, length,
-                           ZTEXT_ENCODING_UTF8, 0, length, &params) !=
-          ZTEXT_RESULT_OK) {
+      if (ztypesetShaperShape(shaper, face, text, length,
+                           ZTYPESET_ENCODING_UTF8, 0, length, &params) !=
+          ZTYPESET_RESULT_OK) {
         printf("  FAIL steady-state: warm-up shape failed\n");
         failed = 1;
         break;
@@ -340,9 +340,9 @@ static int checkSteadyStateAllocations(const unsigned char* font,
     if (!failed) {
       const size_t before = counters.total_allocations;
       for (int i = 0; i < 500; i++) {
-        if (ztextShaperShape(shaper, face, text, length,
-                             ZTEXT_ENCODING_UTF8, 0, length, &params) !=
-            ZTEXT_RESULT_OK) {
+        if (ztypesetShaperShape(shaper, face, text, length,
+                             ZTYPESET_ENCODING_UTF8, 0, length, &params) !=
+            ZTYPESET_RESULT_OK) {
           printf("  FAIL steady-state: shape failed\n");
           failed = 1;
           break;
@@ -359,11 +359,11 @@ static int checkSteadyStateAllocations(const unsigned char* font,
     }
   }
 
-  ztextShaperDestroy(shaper);
-  ztextFaceDestroy(face);
-  ztextFontDestroy(ffont);
-  ztextLibraryDestroy(library);
-  ztextSetAllocator(NULL);
+  ztypesetShaperDestroy(shaper);
+  ztypesetFaceDestroy(face);
+  ztypesetFontDestroy(ffont);
+  ztypesetLibraryDestroy(library);
+  ztypesetSetAllocator(NULL);
 
   if (!failed && (counters.live_blocks != 0 || counters.live_bytes != 0)) {
     printf("  FAIL steady-state: %zu blocks leaked\n", counters.live_blocks);
@@ -376,7 +376,7 @@ static int checkSteadyStateAllocations(const unsigned char* font,
 // An allocator that fails the Nth allocation, for injection testing.
 //
 // Every step of the pipeline is run with the failure point walked forward one
-// allocation at a time. At each point ztext must do three things: report a
+// allocation at a time. At each point ztypeset must do three things: report a
 // typed error rather than crashing, leave the caller's out-parameter NULL
 // rather than handing back a half-built handle, and free everything it had
 // already allocated.
@@ -428,15 +428,14 @@ static void injectDeallocate(void* user, void* block, size_t size,
 ///   1  0xCD in every byte, which is what an allocator returns when nothing
 ///      is allowed to depend on the previous contents.
 ///
-/// The poisoned arm exists because of a measured defect. SheenBidi 3.0.0
-/// reads a field it has not written on its own allocation-failure path
-/// (Core/Object.c ObjectCreate, API/SBParagraph.c FinalizeParagraph), and
-/// ztext's SheenBidi seam zeroes every block it hands over so that read finds
-/// a NULL rather than a pointer. With malloc's leftovers the defect segfaulted
-/// about one run in fifty and stayed unlocated; with 0xCD it is every run.
-/// Remove the memset in ztext_core.c's sbAllocateBlock and this arm dies
-/// immediately and always, which is the only kind of gate worth having over an
-/// intermittent fault.
+/// The poisoned arm exists because of a measured defect. SheenBidi 3.0.0 reads
+/// a field it has not written on its own allocation-failure path (Core/Object.c
+/// ObjectCreate, API/SBParagraph.c FinalizeParagraph), and ztypeset's SheenBidi
+/// seam zeroes every block it hands over so that read finds a NULL rather than
+/// a pointer. With malloc's leftovers the defect segfaulted about one run in
+/// fifty and stayed unlocated; with 0xCD it is every run. Remove the memset in
+/// ztypeset_core.c's sbAllocateBlock and this arm dies immediately and always,
+/// which is the only kind of gate worth having over an intermittent fault.
 static int runInjectionSweep(const unsigned char* font, size_t font_size,
                              int poison) {
   const long points = 220;
@@ -451,20 +450,20 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
     injector.live = 0u;
     injector.poison = poison;
 
-    ZtextAllocator allocator;
+    ZtypesetAllocator allocator;
     allocator.allocate = injectAllocate;
     allocator.reallocate = NULL;
     allocator.deallocate = injectDeallocate;
     allocator.user = &injector;
-    ztextSetAllocator(&allocator);
+    ztypesetSetAllocator(&allocator);
 
-    ZtextLibrary* library = NULL;
-    ZtextFont* fnt = NULL;
-    ZtextFace* face = NULL;
-    ZtextShaper* shaper = NULL;
-    ZtextParagraph* paragraph = NULL;
-    ZtextLine* line = NULL;
-    ZtextResult result = ZTEXT_RESULT_OK;
+    ZtypesetLibrary* library = NULL;
+    ZtypesetFont* fnt = NULL;
+    ZtypesetFace* face = NULL;
+    ZtypesetShaper* shaper = NULL;
+    ZtypesetParagraph* paragraph = NULL;
+    ZtypesetLine* line = NULL;
+    ZtypesetResult result = ZTYPESET_RESULT_OK;
     int stopped = 0;
 
     // A failed step that still wrote its handle is a violation, and it is
@@ -476,7 +475,7 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
 #define STEP(call, handle)                                                  \
     if (!stopped) {                                                         \
       result = (call);                                                      \
-      if (result != ZTEXT_RESULT_OK) {                                      \
+      if (result != ZTYPESET_RESULT_OK) {                                      \
         stopped = 1;                                                        \
         if ((handle) != NULL) {                                             \
           printf("  FAIL injection %s %ld: %s failed but wrote its handle\n",\
@@ -486,52 +485,52 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
       }                                                                     \
     }
 
-    STEP(ztextLibraryCreate(&library), library)
-    STEP(ztextFontCreateFromMemory(library, font, font_size, 0, &fnt), fnt)
-    STEP(ztextFaceCreate(fnt, 0, 24.5f, &face), face)
-    STEP(ztextShaperCreate(&shaper), shaper)
-    STEP(ztextParagraphCreate("a \xd7\xa9\xd7\x9c b", 8,
-                              ZTEXT_ENCODING_UTF8,
-                              ZTEXT_BASE_DIRECTION_AUTO,
-                              ZTEXT_SEGMENTATION_ALL, &paragraph),
+    STEP(ztypesetLibraryCreate(&library), library)
+    STEP(ztypesetFontCreateFromMemory(library, font, font_size, 0, &fnt), fnt)
+    STEP(ztypesetFaceCreate(fnt, 0, 24.5f, &face), face)
+    STEP(ztypesetShaperCreate(&shaper), shaper)
+    STEP(ztypesetParagraphCreate("a \xd7\xa9\xd7\x9c b", 8,
+                              ZTYPESET_ENCODING_UTF8,
+                              ZTYPESET_BASE_DIRECTION_AUTO,
+                              ZTYPESET_SEGMENTATION_ALL, &paragraph),
          paragraph)
-    STEP(ztextLineCreate(paragraph, 0, 6, &line), line)
+    STEP(ztypesetLineCreate(paragraph, 0, 6, &line), line)
 #undef STEP
 
     if (!stopped) {
-      ZtextShapeParams params;
+      ZtypesetShapeParams params;
       memset(&params, 0, sizeof(params));
-      params.direction = ZTEXT_DIRECTION_RTL;
-      params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
-      result = ztextShaperShape(
+      params.direction = ZTYPESET_DIRECTION_RTL;
+      params.script = ZTYPESET_TAG('H', 'e', 'b', 'r');
+      result = ztypesetShaperShape(
           shaper, face, "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d", 8,
-          ZTEXT_ENCODING_UTF8, 0, 8, &params);
-      if (result != ZTEXT_RESULT_OK) stopped = 1;
+          ZTYPESET_ENCODING_UTF8, 0, 8, &params);
+      if (result != ZTYPESET_RESULT_OK) stopped = 1;
     }
 
     if (!stopped) completed++;
-    else if (result == ZTEXT_RESULT_OUT_OF_MEMORY) out_of_memory++;
+    else if (result == ZTYPESET_RESULT_OUT_OF_MEMORY) out_of_memory++;
     else other_error++;
 
-    ztextLineDestroy(line);
-    ztextParagraphDestroy(paragraph);
-    ztextShaperDestroy(shaper);
+    ztypesetLineDestroy(line);
+    ztypesetParagraphDestroy(paragraph);
+    ztypesetShaperDestroy(shaper);
     // Deliberately the "wrong" way round: the font is released while its face
     // is still alive, so every one of the 220 injection points also walks the
     // order-free teardown.
-    ztextFontDestroy(fnt);
-    ztextFaceDestroy(face);
-    ztextLibraryDestroy(library);
+    ztypesetFontDestroy(fnt);
+    ztypesetFaceDestroy(face);
+    ztypesetLibraryDestroy(library);
 
     if (injector.live != 0u) {
       printf("  FAIL injection %s %ld: %zu blocks leaked after teardown (%s)\n",
-             arm, limit, injector.live, ztextResultName(result));
+             arm, limit, injector.live, ztypesetResultName(result));
       violated = 1;
     }
 
     // Restored before the frame holding `injector` goes away, on every path
     // through this body including the two violations above.
-    ztextSetAllocator(NULL);
+    ztypesetSetAllocator(NULL);
   }
 
   if (violated) return 1;
@@ -567,28 +566,28 @@ typedef struct OutlineCounts {
   int close;
 } OutlineCounts;
 
-static ZtextResult countMoveTo(void* user, int32_t x, int32_t y) {
+static ZtypesetResult countMoveTo(void* user, int32_t x, int32_t y) {
   (void)x;
   (void)y;
   ((OutlineCounts*)user)->move_to++;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
-static ZtextResult countLineTo(void* user, int32_t x, int32_t y) {
+static ZtypesetResult countLineTo(void* user, int32_t x, int32_t y) {
   (void)x;
   (void)y;
   ((OutlineCounts*)user)->line_to++;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
-static ZtextResult countConicTo(void* user, int32_t control_x,
+static ZtypesetResult countConicTo(void* user, int32_t control_x,
                                 int32_t control_y, int32_t x, int32_t y) {
   (void)control_x;
   (void)control_y;
   (void)x;
   (void)y;
   ((OutlineCounts*)user)->conic_to++;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
-static ZtextResult countCubicTo(void* user, int32_t control1_x,
+static ZtypesetResult countCubicTo(void* user, int32_t control1_x,
                                 int32_t control1_y, int32_t control2_x,
                                 int32_t control2_y, int32_t x, int32_t y) {
   (void)control1_x;
@@ -598,11 +597,11 @@ static ZtextResult countCubicTo(void* user, int32_t control1_x,
   (void)x;
   (void)y;
   ((OutlineCounts*)user)->cubic_to++;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
-static ZtextResult countClose(void* user) {
+static ZtypesetResult countClose(void* user) {
   ((OutlineCounts*)user)->close++;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 int main(int argc, char** argv) {
@@ -617,57 +616,62 @@ int main(int argc, char** argv) {
   }
 
   size_t font_size = 0;
-  unsigned char* font = ztextTestReadFile(argv[1], &font_size);
+  unsigned char* font = ztypesetTestReadFile(argv[1], &font_size);
   if (font == NULL) {
     printf("could not read %s\n", argv[1]);
     return 2;
   }
 
-  printf("ztext %u.%u.%u  freetype %u.%u.%u  harfbuzz %u.%u.%u  "
+  printf("ztypeset %u.%u.%u  freetype %u.%u.%u  harfbuzz %u.%u.%u  "
          "sheenbidi %u.%u.%u\n",
-         ztextVersion() >> 16, (ztextVersion() >> 8) & 0xFF,
-         ztextVersion() & 0xFF,
-         ztextFreetypeVersion() >> 16, (ztextFreetypeVersion() >> 8) & 0xFF,
-         ztextFreetypeVersion() & 0xFF,
-         ztextHarfbuzzVersion() >> 16, (ztextHarfbuzzVersion() >> 8) & 0xFF,
-         ztextHarfbuzzVersion() & 0xFF,
-         ztextSheenbidiVersion() >> 16, (ztextSheenbidiVersion() >> 8) & 0xFF,
-         ztextSheenbidiVersion() & 0xFF);
+         ztypesetVersion() >> 16, (ztypesetVersion() >> 8) & 0xFF,
+         ztypesetVersion() & 0xFF,
+         ztypesetFreetypeVersion() >> 16,
+                                 (ztypesetFreetypeVersion() >> 8) & 0xFF,
+         ztypesetFreetypeVersion() & 0xFF,
+         ztypesetHarfbuzzVersion() >> 16,
+                                 (ztypesetHarfbuzzVersion() >> 8) & 0xFF,
+         ztypesetHarfbuzzVersion() & 0xFF,
+         ztypesetSheenbidiVersion() >> 16,
+                                  (ztypesetSheenbidiVersion() >> 8) & 0xFF,
+         ztypesetSheenbidiVersion() & 0xFF);
 
-  CHECK(ztextVersion() == (uint32_t)((ZTEXT_VERSION_MAJOR << 16) |
-                                     (ZTEXT_VERSION_MINOR << 8) |
-                                     ZTEXT_VERSION_PATCH),
-        "the header and the library disagree about ztext's version");
+  CHECK(ztypesetVersion() == (uint32_t)((ZTYPESET_VERSION_MAJOR << 16) |
+                                     (ZTYPESET_VERSION_MINOR << 8) |
+                                     ZTYPESET_VERSION_PATCH),
+        "the header and the library disagree about ztypeset's version");
 
-  // No ztextWarmup() here on purpose. Installing an allocator warms the
-  // upstreams' process-lifetime caches first, so what this counts is ztext's
+  // No ztypesetWarmup() here on purpose. Installing an allocator warms the
+  // upstreams' process-lifetime caches first, so what this counts is ztypeset's
   // own working set without the host having been told to ask -- and this
   // phase is what proves it, since a count that only balances because the
   // test remembered would prove nothing about a host that did not.
   phase("install-counting-allocator");
   Counters counters;
   memset(&counters, 0, sizeof(counters));
-  ZtextAllocator allocator;
+  ZtypesetAllocator allocator;
   allocator.allocate = countingAllocate;
   allocator.reallocate = NULL;
   allocator.deallocate = countingDeallocate;
   allocator.user = &counters;
-  CHECK_OK(ztextSetAllocator(&allocator));
+  CHECK_OK(ztypesetSetAllocator(&allocator));
 
   // A partial allocator must be refused without disturbing the working one.
-  ZtextAllocator broken;
+  ZtypesetAllocator broken;
   memset(&broken, 0, sizeof(broken));
-  CHECK(ztextSetAllocator(&broken) == ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetSetAllocator(&broken) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "an allocator with no allocate should be refused");
 
   phase("library+font");
-  ZtextLibrary* library = NULL;
-  CHECK_OK(ztextLibraryCreate(&library));
+  ZtypesetLibrary* library = NULL;
+  CHECK_OK(ztypesetLibraryCreate(&library));
 
-  ZtextFont* the_font = NULL;
-  CHECK_OK(ztextFontCreateFromMemory(library, font, font_size, 0, &the_font));
-  CHECK(ztextFontGlyphCount(the_font) > 0, "the font should have glyphs");
-  CHECK(ztextFontUnitsPerEm(the_font) > 0, "units_per_em should be positive");
+  ZtypesetFont* the_font = NULL;
+  CHECK_OK(ztypesetFontCreateFromMemory(library, font, font_size, 0,
+           &the_font));
+  CHECK(ztypesetFontGlyphCount(the_font) > 0, "the font should have glyphs");
+  CHECK(ztypesetFontUnitsPerEm(the_font) > 0,
+        "units_per_em should be positive");
 
   // Variable axes, from C. This smoke test is handed ONE font path (see
   // build.zig) and it is a static one, so what is provable here is the half
@@ -677,29 +681,30 @@ int main(int argc, char** argv) {
   // whatever was already in the caller's struct. The Zig suite drives the
   // other half against a variable font.
   phase("variations");
-  ZtextVariationAxis axis;
+  ZtypesetVariationAxis axis;
   memset(&axis, 0xFF, sizeof(axis));
-  ZtextVariation wanted;
-  wanted.tag = ZTEXT_TAG('w', 'g', 'h', 't');
+  ZtypesetVariation wanted;
+  wanted.tag = ZTYPESET_TAG('w', 'g', 'h', 't');
   wanted.value = 700.0f;
   float current = -1.0f;
 
-  CHECK(ztextFontAxisCount(the_font) == 0,
+  CHECK(ztypesetFontAxisCount(the_font) == 0,
         "a static font should report 0 axes, got %u",
-        ztextFontAxisCount(the_font));
-  CHECK(ztextFontAxis(the_font, 0, &axis) == ZTEXT_RESULT_INVALID_ARGUMENT,
+        ztypesetFontAxisCount(the_font));
+  CHECK(ztypesetFontAxis(the_font, 0,
+        &axis) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "asking a static font for axis 0 should be refused");
   CHECK(axis.tag == 0u, "a refused axis query should clear its output");
-  CHECK(ztextFontVariation(the_font, 0, &current) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetFontVariation(the_font, 0, &current) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "reading an axis of a static font should be refused");
-  CHECK(ztextFontSetVariations(the_font, &wanted, 1) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetFontSetVariations(the_font, &wanted, 1) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "setting an axis on a static font should be refused, not ignored");
-  CHECK(ztextFontSetVariations(the_font, NULL, 1) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetFontSetVariations(the_font, NULL, 1) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a NULL array with a non-zero count should be refused");
-  CHECK(ztextFontAxisCount(NULL) == 0, "a NULL font should report 0 axes");
+  CHECK(ztypesetFontAxisCount(NULL) == 0, "a NULL font should report 0 axes");
 
   // Named instances, on the same static font: none, and every call that takes
   // an index says so rather than describing an instance that is not there.
@@ -707,55 +712,55 @@ int main(int argc, char** argv) {
   size_t instance_count = 4u;
   char instance_name[32];
   size_t instance_size = sizeof(instance_name);
-  CHECK(ztextFontNamedInstanceCount(the_font) == 0,
+  CHECK(ztypesetFontNamedInstanceCount(the_font) == 0,
         "a static font should report 0 named instances, got %u",
-        ztextFontNamedInstanceCount(the_font));
-  CHECK(ztextFontNamedInstanceCoords(the_font, 0, instance_coords,
+        ztypesetFontNamedInstanceCount(the_font));
+  CHECK(ztypesetFontNamedInstanceCoords(the_font, 0, instance_coords,
                                      &instance_count) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "asking a static font for instance 0 should be refused");
   CHECK(instance_count == 0u,
         "a refused instance query should clear its count");
-  CHECK(ztextFontNamedInstanceName(the_font, 0, instance_name,
+  CHECK(ztypesetFontNamedInstanceName(the_font, 0, instance_name,
                                    &instance_size) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "asking a static font for an instance name should be refused");
-  CHECK(ztextFontSetNamedInstance(the_font, 0) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetFontSetNamedInstance(the_font, 0) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "setting an instance on a static font should be refused, not ignored");
 
   // Variation sequences: this font has no cmap format 14, so every pair is 0
   // while the base character on its own is not.
-  CHECK(ztextFontGlyphIndex(the_font, 0x05D0u) != 0u,
+  CHECK(ztypesetFontGlyphIndex(the_font, 0x05D0u) != 0u,
         "the font should map ALEF");
-  CHECK(ztextFontVariantGlyphIndex(the_font, 0x05D0u, 0xFE00u) == 0u,
+  CHECK(ztypesetFontVariantGlyphIndex(the_font, 0x05D0u, 0xFE00u) == 0u,
         "a font with no format-14 cmap should name no variation sequence");
 
   // A fractional size through the C boundary, where the 26.6 conversion is.
   phase("faces");
-  ZtextFace* fractional_face = NULL;
-  CHECK_OK(ztextFaceCreate(the_font, 0, 24.5f, &fractional_face));
-  ZtextFaceMetrics fractional;
-  CHECK_OK(ztextFaceMetrics(fractional_face, &fractional));
+  ZtypesetFace* fractional_face = NULL;
+  CHECK_OK(ztypesetFaceCreate(the_font, 0, 24.5f, &fractional_face));
+  ZtypesetFaceMetrics fractional;
+  CHECK_OK(ztypesetFaceMetrics(fractional_face, &fractional));
   CHECK(fractional.pixel_size == 24.5f, "expected 24.5 px, got %f",
         (double)fractional.pixel_size);
-  ztextFaceDestroy(fractional_face);
+  ztypesetFaceDestroy(fractional_face);
 
-  ZtextFace* nothing = NULL;
-  CHECK(ztextFaceCreate(the_font, 0, 0, &nothing) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  ZtypesetFace* nothing = NULL;
+  CHECK(ztypesetFaceCreate(the_font, 0, 0, &nothing) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a zero size should be refused");
-  CHECK(ztextFaceCreate(the_font, 0, -1.0f, &nothing) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetFaceCreate(the_font, 0, -1.0f, &nothing) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a negative size should be refused");
   CHECK(nothing == NULL, "a refused face should not write a handle");
 
-  ZtextFace* face = NULL;
-  CHECK_OK(ztextFaceCreate(the_font, 0, 24, &face));
-  CHECK(ztextFaceFont(face) == the_font, "a face should name its own font");
+  ZtypesetFace* face = NULL;
+  CHECK_OK(ztypesetFaceCreate(the_font, 0, 24, &face));
+  CHECK(ztypesetFaceFont(face) == the_font, "a face should name its own font");
 
-  ZtextFaceMetrics metrics;
-  CHECK_OK(ztextFaceMetrics(face, &metrics));
+  ZtypesetFaceMetrics metrics;
+  CHECK_OK(ztypesetFaceMetrics(face, &metrics));
   CHECK(metrics.units_per_em > 0, "units_per_em should be positive");
   CHECK(metrics.num_glyphs > 0, "the face should have glyphs");
   CHECK(metrics.ascender > 0.0f, "ascender should be above the baseline");
@@ -766,55 +771,59 @@ int main(int argc, char** argv) {
         "this font has no vhea/vmtx; vertical metrics should be synthesised");
   CHECK(metrics.vert_line_height > 0.0f,
         "even synthesised column spacing should be positive");
-  printf("  face: %s %s, %u glyphs, %u upem\n", ztextFontFamilyName(the_font),
-         ztextFontStyleName(the_font), metrics.num_glyphs,
+  printf("  face: %s %s, %u glyphs, %u upem\n",
+         ztypesetFontFamilyName(the_font),
+         ztypesetFontStyleName(the_font), metrics.num_glyphs,
          metrics.units_per_em);
 
   // OpenType metrics. The interesting check is the one Zig cannot write: a
-  // ZtextMetric this build does not name, which only C can construct, has to
+  // ZtypesetMetric this build does not name, which only C can construct, has to
   // be refused rather than handed to HarfBuzz as a tag.
   float metric = -1.0f;
-  CHECK_OK(ztextFaceMetric(face, ZTEXT_METRIC_X_HEIGHT, &metric));
+  CHECK_OK(ztypesetFaceMetric(face, ZTYPESET_METRIC_X_HEIGHT, &metric));
   CHECK(metric > 0.0f, "this font declares an x-height; it should be positive");
   metric = -1.0f;
-  CHECK(ztextFaceMetric(face, ZTEXT_METRIC_VERTICAL_ASCENDER, &metric) ==
-            ZTEXT_RESULT_UNSUPPORTED,
+  CHECK(ztypesetFaceMetric(face, ZTYPESET_METRIC_VERTICAL_ASCENDER, &metric) ==
+            ZTYPESET_RESULT_UNSUPPORTED,
         "a font with no vhea should report its vertical ascender unsupported");
   CHECK(metric == 0.0f, "an unsupported metric should clear its output");
-  CHECK_OK(ztextFaceMetricWithFallback(face, ZTEXT_METRIC_VERTICAL_ASCENDER,
+  CHECK_OK(ztypesetFaceMetricWithFallback(face,
+           ZTYPESET_METRIC_VERTICAL_ASCENDER,
                                        &metric));
   CHECK(metric != 0.0f, "the fallback should always produce a value");
   metric = -1.0f;
-  CHECK(ztextFaceMetric(face, (ZtextMetric)ZTEXT_TAG('n', 'o', 'p', 'e'),
-                        &metric) == ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetFaceMetric(face, (ZtypesetMetric)ZTYPESET_TAG('n', 'o', 'p',
+        'e'),
+                        &metric) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a tag this build does not name should be refused, not forwarded");
   CHECK(metric == 0.0f, "a refused metric should clear its output");
-  CHECK(ztextFaceMetricWithFallback(face,
-                                    (ZtextMetric)ZTEXT_TAG('n', 'o', 'p', 'e'),
+  CHECK(ztypesetFaceMetricWithFallback(face,
+                                    (ZtypesetMetric)ZTYPESET_TAG('n', 'o', 'p',
+                                     'e'),
                                     &metric) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "the fallback should refuse an unnamed tag too");
 
   // Shape a right-to-left run: the font passed in is Hebrew.
   phase("shape");
-  ZtextShaper* shaper = NULL;
-  CHECK_OK(ztextShaperCreate(&shaper));
+  ZtypesetShaper* shaper = NULL;
+  CHECK_OK(ztypesetShaperCreate(&shaper));
 
   // shin lamed vav mem
   const char* shalom = "\xd7\xa9\xd7\x9c\xd7\x95\xd7\x9d";
-  ZtextShapeParams params;
+  ZtypesetShapeParams params;
   memset(&params, 0, sizeof(params));
-  params.direction = ZTEXT_DIRECTION_RTL;
-  params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
-  CHECK_OK(ztextShaperShape(shaper, face, shalom, strlen(shalom),
-                            ZTEXT_ENCODING_UTF8, 0,
+  params.direction = ZTYPESET_DIRECTION_RTL;
+  params.script = ZTYPESET_TAG('H', 'e', 'b', 'r');
+  CHECK_OK(ztypesetShaperShape(shaper, face, shalom, strlen(shalom),
+                            ZTYPESET_ENCODING_UTF8, 0,
                                 strlen(shalom), &params));
 
-  const size_t glyph_count = ztextShaperGlyphCount(shaper);
-  const ZtextGlyph* glyphs = ztextShaperGlyphs(shaper);
+  const size_t glyph_count = ztypesetShaperGlyphCount(shaper);
+  const ZtypesetGlyph* glyphs = ztypesetShaperGlyphs(shaper);
   CHECK(glyph_count == 4, "expected 4 glyphs, got %zu", glyph_count);
   CHECK(glyphs != NULL, "glyph array should not be NULL after a shape");
-  CHECK(ztextShaperDirection(shaper) == ZTEXT_DIRECTION_RTL,
+  CHECK(ztypesetShaperDirection(shaper) == ZTYPESET_DIRECTION_RTL,
         "the shaper should report the direction it used");
   if (glyphs != NULL && glyph_count == 4) {
     // Right-to-left output runs in visual order, so clusters descend.
@@ -827,83 +836,88 @@ int main(int argc, char** argv) {
       CHECK(glyphs[i].x_advance > 0.0f, "glyph %zu has no advance", i);
       // Every bit set is a bit this header names, so a switch on the mask
       // cannot meet a value it has no meaning for.
-      CHECK((glyphs[i].flags & ~(uint32_t)ZTEXT_GLYPH_FLAG_DEFINED) == 0u,
+      CHECK((glyphs[i].flags & ~(uint32_t)ZTYPESET_GLYPH_FLAG_DEFINED) == 0u,
             "glyph %zu carries an undefined flag: 0x%x", i, glyphs[i].flags);
-      if ((glyphs[i].flags & (uint32_t)ZTEXT_GLYPH_FLAG_UNSAFE_TO_CONCAT) !=
+      if ((glyphs[i].flags & (uint32_t)ZTYPESET_GLYPH_FLAG_UNSAFE_TO_CONCAT) !=
           0u) {
         saw_unsafe_to_concat = 1;
       }
     }
     // The optional flags reach a C consumer too, not only the Zig wrapper:
-    // HarfBuzz withholds unsafe-to-concat unless ztext asks for it on every
+    // HarfBuzz withholds unsafe-to-concat unless ztypeset asks for it on every
     // shape, and a withheld flag is indistinguishable from an absent one.
     CHECK(saw_unsafe_to_concat,
           "no glyph reported unsafe-to-concat; the optional glyph flags are "
           "not being produced");
   }
 
-  ZtextExtents extents;
-  CHECK_OK(ztextShaperExtents(shaper, face, &extents));
+  ZtypesetExtents extents;
+  CHECK_OK(ztypesetShaperExtents(shaper, face, &extents));
   CHECK(extents.x_advance > 0.0f, "a shaped run should advance the pen");
   CHECK(extents.x_max > extents.x_min, "extents should enclose some ink");
 
   // The other shaping entry point: a run OF A PARAGRAPH, which is where the
   // text, the offsets, the direction and the script all come from one place.
   phase("shape a paragraph run");
-  ZtextParagraph* shaped_paragraph = NULL;
-  CHECK_OK(ztextParagraphCreate(shalom, strlen(shalom), ZTEXT_ENCODING_UTF8,
-                                ZTEXT_BASE_DIRECTION_AUTO,
-                                ZTEXT_SEGMENTATION_ALL, &shaped_paragraph));
-  const ZtextShapingRun* shaped_runs =
-      ztextParagraphShapingRuns(shaped_paragraph);
+  ZtypesetParagraph* shaped_paragraph = NULL;
+  CHECK_OK(ztypesetParagraphCreate(shalom, strlen(shalom),
+           ZTYPESET_ENCODING_UTF8,
+                                ZTYPESET_BASE_DIRECTION_AUTO,
+                                ZTYPESET_SEGMENTATION_ALL, &shaped_paragraph));
+  const ZtypesetShapingRun* shaped_runs =
+      ztypesetParagraphShapingRuns(shaped_paragraph);
   const size_t shaped_run_count =
-      ztextParagraphShapingRunCount(shaped_paragraph);
+      ztypesetParagraphShapingRunCount(shaped_paragraph);
   CHECK(shaped_run_count == 1u, "expected one run, got %zu",
         shaped_run_count);
   if (shaped_runs != NULL && shaped_run_count == 1u) {
-    ZtextShapeParams run_params;
+    ZtypesetShapeParams run_params;
     memset(&run_params, 0, sizeof(run_params));
-    CHECK_OK(ztextShaperShapeRun(shaper, face, shaped_paragraph,
+    CHECK_OK(ztypesetShaperShapeRun(shaper, face, shaped_paragraph,
                                  &shaped_runs[0], &run_params));
-    CHECK(ztextShaperGlyphCount(shaper) == 4u,
+    CHECK(ztypesetShaperGlyphCount(shaper) == 4u,
           "the same four glyphs, from the paragraph");
-    CHECK(ztextShaperDirection(shaper) == ZTEXT_DIRECTION_RTL,
+    CHECK(ztypesetShaperDirection(shaper) == ZTYPESET_DIRECTION_RTL,
           "the run's odd level should decide the direction");
 
-    // The run carries direction and script; a ZtextShapeParams that carries
+    // The run carries direction and script; a ZtypesetShapeParams that carries
     // them too is refused rather than quietly losing to one of them.
-    run_params.direction = ZTEXT_DIRECTION_RTL;
-    CHECK(ztextShaperShapeRun(shaper, face, shaped_paragraph, &shaped_runs[0],
-                              &run_params) == ZTEXT_RESULT_INVALID_ARGUMENT,
+    run_params.direction = ZTYPESET_DIRECTION_RTL;
+    CHECK(ztypesetShaperShapeRun(shaper, face, shaped_paragraph,
+          &shaped_runs[0],
+                              &run_params) == ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a direction in the params should be refused");
-    run_params.direction = ZTEXT_DIRECTION_AUTO;
-    run_params.script = ZTEXT_TAG('H', 'e', 'b', 'r');
-    CHECK(ztextShaperShapeRun(shaper, face, shaped_paragraph, &shaped_runs[0],
-                              &run_params) == ZTEXT_RESULT_INVALID_ARGUMENT,
+    run_params.direction = ZTYPESET_DIRECTION_AUTO;
+    run_params.script = ZTYPESET_TAG('H', 'e', 'b', 'r');
+    CHECK(ztypesetShaperShapeRun(shaper, face, shaped_paragraph,
+          &shaped_runs[0],
+                              &run_params) == ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a script in the params should be refused");
 
     // And a run nobody produced cannot reach outside the paragraph.
-    ZtextShapingRun forged = shaped_runs[0];
+    ZtypesetShapingRun forged = shaped_runs[0];
     forged.length = 999u;
     memset(&run_params, 0, sizeof(run_params));
-    CHECK(ztextShaperShapeRun(shaper, face, shaped_paragraph, &forged,
-                              &run_params) == ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetShaperShapeRun(shaper, face, shaped_paragraph, &forged,
+                              &run_params) == ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a run past the end of the paragraph should be refused");
   }
-  ztextParagraphDestroy(shaped_paragraph);
+  ztypesetParagraphDestroy(shaped_paragraph);
 
   // The refusals above cleared the shaper, as every failed shape does. Put
   // the run back so what follows rasterises the glyphs it was written for.
-  CHECK_OK(ztextShaperShape(shaper, face, shalom, strlen(shalom),
-                            ZTEXT_ENCODING_UTF8, 0, strlen(shalom), &params));
-  glyphs = ztextShaperGlyphs(shaper);
+  CHECK_OK(ztypesetShaperShape(shaper, face, shalom, strlen(shalom),
+                            ZTYPESET_ENCODING_UTF8, 0, strlen(shalom),
+                                                              &params));
+  glyphs = ztypesetShaperGlyphs(shaper);
 
   phase("raster");
   // Rasterise.
   if (glyphs != NULL && glyph_count > 0) {
-    ZtextGlyphBitmap bitmap;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_NORMAL,
+    ZtypesetGlyphBitmap bitmap;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_A8,
+    ZTYPESET_HINTING_NORMAL,
                                   0, 0, &bitmap));
     CHECK(bitmap.width > 0 && bitmap.height > 0,
           "a letter should rasterise to a non-empty bitmap");
@@ -911,14 +925,15 @@ int main(int argc, char** argv) {
     // The bytes say what they are. A8 coverage and an SDF are both one byte
     // per pixel, so a consumer that remembers the wrong mode gets a picture
     // rather than an error.
-    CHECK(bitmap.format == ZTEXT_BITMAP_FORMAT_A8,
+    CHECK(bitmap.format == ZTYPESET_BITMAP_FORMAT_A8,
           "an A8 render should report A8, got %d", (int)bitmap.format);
 
-    ZtextGlyphBitmap field;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_SDF, ZTEXT_HINTING_NONE, 0,
+    ZtypesetGlyphBitmap field;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_SDF,
+    ZTYPESET_HINTING_NONE, 0,
                                   0, &field));
-    CHECK(field.format == ZTEXT_BITMAP_FORMAT_SDF,
+    CHECK(field.format == ZTYPESET_BITMAP_FORMAT_SDF,
           "an SDF render should report SDF, got %d", (int)field.format);
 
     // Light hinting, which is the AUTOHINTER and nothing else for a
@@ -927,22 +942,24 @@ int main(int argc, char** argv) {
     // belongs in this function specifically because this function is the one
     // that counts every byte in and out: the autohinter's coverage pass builds
     // a HarfBuzz buffer and interns the host locale's language tag, which is a
-    // process-lifetime allocation like the other four ztextWarmup touches.
+    // process-lifetime allocation like the other four ztypesetWarmup touches.
     // Without a light render here, that byte count never met the path that
     // makes it.
-    ZtextGlyphBitmap hinted;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_LIGHT, 0,
+    ZtypesetGlyphBitmap hinted;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_A8,
+    ZTYPESET_HINTING_LIGHT, 0,
                                   0, &hinted));
     CHECK(hinted.width > 0 && hinted.height > 0,
           "a light-hinted letter should rasterise to a non-empty bitmap");
 
     // Subpixel offset: a half-pixel shift must not crash and must still
-    // rasterise to ink, exercising ztextFaceRenderGlyph's new parameters from
-    // C directly rather than only through the Zig wrapper.
-    ZtextGlyphBitmap shifted;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_NORMAL,
+    // rasterise to ink, exercising ztypesetFaceRenderGlyph's new parameters
+    // from C directly rather than only through the Zig wrapper.
+    ZtypesetGlyphBitmap shifted;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_A8,
+    ZTYPESET_HINTING_NORMAL,
                                   32, 0, &shifted));
     CHECK(shifted.width > 0 && shifted.height > 0,
           "an offset render should still produce a non-empty bitmap");
@@ -954,10 +971,11 @@ int main(int argc, char** argv) {
   if (glyphs != NULL && glyph_count > 0) {
     OutlineCounts counts;
     memset(&counts, 0, sizeof(counts));
-    ZtextOutlineFuncs outline_funcs = {countMoveTo,  countLineTo, countConicTo,
+    ZtypesetOutlineFuncs outline_funcs = {countMoveTo,  countLineTo,
+    countConicTo,
                                        countCubicTo, countClose,  &counts};
-    CHECK_OK(ztextFaceDecomposeOutline(face, glyphs[0].glyph_id,
-                                       ZTEXT_HINTING_NONE, &outline_funcs));
+    CHECK_OK(ztypesetFaceDecomposeOutline(face, glyphs[0].glyph_id,
+                                       ZTYPESET_HINTING_NONE, &outline_funcs));
     CHECK(counts.move_to > 0, "a letter's outline should have a contour");
     CHECK(counts.move_to == counts.close,
           "every contour opened should be closed exactly once");
@@ -966,23 +984,25 @@ int main(int argc, char** argv) {
   phase("subpixel");
   // Three samples per pixel, and the pixel dimensions still in pixels.
   if (glyphs != NULL && glyph_count > 0) {
-    CHECK(ztextBitmapFormatChannels(ZTEXT_BITMAP_FORMAT_A8) == 1u,
+    CHECK(ztypesetBitmapFormatChannels(ZTYPESET_BITMAP_FORMAT_A8) == 1u,
           "A8 should be one byte per pixel");
-    CHECK(ztextBitmapFormatChannels(ZTEXT_BITMAP_FORMAT_LCD) == 3u,
+    CHECK(ztypesetBitmapFormatChannels(ZTYPESET_BITMAP_FORMAT_LCD) == 3u,
           "LCD should be three bytes per pixel");
 
-    ZtextGlyphBitmap grey;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_A8, ZTEXT_HINTING_NONE, 0,
+    ZtypesetGlyphBitmap grey;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_A8,
+    ZTYPESET_HINTING_NONE, 0,
                                   0, &grey));
     const uint32_t grey_width = grey.width;
     const uint32_t grey_height = grey.height;
 
-    ZtextGlyphBitmap lcd;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_LCD, ZTEXT_HINTING_NONE, 0,
+    ZtypesetGlyphBitmap lcd;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_LCD,
+    ZTYPESET_HINTING_NONE, 0,
                                   0, &lcd));
-    CHECK(lcd.format == ZTEXT_BITMAP_FORMAT_LCD,
+    CHECK(lcd.format == ZTYPESET_BITMAP_FORMAT_LCD,
           "an LCD render should say which format its bytes are in");
     CHECK(lcd.width >= grey_width && lcd.width <= grey_width + 2u,
           "an LCD bitmap's width should be in pixels, not samples");
@@ -990,11 +1010,12 @@ int main(int argc, char** argv) {
     CHECK(lcd.pitch == (int32_t)(3u * lcd.width),
           "pitch should be bytes per pixel row");
 
-    ZtextGlyphBitmap lcd_v;
-    CHECK_OK(ztextFaceRenderGlyph(face, glyphs[0].glyph_id,
-                                  ZTEXT_RENDER_MODE_LCD_V, ZTEXT_HINTING_NONE,
+    ZtypesetGlyphBitmap lcd_v;
+    CHECK_OK(ztypesetFaceRenderGlyph(face, glyphs[0].glyph_id,
+                                  ZTYPESET_RENDER_MODE_LCD_V,
+    ZTYPESET_HINTING_NONE,
                                   0, 0, &lcd_v));
-    CHECK(lcd_v.format == ZTEXT_BITMAP_FORMAT_LCD_V,
+    CHECK(lcd_v.format == ZTYPESET_BITMAP_FORMAT_LCD_V,
           "an LCD_V render should say which format its bytes are in");
     CHECK(lcd_v.height >= grey_height && lcd_v.height <= grey_height + 2u,
           "an LCD_V bitmap's height should be in pixels, not sub-rows");
@@ -1003,41 +1024,45 @@ int main(int argc, char** argv) {
   phase("transform");
   // A 2x2 map applied to the glyph image, and to no advance.
   if (glyphs != NULL && glyph_count > 0) {
-    ZtextMatrix identity;
-    CHECK_OK(ztextFaceTransform(face, &identity));
+    ZtypesetMatrix identity;
+    CHECK_OK(ztypesetFaceTransform(face, &identity));
     CHECK(identity.xx == 1.0f && identity.xy == 0.0f && identity.yx == 0.0f &&
               identity.yy == 1.0f,
           "a face should be created with the identity transform");
 
-    ZtextExtents upright;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+    ZtypesetExtents upright;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, glyphs[0].glyph_id,
+             ZTYPESET_HINTING_NONE,
                                    &upright));
 
-    ZtextMatrix wide;
+    ZtypesetMatrix wide;
     wide.xx = 2.0f;
     wide.xy = 0.0f;
     wide.yx = 0.0f;
     wide.yy = 1.0f;
-    CHECK_OK(ztextFaceSetTransform(face, &wide));
-    ZtextExtents stretched;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+    CHECK_OK(ztypesetFaceSetTransform(face, &wide));
+    ZtypesetExtents stretched;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, glyphs[0].glyph_id,
+             ZTYPESET_HINTING_NONE,
                                    &stretched));
     CHECK(stretched.x_max - stretched.x_min > upright.x_max - upright.x_min,
           "a 2x horizontal map should widen the ink");
     CHECK(stretched.x_advance == upright.x_advance,
           "a transform should leave the advance in text space");
 
-    ZtextMatrix bad;
+    ZtypesetMatrix bad;
     bad.xx = 1.0f;
     bad.xy = (float)NAN;
     bad.yx = 0.0f;
     bad.yy = 1.0f;
-    CHECK(ztextFaceSetTransform(face, &bad) == ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetFaceSetTransform(face,
+          &bad) == ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a transform that is not made of numbers should be refused");
 
-    CHECK_OK(ztextFaceSetTransform(face, NULL));
-    ZtextExtents restored;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+    CHECK_OK(ztypesetFaceSetTransform(face, NULL));
+    ZtypesetExtents restored;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, glyphs[0].glyph_id,
+             ZTYPESET_HINTING_NONE,
                                    &restored));
     CHECK(restored.x_max == upright.x_max,
           "clearing a transform should put the glyph back");
@@ -1047,77 +1072,84 @@ int main(int argc, char** argv) {
   // A pen traced round the glyph: it grows the ink and moves no advance, and
   // a cap this build does not name is refused rather than defaulted.
   if (glyphs != NULL && glyph_count > 0) {
-    ZtextStroke none;
-    CHECK_OK(ztextFaceStroke(face, &none));
+    ZtypesetStroke none;
+    CHECK_OK(ztypesetFaceStroke(face, &none));
     CHECK(none.radius == 0.0f, "a face should be created with no pen");
 
-    ZtextExtents bare;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+    ZtypesetExtents bare;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, glyphs[0].glyph_id,
+             ZTYPESET_HINTING_NONE,
                                    &bare));
 
-    ZtextStroke pen;
+    ZtypesetStroke pen;
     pen.radius = 3.0f;
     pen.miter_limit = 0.0f;
-    pen.cap = ZTEXT_LINE_CAP_BUTT;
-    pen.join = ZTEXT_LINE_JOIN_BEVEL;
-    pen.style = ZTEXT_STROKE_STYLE_BAND;
-    CHECK_OK(ztextFaceSetStroke(face, &pen));
+    pen.cap = ZTYPESET_LINE_CAP_BUTT;
+    pen.join = ZTYPESET_LINE_JOIN_BEVEL;
+    pen.style = ZTYPESET_STROKE_STYLE_BAND;
+    CHECK_OK(ztypesetFaceSetStroke(face, &pen));
 
-    ZtextStroke read_back;
-    CHECK_OK(ztextFaceStroke(face, &read_back));
-    CHECK(read_back.radius == 3.0f && read_back.join == ZTEXT_LINE_JOIN_BEVEL,
+    ZtypesetStroke read_back;
+    CHECK_OK(ztypesetFaceStroke(face, &read_back));
+    CHECK(read_back.radius == 3.0f && read_back.join ==
+          ZTYPESET_LINE_JOIN_BEVEL,
           "a pen should read back as it was set");
 
-    ZtextExtents stroked;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+    ZtypesetExtents stroked;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, glyphs[0].glyph_id,
+             ZTYPESET_HINTING_NONE,
                                    &stroked));
     CHECK(stroked.x_max > bare.x_max && stroked.x_min < bare.x_min,
           "a pen should grow the ink on both sides");
     CHECK(stroked.x_advance == bare.x_advance,
           "a pen should leave the advance alone");
 
-    ZtextStroke unnamed = pen;
-    unnamed.cap = (ZtextLineCap)99;
-    CHECK(ztextFaceSetStroke(face, &unnamed) == ZTEXT_RESULT_INVALID_ARGUMENT,
+    ZtypesetStroke unnamed = pen;
+    unnamed.cap = (ZtypesetLineCap)99;
+    CHECK(ztypesetFaceSetStroke(face,
+          &unnamed) == ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a cap this build does not name should be refused");
     unnamed = pen;
-    unnamed.style = (ZtextStrokeStyle)99;
-    CHECK(ztextFaceSetStroke(face, &unnamed) == ZTEXT_RESULT_INVALID_ARGUMENT,
+    unnamed.style = (ZtypesetStrokeStyle)99;
+    CHECK(ztypesetFaceSetStroke(face,
+          &unnamed) == ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a stroke style this build does not name should be refused");
 
-    CHECK_OK(ztextFaceSetStroke(face, NULL));
-    ZtextExtents unstroked;
-    CHECK_OK(ztextFaceGlyphExtents(face, glyphs[0].glyph_id, ZTEXT_HINTING_NONE,
+    CHECK_OK(ztypesetFaceSetStroke(face, NULL));
+    ZtypesetExtents unstroked;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, glyphs[0].glyph_id,
+             ZTYPESET_HINTING_NONE,
                                    &unstroked));
     CHECK(unstroked.x_max == bare.x_max,
           "clearing a pen should put the glyph back");
   }
 
   phase("charmaps");
-  // Which character map is selected decides what ztextFontGlyphIndex answers.
-  // FreeType selects a Unicode one when it opens the font.
+  // Which character map is selected decides what ztypesetFontGlyphIndex
+  // answers. FreeType selects a Unicode one when it opens the font.
   {
-    const uint32_t charmap_count = ztextFontCharmapCount(the_font);
+    const uint32_t charmap_count = ztypesetFontCharmapCount(the_font);
     CHECK(charmap_count >= 1u, "a font should declare at least one charmap");
-    const uint32_t active = ztextFontActiveCharmap(the_font);
-    CHECK(active != ZTEXT_CHARMAP_INDEX_NONE,
+    const uint32_t active = ztypesetFontActiveCharmap(the_font);
+    CHECK(active != ZTYPESET_CHARMAP_INDEX_NONE,
           "a font with a cmap should open with one selected");
-    ZtextCharmap map;
-    CHECK_OK(ztextFontCharmap(the_font, active, &map));
-    CHECK(map.encoding == ZTEXT_CHARMAP_UNICODE,
+    ZtypesetCharmap map;
+    CHECK_OK(ztypesetFontCharmap(the_font, active, &map));
+    CHECK(map.encoding == ZTYPESET_CHARMAP_UNICODE,
           "the map a font opens with should be a Unicode one");
-    CHECK(ztextFontCharmap(the_font, charmap_count, &map) ==
-              ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetFontCharmap(the_font, charmap_count, &map) ==
+              ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a charmap index past the end should be refused");
-    CHECK(ztextFontSelectCharmap(the_font, charmap_count) ==
-              ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetFontSelectCharmap(the_font, charmap_count) ==
+              ZTYPESET_RESULT_INVALID_ARGUMENT,
           "selecting a charmap index past the end should be refused");
-    CHECK(ztextFontSelectCharmapEncoding(the_font, ZTEXT_CHARMAP_MS_SYMBOL) ==
-              ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetFontSelectCharmapEncoding(the_font,
+          ZTYPESET_CHARMAP_MS_SYMBOL) ==
+              ZTYPESET_RESULT_INVALID_ARGUMENT,
           "selecting an encoding this font has no map for should be refused");
-    CHECK(ztextFontActiveCharmap(the_font) == active,
+    CHECK(ztypesetFontActiveCharmap(the_font) == active,
           "a refused selection should leave the selection where it was");
-    CHECK_OK(ztextFontSelectCharmap(the_font, active));
+    CHECK_OK(ztypesetFontSelectCharmap(the_font, active));
   }
 
   phase("synthetic");
@@ -1127,129 +1159,134 @@ int main(int argc, char** argv) {
     // Taken by value: the re-shape below replaces the shaper's glyph array,
     // and this phase has to keep asking about the same glyph.
     const uint32_t styled = glyphs[0].glyph_id;
-    ZtextExtents plain;
-    CHECK_OK(ztextFaceGlyphExtents(face, styled, ZTEXT_HINTING_NONE, &plain));
+    ZtypesetExtents plain;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, styled, ZTYPESET_HINTING_NONE,
+             &plain));
 
-    CHECK_OK(ztextFaceSetSyntheticBold(face, ZTEXT_SYNTHETIC_BOLD_DEFAULT));
-    ZtextExtents bold;
-    CHECK_OK(ztextFaceGlyphExtents(face, styled, ZTEXT_HINTING_NONE, &bold));
+    CHECK_OK(ztypesetFaceSetSyntheticBold(face,
+             ZTYPESET_SYNTHETIC_BOLD_DEFAULT));
+    ZtypesetExtents bold;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, styled, ZTYPESET_HINTING_NONE,
+             &bold));
     CHECK(bold.x_advance > plain.x_advance,
           "synthetic bold should widen the advance");
-    CHECK_OK(ztextFaceSetSyntheticBold(face, 0.0f));
+    CHECK_OK(ztypesetFaceSetSyntheticBold(face, 0.0f));
 
     // The half FreeType cannot reach: a shaped advance comes from HarfBuzz
     // and never passes through this face's glyph loading.
-    ZtextShapeParams bold_params;
+    ZtypesetShapeParams bold_params;
     memset(&bold_params, 0, sizeof(bold_params));
-    bold_params.direction = ZTEXT_DIRECTION_LTR;
+    bold_params.direction = ZTYPESET_DIRECTION_LTR;
     const char* bold_word = "HH";
-    CHECK_OK(ztextShaperShape(shaper, face, bold_word, strlen(bold_word),
-                              ZTEXT_ENCODING_UTF8, 0, strlen(bold_word),
+    CHECK_OK(ztypesetShaperShape(shaper, face, bold_word, strlen(bold_word),
+                              ZTYPESET_ENCODING_UTF8, 0, strlen(bold_word),
                               &bold_params));
     float plain_run = 0.0f;
-    const ZtextGlyph* run_glyphs = ztextShaperGlyphs(shaper);
-    for (size_t i = 0; i < ztextShaperGlyphCount(shaper); i++) {
+    const ZtypesetGlyph* run_glyphs = ztypesetShaperGlyphs(shaper);
+    for (size_t i = 0; i < ztypesetShaperGlyphCount(shaper); i++) {
       plain_run += run_glyphs[i].x_advance;
     }
-    CHECK_OK(ztextFaceSetSyntheticBold(face, ZTEXT_SYNTHETIC_BOLD_DEFAULT));
-    CHECK_OK(ztextShaperShape(shaper, face, bold_word, strlen(bold_word),
-                              ZTEXT_ENCODING_UTF8, 0, strlen(bold_word),
+    CHECK_OK(ztypesetFaceSetSyntheticBold(face,
+             ZTYPESET_SYNTHETIC_BOLD_DEFAULT));
+    CHECK_OK(ztypesetShaperShape(shaper, face, bold_word, strlen(bold_word),
+                              ZTYPESET_ENCODING_UTF8, 0, strlen(bold_word),
                               &bold_params));
     float bold_run = 0.0f;
-    run_glyphs = ztextShaperGlyphs(shaper);
-    for (size_t i = 0; i < ztextShaperGlyphCount(shaper); i++) {
+    run_glyphs = ztypesetShaperGlyphs(shaper);
+    for (size_t i = 0; i < ztypesetShaperGlyphCount(shaper); i++) {
       bold_run += run_glyphs[i].x_advance;
     }
-    CHECK_OK(ztextFaceSetSyntheticBold(face, 0.0f));
+    CHECK_OK(ztypesetFaceSetSyntheticBold(face, 0.0f));
     CHECK(bold_run > plain_run,
           "synthetic bold should widen a SHAPED run's advances too");
 
     // A strength that is not a number is refused rather than cast.
-    CHECK(ztextFaceSetSyntheticBold(face, (float)INFINITY) ==
-              ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetFaceSetSyntheticBold(face, (float)INFINITY) ==
+              ZTYPESET_RESULT_INVALID_ARGUMENT,
           "an infinite strength should be refused");
-    CHECK(ztextFaceSetSyntheticOblique(face, (float)NAN) ==
-              ZTEXT_RESULT_INVALID_ARGUMENT,
+    CHECK(ztypesetFaceSetSyntheticOblique(face, (float)NAN) ==
+              ZTYPESET_RESULT_INVALID_ARGUMENT,
           "a slant that is not a number should be refused");
 
     CHECK_OK(
-        ztextFaceSetSyntheticOblique(face, ZTEXT_SYNTHETIC_OBLIQUE_DEFAULT));
-    ZtextExtents sheared;
-    CHECK_OK(ztextFaceGlyphExtents(face, styled, ZTEXT_HINTING_NONE,
+        ztypesetFaceSetSyntheticOblique(face,
+                                        ZTYPESET_SYNTHETIC_OBLIQUE_DEFAULT));
+    ZtypesetExtents sheared;
+    CHECK_OK(ztypesetFaceGlyphExtents(face, styled, ZTYPESET_HINTING_NONE,
                                    &sheared));
     CHECK(sheared.x_advance == plain.x_advance,
           "a shear should not change the advance");
     CHECK(sheared.x_max != plain.x_max || sheared.x_min != plain.x_min,
           "a shear should move the ink");
-    CHECK_OK(ztextFaceSetSyntheticOblique(face, 0.0f));
+    CHECK_OK(ztypesetFaceSetSyntheticOblique(face, 0.0f));
   }
 
   phase("bidi");
   // Bidi, with no face involved at all.
   const char* mixed = "a \xd7\xa9\xd7\x9c b";
-  ZtextParagraph* paragraph = NULL;
-  CHECK_OK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
-                                ZTEXT_BASE_DIRECTION_AUTO,
-                                ZTEXT_SEGMENTATION_ALL, &paragraph));
-  CHECK(ztextParagraphEncoding(paragraph) == ZTEXT_ENCODING_UTF8,
+  ZtypesetParagraph* paragraph = NULL;
+  CHECK_OK(ztypesetParagraphCreate(mixed, strlen(mixed), ZTYPESET_ENCODING_UTF8,
+                                ZTYPESET_BASE_DIRECTION_AUTO,
+                                ZTYPESET_SEGMENTATION_ALL, &paragraph));
+  CHECK(ztypesetParagraphEncoding(paragraph) == ZTYPESET_ENCODING_UTF8,
         "a paragraph should report the encoding it was built from");
-  CHECK(ztextParagraphBaseLevel(paragraph) == 0,
+  CHECK(ztypesetParagraphBaseLevel(paragraph) == 0,
         "a paragraph starting with Latin should resolve to an LTR base");
-  CHECK(ztextParagraphVisualRunCount(paragraph) == 3,
+  CHECK(ztypesetParagraphVisualRunCount(paragraph) == 3,
         "expected 3 visual runs, got %zu",
-        ztextParagraphVisualRunCount(paragraph));
-  CHECK(ztextParagraphScriptRunCount(paragraph) >= 2,
+        ztypesetParagraphVisualRunCount(paragraph));
+  CHECK(ztypesetParagraphScriptRunCount(paragraph) >= 2,
         "expected at least 2 script runs");
-  CHECK(ztextParagraphSegmentation(paragraph) == ZTEXT_SEGMENTATION_ALL,
+  CHECK(ztypesetParagraphSegmentation(paragraph) == ZTYPESET_SEGMENTATION_ALL,
         "a paragraph should report the passes it was asked for");
-  CHECK(ztextParagraphWordBreaks(paragraph) != NULL,
+  CHECK(ztypesetParagraphWordBreaks(paragraph) != NULL,
         "all three passes were asked for");
 
   // The same text with one pass instead of three: the arrays not asked for
   // do not exist, and nothing else about the paragraph changes.
-  ZtextParagraph* lines_only = NULL;
-  CHECK_OK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
-                                ZTEXT_BASE_DIRECTION_AUTO,
-                                ZTEXT_SEGMENTATION_LINES, &lines_only));
-  CHECK(ztextParagraphLineBreaks(lines_only) != NULL,
+  ZtypesetParagraph* lines_only = NULL;
+  CHECK_OK(ztypesetParagraphCreate(mixed, strlen(mixed), ZTYPESET_ENCODING_UTF8,
+                                ZTYPESET_BASE_DIRECTION_AUTO,
+                                ZTYPESET_SEGMENTATION_LINES, &lines_only));
+  CHECK(ztypesetParagraphLineBreaks(lines_only) != NULL,
         "the pass that was asked for should have an array");
-  CHECK(ztextParagraphGraphemeBreaks(lines_only) == NULL,
+  CHECK(ztypesetParagraphGraphemeBreaks(lines_only) == NULL,
         "a pass not asked for should have no array");
-  CHECK(ztextParagraphWordBreaks(lines_only) == NULL,
+  CHECK(ztypesetParagraphWordBreaks(lines_only) == NULL,
         "a pass not asked for should have no array");
-  CHECK(ztextParagraphVisualRunCount(lines_only) ==
-            ztextParagraphVisualRunCount(paragraph),
+  CHECK(ztypesetParagraphVisualRunCount(lines_only) ==
+            ztypesetParagraphVisualRunCount(paragraph),
         "segmentation should not change the bidi analysis");
-  ztextParagraphDestroy(lines_only);
+  ztypesetParagraphDestroy(lines_only);
 
   // A bit this build has no name for is refused rather than ignored.
-  ZtextParagraph* unnamed = NULL;
-  CHECK(ztextParagraphCreate(mixed, strlen(mixed), ZTEXT_ENCODING_UTF8,
-                             ZTEXT_BASE_DIRECTION_AUTO, 0x8u,
-                             &unnamed) == ZTEXT_RESULT_INVALID_ARGUMENT,
+  ZtypesetParagraph* unnamed = NULL;
+  CHECK(ztypesetParagraphCreate(mixed, strlen(mixed), ZTYPESET_ENCODING_UTF8,
+                             ZTYPESET_BASE_DIRECTION_AUTO, 0x8u,
+                             &unnamed) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "an unnamed segmentation bit should be refused");
 
   // And one line of it, which is where rules L1 and L2 are actually applied.
-  ZtextLine* line = NULL;
-  const size_t whole = ztextParagraphLength(paragraph);
-  CHECK_OK(ztextLineCreate(paragraph, 0, whole, &line));
-  CHECK(ztextLineOffset(line) == 0, "line offset should be as given");
-  CHECK(ztextLineVisualRunCount(line) ==
-            ztextParagraphVisualRunCount(paragraph),
+  ZtypesetLine* line = NULL;
+  const size_t whole = ztypesetParagraphLength(paragraph);
+  CHECK_OK(ztypesetLineCreate(paragraph, 0, whole, &line));
+  CHECK(ztypesetLineOffset(line) == 0, "line offset should be as given");
+  CHECK(ztypesetLineVisualRunCount(line) ==
+            ztypesetParagraphVisualRunCount(paragraph),
         "a line spanning the paragraph should agree with it");
-  CHECK(ztextLineShapingRuns(line) != NULL, "a non-empty line needs runs");
-  ztextLineDestroy(line);
+  CHECK(ztypesetLineShapingRuns(line) != NULL, "a non-empty line needs runs");
+  ztypesetLineDestroy(line);
 
   // Into a fresh handle: a refused create writes NULL to its out-parameter,
   // so reusing `line` here would drop the one above on the floor -- which is
   // what the leak count at the end of this function is for.
-  ZtextLine* rejected = NULL;
-  CHECK(ztextLineCreate(paragraph, 0, whole + 1, &rejected) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  ZtypesetLine* rejected = NULL;
+  CHECK(ztypesetLineCreate(paragraph, 0, whole + 1, &rejected) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a line past the end of the paragraph should be refused");
   CHECK(rejected == NULL, "a refused line should not write a handle");
 
-  ztextParagraphDestroy(paragraph);
+  ztypesetParagraphDestroy(paragraph);
 
   phase("encodings");
   // The same paragraph in all three encodings, which must agree about
@@ -1257,29 +1294,30 @@ int main(int argc, char** argv) {
   // 6 UTF-16 units, 6 UTF-32 units, and the same three visual runs.
   const uint16_t mixed16[] = {'a', ' ', 0x05E9, 0x05DC, ' ', 'b'};
   const uint32_t mixed32[] = {'a', ' ', 0x05E9, 0x05DC, ' ', 'b'};
-  ZtextParagraph* p16 = NULL;
-  ZtextParagraph* p32 = NULL;
-  CHECK_OK(ztextParagraphCreate(mixed16, 6, ZTEXT_ENCODING_UTF16,
-                                ZTEXT_BASE_DIRECTION_AUTO,
-                                ZTEXT_SEGMENTATION_ALL, &p16));
-  CHECK_OK(ztextParagraphCreate(mixed32, 6, ZTEXT_ENCODING_UTF32,
-                                ZTEXT_BASE_DIRECTION_AUTO,
-                                ZTEXT_SEGMENTATION_ALL, &p32));
-  CHECK(ztextParagraphEncoding(p16) == ZTEXT_ENCODING_UTF16,
+  ZtypesetParagraph* p16 = NULL;
+  ZtypesetParagraph* p32 = NULL;
+  CHECK_OK(ztypesetParagraphCreate(mixed16, 6, ZTYPESET_ENCODING_UTF16,
+                                ZTYPESET_BASE_DIRECTION_AUTO,
+                                ZTYPESET_SEGMENTATION_ALL, &p16));
+  CHECK_OK(ztypesetParagraphCreate(mixed32, 6, ZTYPESET_ENCODING_UTF32,
+                                ZTYPESET_BASE_DIRECTION_AUTO,
+                                ZTYPESET_SEGMENTATION_ALL, &p32));
+  CHECK(ztypesetParagraphEncoding(p16) == ZTYPESET_ENCODING_UTF16,
         "a UTF-16 paragraph should say so");
-  CHECK(ztextParagraphLength(p16) == 6u && ztextParagraphLength(p32) == 6u,
+  CHECK(ztypesetParagraphLength(p16) == 6u && ztypesetParagraphLength(p32) ==
+        6u,
         "lengths are in code units, so both should be 6");
-  CHECK(ztextParagraphVisualRunCount(p16) == 3u &&
-            ztextParagraphVisualRunCount(p32) == 3u,
+  CHECK(ztypesetParagraphVisualRunCount(p16) == 3u &&
+            ztypesetParagraphVisualRunCount(p32) == 3u,
         "the same text reorders the same way in every encoding");
-  CHECK(ztextParagraphBaseLevel(p16) == 0u &&
-            ztextParagraphBaseLevel(p32) == 0u,
+  CHECK(ztypesetParagraphBaseLevel(p16) == 0u &&
+            ztypesetParagraphBaseLevel(p32) == 0u,
         "the base level is a property of the text, not of its encoding");
   // The Hebrew run is units 2..4 in both, where in UTF-8 it is bytes 2..6.
-  CHECK(ztextParagraphScriptRuns(p16)[1].offset == 2u,
+  CHECK(ztypesetParagraphScriptRuns(p16)[1].offset == 2u,
         "UTF-16 offsets should be counted in UTF-16 units");
-  ztextParagraphDestroy(p16);
-  ztextParagraphDestroy(p32);
+  ztypesetParagraphDestroy(p16);
+  ztypesetParagraphDestroy(p32);
 
   phase("malformed");
   // Malformed input must be refused rather than substituted, in every
@@ -1288,60 +1326,68 @@ int main(int argc, char** argv) {
   const char bad_utf8[] = {(char)0xC3, (char)0x28, 0};
   const uint16_t bad_utf16[] = {'a', 0xD800};
   const uint32_t bad_utf32[] = {'a', 0x110000};
-  CHECK(ztextShaperShape(shaper, face, bad_utf8, 2, ZTEXT_ENCODING_UTF8, 0, 2,
-                         &params) == ZTEXT_RESULT_INVALID_TEXT,
+  CHECK(ztypesetShaperShape(shaper, face, bad_utf8, 2, ZTYPESET_ENCODING_UTF8,
+        0, 2,
+                         &params) == ZTYPESET_RESULT_INVALID_TEXT,
         "malformed UTF-8 should be refused by the shaper");
-  CHECK(ztextParagraphCreate(bad_utf8, 2, ZTEXT_ENCODING_UTF8,
-                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
-                             &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
+  CHECK(ztypesetParagraphCreate(bad_utf8, 2, ZTYPESET_ENCODING_UTF8,
+                             ZTYPESET_BASE_DIRECTION_AUTO,
+    ZTYPESET_SEGMENTATION_ALL,
+                             &paragraph) == ZTYPESET_RESULT_INVALID_TEXT,
         "malformed UTF-8 should be refused by the bidi analyser");
-  CHECK(ztextShaperShape(shaper, face, bad_utf16, 2, ZTEXT_ENCODING_UTF16, 0,
-                         2, &params) == ZTEXT_RESULT_INVALID_TEXT,
+  CHECK(ztypesetShaperShape(shaper, face, bad_utf16, 2, ZTYPESET_ENCODING_UTF16,
+        0,
+                         2, &params) == ZTYPESET_RESULT_INVALID_TEXT,
         "an unpaired surrogate should be refused by the shaper");
-  CHECK(ztextParagraphCreate(bad_utf16, 2, ZTEXT_ENCODING_UTF16,
-                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
-                             &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
+  CHECK(ztypesetParagraphCreate(bad_utf16, 2, ZTYPESET_ENCODING_UTF16,
+                             ZTYPESET_BASE_DIRECTION_AUTO,
+    ZTYPESET_SEGMENTATION_ALL,
+                             &paragraph) == ZTYPESET_RESULT_INVALID_TEXT,
         "an unpaired surrogate should be refused by the bidi analyser");
-  CHECK(ztextParagraphCreate(bad_utf32, 2, ZTEXT_ENCODING_UTF32,
-                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
-                             &paragraph) == ZTEXT_RESULT_INVALID_TEXT,
+  CHECK(ztypesetParagraphCreate(bad_utf32, 2, ZTYPESET_ENCODING_UTF32,
+                             ZTYPESET_BASE_DIRECTION_AUTO,
+    ZTYPESET_SEGMENTATION_ALL,
+                             &paragraph) == ZTYPESET_RESULT_INVALID_TEXT,
         "a value above U+10FFFF should be refused by the bidi analyser");
   // And an encoding this build does not name is an argument error rather
   // than text read as UTF-8.
-  CHECK(ztextParagraphCreate("abc", 3, (ZtextEncoding)99,
-                             ZTEXT_BASE_DIRECTION_AUTO, ZTEXT_SEGMENTATION_ALL,
-                             &paragraph) == ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetParagraphCreate("abc", 3, (ZtypesetEncoding)99,
+                             ZTYPESET_BASE_DIRECTION_AUTO,
+    ZTYPESET_SEGMENTATION_ALL,
+                             &paragraph) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "an unknown encoding should be refused");
 
   phase("count-faces");
   // Face counting: a plain TTF has exactly one face.
   uint32_t face_count = 0;
-  CHECK_OK(ztextLibraryCountFaces(library, font, font_size, &face_count));
+  CHECK_OK(ztypesetLibraryCountFaces(library, font, font_size, &face_count));
   CHECK(face_count == 1, "expected 1 face in a plain TTF, got %u", face_count);
-  CHECK(ztextLibraryCountFaces(library, font, 0, &face_count) ==
-            ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetLibraryCountFaces(library, font, 0, &face_count) ==
+            ZTYPESET_RESULT_INVALID_ARGUMENT,
         "counting faces in an empty buffer should be refused");
 
   // The SDF spread is validated rather than clamped.
-  CHECK_OK(ztextLibrarySetSdfSpread(library, 8));
-  CHECK(ztextLibrarySetSdfSpread(library, 1) == ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK_OK(ztypesetLibrarySetSdfSpread(library, 8));
+  CHECK(ztypesetLibrarySetSdfSpread(library,
+        1) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a spread below FreeType's range should be refused");
-  CHECK(ztextLibrarySetSdfSpread(library, 33) == ZTEXT_RESULT_INVALID_ARGUMENT,
+  CHECK(ztypesetLibrarySetSdfSpread(library,
+        33) == ZTYPESET_RESULT_INVALID_ARGUMENT,
         "a spread above FreeType's range should be refused");
 
   phase("null-destructors");
   // NULL handles are tolerated by every destructor.
-  ztextShaperDestroy(NULL);
-  ztextFaceDestroy(NULL);
-  ztextFontDestroy(NULL);
-  ztextLineDestroy(NULL);
-  ztextLibraryDestroy(NULL);
-  ztextParagraphDestroy(NULL);
+  ztypesetShaperDestroy(NULL);
+  ztypesetFaceDestroy(NULL);
+  ztypesetFontDestroy(NULL);
+  ztypesetLineDestroy(NULL);
+  ztypesetLibraryDestroy(NULL);
+  ztypesetParagraphDestroy(NULL);
 
-  ztextShaperDestroy(shaper);
-  ztextFaceDestroy(face);
-  ztextFontDestroy(the_font);
-  ztextLibraryDestroy(library);
+  ztypesetShaperDestroy(shaper);
+  ztypesetFaceDestroy(face);
+  ztypesetFontDestroy(the_font);
+  ztypesetLibraryDestroy(library);
 
   phase("main-teardown");
   printf("  allocations: %zu total, %zu live, %zu bytes live\n",
@@ -1351,7 +1397,7 @@ int main(int argc, char** argv) {
   CHECK(counters.live_blocks == 0, "%zu blocks leaked", counters.live_blocks);
   CHECK(counters.live_bytes == 0, "%zu bytes leaked", counters.live_bytes);
 
-  ztextSetAllocator(NULL);
+  ztypesetSetAllocator(NULL);
 
   // These install allocators of their own, so they come after the balance
   // check above rather than inside it.
@@ -1373,7 +1419,7 @@ int main(int argc, char** argv) {
   // is what a host's allocator normally hands back.
   phase("injection-sweep");
   if (runInjectionSweep(font, font_size, 0) != 0) failures++;
-  ztextSetAllocator(NULL);
+  ztypesetSetAllocator(NULL);
 
   phase("done");
   free(font);
