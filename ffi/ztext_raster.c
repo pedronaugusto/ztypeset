@@ -608,7 +608,7 @@ ZtextResult ztextFaceRenderGlyph(ZtextFace* face, uint32_t glyph_id,
                          ((mode == ZTEXT_RENDER_MODE_LCD_V) ? channels : 1u));
   out->left = slot->bitmap_left;
   out->top = slot->bitmap_top;
-  out->x_advance = (float)slot->advance.x / 64.0f;
+  out->x_advance = ztextFrom266(slot->advance.x);
   return ZTEXT_RESULT_OK;
 }
 
@@ -625,11 +625,11 @@ ZtextResult ztextFaceGlyphExtents(ZtextFace* face, uint32_t glyph_id,
   // horiBearingY is the distance from the baseline to the TOP of the ink, so
   // the bottom is that minus the height.
   const FT_Glyph_Metrics* metrics = &face->font->ft->glyph->metrics;
-  out->x_min = (float)metrics->horiBearingX / 64.0f;
-  out->x_max = (float)(metrics->horiBearingX + metrics->width) / 64.0f;
-  out->y_max = (float)metrics->horiBearingY / 64.0f;
-  out->y_min = (float)(metrics->horiBearingY - metrics->height) / 64.0f;
-  out->x_advance = (float)metrics->horiAdvance / 64.0f;
+  out->x_min = ztextFrom266(metrics->horiBearingX);
+  out->x_max = ztextFrom266(metrics->horiBearingX + metrics->width);
+  out->y_max = ztextFrom266(metrics->horiBearingY);
+  out->y_min = ztextFrom266(metrics->horiBearingY - metrics->height);
+  out->x_advance = ztextFrom266(metrics->horiAdvance);
   out->y_advance = 0.0f;
   return ZTEXT_RESULT_OK;
 }

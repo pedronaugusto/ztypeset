@@ -433,6 +433,32 @@ const cxx_base_other = [_][]const u8{ "-std=c++17", "-fno-exceptions", "-fno-rtt
 
 const c_base = [_][]const u8{"-std=c11"};
 
+/// Warnings, as errors, for the C ztext WROTE -- never for the C it vendors.
+///
+/// The two cannot share a flag list. libs/ is pristine upstream and stays
+/// that way: FreeType, HarfBuzz, SheenBidi and libunibreak are compiled with
+/// whatever their authors chose to leave warning, and turning ztext's
+/// standards into build failures for their code would either break the build
+/// or force a local patch, which is the one thing the vendor rules forbid.
+///
+/// So these apply to ffi/*.c and to the C test translation units, and to
+/// nothing else. Without them ztext's own C was the only code in the
+/// repository whose warnings nobody had to read: -Wall and -Wextra were never
+/// passed, so an unused parameter, a signed/unsigned comparison or a missing
+/// field initialiser in a ztext source compiled silently.
+///
+/// -Wno-unused-parameter is the one exception, and it is upstream's shape
+/// rather than ztext's: a callback matching a FreeType or HarfBuzz function
+/// pointer takes the parameters that signature has, whether or not this
+/// implementation reads them, and every one of those would otherwise need a
+/// (void) cast that says nothing.
+const ztext_warnings = [_][]const u8{
+    "-Wall",
+    "-Wextra",
+    "-Werror",
+    "-Wno-unused-parameter",
+};
+
 /// Applied only to a shared build; see the comment at its use site.
 const visibility_flags = [_][]const u8{ "-fvisibility=hidden", "-DZTEXT_SHARED", "-DZTEXT_BUILD" };
 
@@ -494,6 +520,17 @@ pub fn build(b: *std.Build) void {
         &(c_base ++ freetype_defines ++ visibility_flags)
     else
         &(c_base ++ freetype_defines);
+
+    // The same flags plus ztext's own warning settings. Used for ffi/*.c and
+    // for the C tests; never for anything under libs/.
+    const ztext_c_flags: []const []const u8 = if (shared_elf)
+        &(c_base ++ freetype_defines ++ visibility_flags ++ ztext_warnings)
+    else
+        &(c_base ++ freetype_defines ++ ztext_warnings);
+
+    // A C test links the installed library and includes only ffi/ztext.h, so
+    // it needs the warnings without any of FreeType's build-time defines.
+    const c_test_flags: []const []const u8 = &(c_base ++ ztext_warnings);
 
     // SheenBidi wants no FreeType defines, but does want the visibility flag:
     // its SB_PUBLIC is empty outside Windows, so hiding actually takes effect
@@ -651,7 +688,7 @@ pub fn build(b: *std.Build) void {
     // where they turn ZTEXT_API into an explicit default-visibility marker.
     lib.root_module.addCSourceFiles(.{
         .files = &ztext_sources,
-        .flags = c_flags,
+        .flags = ztext_c_flags,
     });
     lib.root_module.sanitize_c = sanitize;
     lib.root_module.linkLibrary(freetype);
@@ -762,7 +799,7 @@ pub fn build(b: *std.Build) void {
     c_smoke.root_module.addIncludePath(b.path("ffi"));
     c_smoke.root_module.addCSourceFile(.{
         .file = b.path("tests/c_smoke.c"),
-        .flags = &.{"-std=c11"},
+        .flags = c_test_flags,
     });
     c_smoke.root_module.linkLibrary(lib);
 
@@ -811,7 +848,7 @@ pub fn build(b: *std.Build) void {
     bench.root_module.addIncludePath(b.path("ffi"));
     bench.root_module.addCSourceFile(.{
         .file = b.path("tests/bench.c"),
-        .flags = &.{"-std=c11"},
+        .flags = c_test_flags,
     });
     bench.root_module.linkLibrary(lib);
 
@@ -832,7 +869,7 @@ pub fn build(b: *std.Build) void {
     null_sweep.root_module.addIncludePath(b.path("ffi"));
     null_sweep.root_module.addCSourceFile(.{
         .file = b.path("tests/null_sweep.c"),
-        .flags = &.{"-std=c11"},
+        .flags = c_test_flags,
     });
     null_sweep.root_module.linkLibrary(lib);
 
@@ -867,11 +904,11 @@ pub fn build(b: *std.Build) void {
     c_internal.root_module.addIncludePath(b.path("libs/libunibreak/src"));
     c_internal.root_module.addCSourceFiles(.{
         .files = &ztext_sources,
-        .flags = c_flags,
+        .flags = ztext_c_flags,
     });
     c_internal.root_module.addCSourceFile(.{
         .file = b.path("tests/c_internal.c"),
-        .flags = c_flags,
+        .flags = ztext_c_flags,
     });
     c_internal.root_module.linkLibrary(freetype);
     c_internal.root_module.linkLibrary(harfbuzz);

@@ -160,6 +160,33 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **libunibreak's three initialisers are called.** `init_linebreak`,
+  `init_wordbreak` and `init_graphemebreak` are what its headers ask a caller
+  to run before `set_*breaks_*`, and ztext had never run them. In 7.0.0 all
+  three are empty, which is precisely why the omission was invisible -- and
+  why it is fixed rather than documented: upstream may give them a body in any
+  release, and a version that started interning a table there would charge
+  that allocation to whichever host allocator happened to be installed at the
+  first paragraph. That is the defect the five HarfBuzz warm-up calls exist to
+  prevent, arriving silently on a routine re-vendor. They go in `ztextWarmup`,
+  which is where a process pays its one-time costs on purpose.
+
+- **26.6 fixed point converts to pixels in one place.** `(float)x / 64.0f` was
+  written out at **26** sites across three translation units, four of them per
+  glyph in the shaping loop. `ztextFrom266` is the one home, multiplying by an
+  exactly representable reciprocal rather than dividing -- the same value for
+  every finite input, and four multiplies instead of four divides per glyph in
+  an unoptimised build. `ci/measurements.sh --check` greps for the divisor.
+
+- **ztext's own C compiles with `-Wall -Wextra -Werror`.** It never had, so
+  ztext's C was the only code here whose warnings nobody had to read. The flag
+  list is separate from the one `libs/` is built with and always will be:
+  turning ztext's standards into build failures for four upstream projects
+  would mean patching them locally, which the vendor rules forbid. The C test
+  translation units get the same treatment. Clean at zero warnings on
+  x86_64-windows-gnu the first time it was run, which is a statement about how
+  much this found, not about how little it is worth having.
+
 - **Every handle goes to its `*Destroy` exactly once, and the header no
   longer suggests two of them are exempt.** `ztextLibraryDestroy` and
   `ztextFontDestroy` open with `if (h == NULL || h->destroy_requested)

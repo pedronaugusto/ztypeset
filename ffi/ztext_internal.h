@@ -118,6 +118,29 @@ uint64_t ztextNextGeneration(void);
 /// round or clamp differently.
 int32_t ztextToFixed266(float pixels);
 
+/// 26.6 fixed point to pixels: the inverse of ztextToFixed266, and the one
+/// place that conversion is written.
+///
+/// It was open-coded as `(float)x / 64.0f` at twenty-six sites across three
+/// translation units, four of them per glyph in the shaping loop. That is one
+/// home per site for a conversion the library performs everywhere, and the
+/// count is what makes it worth a function rather than a habit.
+///
+/// Multiplication by the reciprocal rather than division, and NOT an accuracy
+/// trade: 64 is a power of two, so 1/64 is exactly representable and the
+/// product is the same value the quotient would round to, for every finite
+/// input. What it buys is that an unoptimised build -- Debug, where ztext's
+/// own sanitiser runs -- does four multiplies per glyph instead of four
+/// divides.
+///
+/// int64_t rather than int32_t because FreeType's FT_Pos is a long: the
+/// callers hand over metrics straight out of an FT_Size, and narrowing them
+/// here would put a truncation in the one place that is supposed to remove
+/// the arithmetic from the call sites.
+static inline float ztextFrom266(int64_t fixed) {
+  return (float)fixed * (1.0f / 64.0f);
+}
+
 //===----------------------------------------------------------------------===//
 // Face activation
 //===----------------------------------------------------------------------===//
