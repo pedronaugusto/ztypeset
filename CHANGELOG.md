@@ -217,6 +217,14 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **Two mutation cases expected a count the gate had stopped printing.**
+  Adding README.md as the fourth version home changed the failure line from
+  "the three version homes disagree" to "the four", and the two cases that
+  plant a version mismatch still quoted the old wording -- so both would have
+  reported a caught mutation as a hole in the suite. A verdict string that
+  repeats a number is a copy of that number; they match on the part of the
+  sentence that says what went wrong and nothing on how many.
+
 - **The C tests read a font in one place, and the msvc ABI builds again.**
   `-Wall -Wextra -Werror` on ztext's own C is correct on the gnu ABI and was
   a build failure on the msvc one: Microsoft's UCRT marks ISO C's `fopen`

@@ -1129,7 +1129,7 @@ GUARD_CMD=(ci/measurements.sh --check)
 
 case_ "a version bump that reached three of its four homes" \
   build.zig.zon \
-  "the three version homes disagree" \
+  "version homes disagree" \
   '.version = "0.2.0",' \
   '.version = "0.3.0",'
 
@@ -1138,7 +1138,7 @@ case_ "a version bump that reached three of its four homes" \
 # check that silently stops checking is worse than no check.
 case_ "the changelog heading the gate reads by shape" \
   CHANGELOG.md \
-  "the three version homes disagree" \
+  "version homes disagree" \
   '## 0.2.0' \
   '## v0.2.0'
 
