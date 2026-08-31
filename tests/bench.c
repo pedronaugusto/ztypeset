@@ -20,6 +20,7 @@
 #include <time.h>
 
 #include "ztext.h"
+#include "ztext_test_io.h"
 
 static size_t live_bytes;
 static size_t peak_bytes;
@@ -52,16 +53,12 @@ int main(int argc, char** argv) {
     printf("usage: %s <font.ttf>\n", argv[0]);
     return 2;
   }
-  FILE* file = fopen(argv[1], "rb");
-  if (file == NULL) return 2;
-  fseek(file, 0, SEEK_END);
-  long file_size = ftell(file);
-  fseek(file, 0, SEEK_SET);
-  unsigned char* font = (unsigned char*)malloc((size_t)file_size);
-  if (font == NULL || fread(font, 1, (size_t)file_size, file) != (size_t)file_size) {
+  size_t font_size = 0;
+  unsigned char* font = ztextTestReadFile(argv[1], &font_size);
+  if (font == NULL) {
+    printf("could not read %s\n", argv[1]);
     return 2;
   }
-  fclose(file);
 
   ZtextAllocator allocator = {benchAllocate, NULL, benchDeallocate, NULL};
   ztextSetAllocator(&allocator);
@@ -71,7 +68,7 @@ int main(int argc, char** argv) {
   ZtextFace* face = NULL;
   ZtextShaper* shaper = NULL;
   if (ztextLibraryCreate(&library) != ZTEXT_RESULT_OK) return 1;
-  if (ztextFontCreateFromMemory(library, font, (size_t)file_size, 0,
+  if (ztextFontCreateFromMemory(library, font, font_size, 0,
                                 &the_font) != ZTEXT_RESULT_OK) {
     return 1;
   }
@@ -287,7 +284,7 @@ int main(int argc, char** argv) {
   // The font on its own, paid once however many sizes follow.
   const size_t before_font = live_bytes;
   ZtextFont* measured = NULL;
-  ztextFontCreateFromMemory(library, font, (size_t)file_size, 0, &measured);
+  ztextFontCreateFromMemory(library, font, font_size, 0, &measured);
   ZtextFace* faces[4];
   ztextFaceCreate(measured, 0, sizes[0], &faces[0]);
   ztextShaperShape(shaper, faces[0], sentence, sentence_length,
@@ -335,7 +332,7 @@ int main(int argc, char** argv) {
   for (size_t i = 0; i < 4; i++) {
     collapsed[i] = NULL;
     collapsed_faces[i] = NULL;
-    ztextFontCreateFromMemory(library, font, (size_t)file_size, 0,
+    ztextFontCreateFromMemory(library, font, font_size, 0,
                               &collapsed[i]);
     ztextFaceCreate(collapsed[i], 0, sizes[i], &collapsed_faces[i]);
     ztextShaperShape(shaper, collapsed_faces[i], sentence,

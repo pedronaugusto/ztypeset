@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "ztext.h"
+#include "ztext_test_io.h"
 
 static int failures = 0;
 
@@ -301,25 +302,17 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  FILE* file = fopen(argv[1], "rb");
-  if (file == NULL) {
-    printf("  FAIL could not open %s\n", argv[1]);
-    return 2;
-  }
-  fseek(file, 0, SEEK_END);
-  const long size = ftell(file);
-  rewind(file);
-  unsigned char* bytes = (unsigned char*)malloc((size_t)size);
-  if (bytes == NULL || fread(bytes, 1, (size_t)size, file) != (size_t)size) {
+  size_t font_bytes = 0;
+  unsigned char* bytes = ztextTestReadFile(argv[1], &font_bytes);
+  if (bytes == NULL) {
     printf("  FAIL could not read %s\n", argv[1]);
     return 2;
   }
-  fclose(file);
 
-  REFUSES_OUT(ztextFontCreateFromMemory(library, bytes, (size_t)size, 0, NULL));
-  REFUSES(ztextFontCreateFromMemory(library, NULL, (size_t)size, 0, &font));
+  REFUSES_OUT(ztextFontCreateFromMemory(library, bytes, font_bytes, 0, NULL));
+  REFUSES(ztextFontCreateFromMemory(library, NULL, font_bytes, 0, &font));
   REFUSES(ztextFontCreateFromMemory(library, bytes, 0, 0, &font));
-  if (ztextFontCreateFromMemory(library, bytes, (size_t)size, 0, &font) !=
+  if (ztextFontCreateFromMemory(library, bytes, font_bytes, 0, &font) !=
       ZTEXT_RESULT_OK) {
     printf("  FAIL could not create a font\n");
     return 1;

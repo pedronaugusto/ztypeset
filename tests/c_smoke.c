@@ -25,6 +25,7 @@
 #endif
 
 #include "ztext.h"
+#include "ztext_test_io.h"
 
 /// Exit code this test uses when the process faults. Distinct from 1 (a
 /// check failed) and from 2 (it could not start), so a harness can tell a
@@ -553,36 +554,6 @@ static int runInjectionSweep(const unsigned char* font, size_t font_size,
 }
 
 //===----------------------------------------------------------------------===//
-
-static unsigned char* readFile(const char* path, size_t* size_out) {
-  FILE* file = fopen(path, "rb");
-  if (file == NULL) return NULL;
-  if (fseek(file, 0, SEEK_END) != 0) {
-    fclose(file);
-    return NULL;
-  }
-  long size = ftell(file);
-  if (size <= 0) {
-    fclose(file);
-    return NULL;
-  }
-  rewind(file);
-  unsigned char* buffer = (unsigned char*)malloc((size_t)size);
-  if (buffer == NULL) {
-    fclose(file);
-    return NULL;
-  }
-  const size_t read = fread(buffer, 1, (size_t)size, file);
-  fclose(file);
-  if (read != (size_t)size) {
-    free(buffer);
-    return NULL;
-  }
-  *size_out = read;
-  return buffer;
-}
-
-//===----------------------------------------------------------------------===//
 // Outline decomposition: a callback context that just counts events, so the
 // smoke test proves the C callback shape works without a real path renderer.
 //===----------------------------------------------------------------------===//
@@ -645,7 +616,7 @@ int main(int argc, char** argv) {
   }
 
   size_t font_size = 0;
-  unsigned char* font = readFile(argv[1], &font_size);
+  unsigned char* font = ztextTestReadFile(argv[1], &font_size);
   if (font == NULL) {
     printf("could not read %s\n", argv[1]);
     return 2;
