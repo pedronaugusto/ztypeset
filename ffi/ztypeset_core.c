@@ -1,5 +1,5 @@
 //===----------------------------------------------------------------------===//
-// ztext -- allocation, versions, results, and the small shared helpers.
+// ztypeset -- allocation, versions, results, and the small shared helpers.
 //===----------------------------------------------------------------------===//
 
 #include <stdio.h>
@@ -9,7 +9,7 @@
 
 #include <stdatomic.h>
 
-#include "ztext_internal.h"
+#include "ztypeset_internal.h"
 
 //===----------------------------------------------------------------------===//
 // The allocator registry
@@ -17,7 +17,7 @@
 // A block must be freed through the allocator that made it. FreeType,
 // HarfBuzz and SheenBidi all free with a bare pointer and none of them
 // remembers where a block came from, so the only place that knowledge can
-// live is ztext.
+// live is ztypeset.
 //
 // It could be a rule in a comment. It was, and the comment was not true:
 // HarfBuzz's seam is compile-time and therefore process-wide, so an
@@ -26,21 +26,21 @@
 // of the same font went back to the right one. One handle, two heaps, and
 // nothing that could tell you.
 //
-// So ztext does not ask. Every allocator ever installed is kept in a
+// So ztypeset does not ask. Every allocator ever installed is kept in a
 // registry, each block records the INDEX of the one that made it, and every
 // free and every grow is routed back to that entry rather than to whatever
 // is installed at the time. The rule is not enforced by discipline; it is
 // not expressible any other way.
 //
-// What that costs: one ZtextAllocator per DISTINCT allocator ever installed
+// What that costs: one ZtypesetAllocator per DISTINCT allocator ever installed
 // (installing the same one twice reuses its entry), allocated with malloc
 // and never freed, because it has to outlive the last block it issued. That
-// is the only allocation ztext makes outside the installed allocator, it is
+// is the only allocation ztypeset makes outside the installed allocator, it is
 // bounded by how many allocators the host installs, and it is at most a few
 // dozen bytes each. Nothing else escapes the seam.
 //
 // What it buys: swapping the process-wide allocator with live handles is
-// safe rather than undefined, ztextResetAllocator has a precondition a host
+// safe rather than undefined, ztypesetResetAllocator has a precondition a host
 // can actually meet, and the upstreams' process-lifetime caches -- HarfBuzz's
 // language intern table is the one that grows -- survive a swap instead of
 // being reallocated onto a heap that never issued them.
@@ -49,8 +49,8 @@
 static void* defaultAllocate(void* user, size_t size, size_t alignment) {
   (void)user;
   (void)alignment;
-  // malloc guarantees ZTEXT_DEFAULT_ALIGN and no more, so
-  // ztextAllocFrom refuses anything stricter before reaching any allocator.
+  // malloc guarantees ZTYPESET_DEFAULT_ALIGN and no more, so
+  // ztypesetAllocFrom refuses anything stricter before reaching any allocator.
   return malloc(size);
 }
 
@@ -71,8 +71,8 @@ static void defaultDeallocate(void* user, void* block, size_t size,
 }
 
 /// Registry entry 0, which exists before anything runs so that an allocation
-/// made before the first ztextSetAllocator still has an allocator to name.
-static ZtextAllocator g_default_entry = {
+/// made before the first ztypesetSetAllocator still has an allocator to name.
+static ZtypesetAllocator g_default_entry = {
     defaultAllocate,
     defaultReallocate,
     defaultDeallocate,
@@ -83,48 +83,50 @@ static ZtextAllocator g_default_entry = {
 /// The ARRAY moves when it grows; the ENTRIES must not, because FreeType
 /// holds one for the life of an FT_Library and a block header names one by
 /// index for the life of the block.
-static ZtextAllocator* g_bootstrap[1] = {&g_default_entry};
-static ZtextAllocator** g_registry = g_bootstrap;
+static ZtypesetAllocator* g_bootstrap[1] = {&g_default_entry};
+static ZtypesetAllocator** g_registry = g_bootstrap;
 static size_t g_registry_count = 1u;
 static size_t g_registry_capacity = 1u;
 
-/// Which entry ztextAlloc hands new blocks to. Never invalid: it is only ever
-/// set to an index the registry already holds.
-static ZtextAllocatorId g_installed = ZTEXT_ALLOCATOR_DEFAULT;
+/// Which entry ztypesetAlloc hands new blocks to. Never invalid: it is only
+/// ever set to an index the registry already holds.
+static ZtypesetAllocatorId g_installed = ZTYPESET_ALLOCATOR_DEFAULT;
 
-static bool sameAllocator(const ZtextAllocator* a, const ZtextAllocator* b) {
-  // Field by field rather than memcmp: ZtextAllocator has no padding on any
-  // ABI ztext builds for, but comparing padding bytes that were never written
-  // would be undefined behaviour if one ever appeared.
+static bool sameAllocator(const ZtypesetAllocator* a,
+                          const ZtypesetAllocator* b) {
+  // Field by field rather than memcmp: ZtypesetAllocator has no padding on any
+  // ABI ztypeset builds for, but comparing padding bytes that were never
+  // written would be undefined behaviour if one ever appeared.
   return a->allocate == b->allocate && a->reallocate == b->reallocate &&
          a->deallocate == b->deallocate && a->user == b->user;
 }
 
 /// Index of `alloc` in the registry, adding it if it is not already there.
-/// Returns ZTEXT_ALLOCATOR_NONE if the registry itself could not grow.
-static ZtextAllocatorId registerAllocator(const ZtextAllocator* alloc) {
+/// Returns ZTYPESET_ALLOCATOR_NONE if the registry itself could not grow.
+static ZtypesetAllocatorId registerAllocator(const ZtypesetAllocator* alloc) {
   for (size_t i = 0u; i < g_registry_count; i++) {
-    if (sameAllocator(g_registry[i], alloc)) return (ZtextAllocatorId)i;
+    if (sameAllocator(g_registry[i], alloc)) return (ZtypesetAllocatorId)i;
   }
   // The registry outlives every allocator it describes, so it cannot be
   // allocated through one of them. See the section header.
-  ZtextAllocator* entry = (ZtextAllocator*)malloc(sizeof(ZtextAllocator));
-  if (entry == NULL) return ZTEXT_ALLOCATOR_NONE;
+  ZtypesetAllocator* entry =
+      (ZtypesetAllocator*)malloc(sizeof(ZtypesetAllocator));
+  if (entry == NULL) return ZTYPESET_ALLOCATOR_NONE;
   *entry = *alloc;
 
   if (g_registry_count == g_registry_capacity) {
-    if (g_registry_capacity > SIZE_MAX / (2u * sizeof(ZtextAllocator*))) {
+    if (g_registry_capacity > SIZE_MAX / (2u * sizeof(ZtypesetAllocator*))) {
       free(entry);
-      return ZTEXT_ALLOCATOR_NONE;
+      return ZTYPESET_ALLOCATOR_NONE;
     }
     const size_t capacity = g_registry_capacity * 2u;
-    ZtextAllocator** grown =
-        (ZtextAllocator**)malloc(capacity * sizeof(ZtextAllocator*));
+    ZtypesetAllocator** grown =
+        (ZtypesetAllocator**)malloc(capacity * sizeof(ZtypesetAllocator*));
     if (grown == NULL) {
       free(entry);
-      return ZTEXT_ALLOCATOR_NONE;
+      return ZTYPESET_ALLOCATOR_NONE;
     }
-    memcpy(grown, g_registry, g_registry_count * sizeof(ZtextAllocator*));
+    memcpy(grown, g_registry, g_registry_count * sizeof(ZtypesetAllocator*));
     // The bootstrap array is static storage, so only a grown one is freed.
     if (g_registry != g_bootstrap) free(g_registry);
     g_registry = grown;
@@ -132,70 +134,70 @@ static ZtextAllocatorId registerAllocator(const ZtextAllocator* alloc) {
   }
 
   g_registry[g_registry_count] = entry;
-  return (ZtextAllocatorId)(g_registry_count++);
+  return (ZtypesetAllocatorId)(g_registry_count++);
 }
 
-ZtextAllocatorId ztextInstalledAllocator(void) { return g_installed; }
+ZtypesetAllocatorId ztypesetInstalledAllocator(void) { return g_installed; }
 
-ZtextResult ztextSetAllocator(const ZtextAllocator* alloc) {
+ZtypesetResult ztypesetSetAllocator(const ZtypesetAllocator* alloc) {
   if (alloc == NULL) {
-    g_installed = ZTEXT_ALLOCATOR_DEFAULT;
-    return ZTEXT_RESULT_OK;
+    g_installed = ZTYPESET_ALLOCATOR_DEFAULT;
+    return ZTYPESET_RESULT_OK;
   }
   // Refuse a partial allocator without disturbing the working one: a host that
   // mis-fills the struct should keep running on what it had, not lose its heap.
   if (alloc->allocate == NULL || alloc->deallocate == NULL) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
   // The upstreams' process-lifetime caches, populated HERE -- before the swap,
   // so they are charged to whatever was installed before this call and never
   // to the allocator arriving now. They are never freed, so an allocator that
-  // issued one can never balance, and "call ztextWarmup first" was a rule a
+  // issued one can never balance, and "call ztypesetWarmup first" was a rule a
   // host had to know and could only discover by not following it. Idempotent,
   // and free after the first time.
-  ztextWarmup();
-  const ZtextAllocatorId id = registerAllocator(alloc);
+  ztypesetWarmup();
+  const ZtypesetAllocatorId id = registerAllocator(alloc);
   // Same bargain: a registry that could not grow leaves the installed
   // allocator exactly as it was.
-  if (id == ZTEXT_ALLOCATOR_NONE) return ZTEXT_RESULT_OUT_OF_MEMORY;
+  if (id == ZTYPESET_ALLOCATOR_NONE) return ZTYPESET_RESULT_OUT_OF_MEMORY;
   g_installed = id;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 //===----------------------------------------------------------------------===//
 // Block header
 //
 // FreeType, HarfBuzz and SheenBidi all free with a bare pointer. Recording the
-// allocation ahead of the payload is what lets ztext hand a size and alignment
-// back to the host -- see the allocator section of ztext.h for why that is
-// worth the sixteen bytes -- and it is where the allocator index lives, which
-// is what makes the routing above possible.
+// allocation ahead of the payload is what lets ztypeset hand a size and
+// alignment back to the host -- see the allocator section of ztypeset.h for why
+// that is worth the sixteen bytes -- and it is where the allocator index lives,
+// which is what makes the routing above possible.
 //===----------------------------------------------------------------------===//
 
-typedef struct ZtextBlockHeader {
+typedef struct ZtypesetBlockHeader {
   /// Total bytes obtained from the host, prefix included.
   size_t total_size;
   /// Registry index of the allocator that issued this block.
-  ZtextAllocatorId allocator;
+  ZtypesetAllocatorId allocator;
   /// Alignment the host was asked for, which is at least the payload's. A
-  /// power of two, never above ZTEXT_DEFAULT_ALIGN, so 32 bits are ample and
+  /// power of two, never above ZTYPESET_DEFAULT_ALIGN, so 32 bits are ample and
   /// the header stays sixteen bytes on a 64-bit target: the allocator index
   /// costs no memory at all.
   uint32_t backing_alignment;
-} ZtextBlockHeader;
+} ZtypesetBlockHeader;
 
 /// A header that cannot be one. Both fields have a small, known range, so a
-/// prefix that was overrun, freed twice or never written by ztext at all
+/// prefix that was overrun, freed twice or never written by ztypeset at all
 /// usually fails one of them -- for free, on every deallocation.
 ///
 /// It is a corruption DETECTOR, not a checksum: sixteen bytes leave no room
 /// for a magic number, so a garbage header whose two fields happen to be in
 /// range still passes. See README.
-static bool headerIsPlausible(const ZtextBlockHeader* header) {
+static bool headerIsPlausible(const ZtypesetBlockHeader* header) {
   if (header->allocator >= g_registry_count) return false;
   const uint32_t alignment = header->backing_alignment;
   if (alignment == 0u || (alignment & (alignment - 1u)) != 0u) return false;
-  if (alignment > (uint32_t)ZTEXT_DEFAULT_ALIGN) return false;
+  if (alignment > (uint32_t)ZTYPESET_DEFAULT_ALIGN) return false;
   return header->total_size > alignment;
 }
 
@@ -210,26 +212,27 @@ static bool headerIsPlausible(const ZtextBlockHeader* header) {
 /// every platform and no crash reporter, dialog or atexit handler runs on top
 /// of a heap whose state is already in question.
 ///
-/// Reaching this is a defect in ztext, not in a host: since every free is
+/// Reaching this is a defect in ztypeset, not in a host: since every free is
 /// ROUTED through the block's own allocator, a host cannot cause it by
-/// swapping allocators. What it catches is ztext allocating a block from one
+/// swapping allocators. What it catches is ztypeset allocating a block from one
 /// place and releasing it from another -- the mutation ci/check-guards.sh
 /// plants to prove this is live.
-static void ztextAllocatorFatal(const char* why, const void* block,
+static void ztypesetAllocatorFatal(const char* why, const void* block,
                                 unsigned long recorded, unsigned long asked) {
   fprintf(stderr,
-          "ztext: FATAL: %s (block %p, recorded allocator %lu, released "
-          "through allocator %lu). A ztext block is freed through the "
-          "allocator that made it; see ztextSetAllocator in ztext.h. The "
+          "ztypeset: FATAL: %s (block %p, recorded allocator %lu, released "
+          "through allocator %lu). A ztypeset block is freed through the "
+          "allocator that made it; see ztypesetSetAllocator in ztypeset.h. The "
           "block was NOT freed and the process is stopping before the wrong "
           "heap is corrupted.\n",
           why, block, recorded, asked);
   fflush(stderr);
-  _Exit(ZTEXT_EXIT_ALLOCATOR_MISMATCH);
+  _Exit(ZTYPESET_EXIT_ALLOCATOR_MISMATCH);
 }
 
 static size_t backingAlignment(size_t alignment) {
-  return alignment < _Alignof(ZtextBlockHeader) ? _Alignof(ZtextBlockHeader)
+  return alignment < _Alignof(ZtypesetBlockHeader) ?
+                              _Alignof(ZtypesetBlockHeader)
                                                 : alignment;
 }
 
@@ -242,53 +245,55 @@ static size_t backingAlignment(size_t alignment) {
 /// rounding to `requested` -- so only the backing alignment needs
 /// storing.
 static size_t prefixSize(size_t alignment) {
-  size_t minimum = sizeof(ZtextBlockHeader);
-  if (minimum < _Alignof(ZtextBlockHeader)) {
-    minimum = _Alignof(ZtextBlockHeader);
+  size_t minimum = sizeof(ZtypesetBlockHeader);
+  if (minimum < _Alignof(ZtypesetBlockHeader)) {
+    minimum = _Alignof(ZtypesetBlockHeader);
   }
   return (minimum + alignment - 1u) & ~(alignment - 1u);
 }
 
-static ZtextBlockHeader* headerOf(void* payload) {
-  return (ZtextBlockHeader*)((unsigned char*)payload -
-                            sizeof(ZtextBlockHeader));
+static ZtypesetBlockHeader* headerOf(void* payload) {
+  return (ZtypesetBlockHeader*)((unsigned char*)payload -
+                            sizeof(ZtypesetBlockHeader));
 }
 
 /// Payload bytes of a live block -- what the caller asked for, rounded up to
 /// at least one. Used by the SheenBidi seam to find the tail a grow added.
-static size_t ztextBlockSize(void* payload) {
-  const ZtextBlockHeader* header = headerOf(payload);
+static size_t ztypesetBlockSize(void* payload) {
+  const ZtypesetBlockHeader* header = headerOf(payload);
   return header->total_size - prefixSize(header->backing_alignment);
 }
 
 /// The header of a live block, with both checks already made: the header has
 /// to be plausible, and if the caller named an allocator it has to be the one
 /// on record.
-static ZtextBlockHeader* checkedHeaderOf(void* block, ZtextAllocatorId asked) {
-  ZtextBlockHeader* header = headerOf(block);
+static ZtypesetBlockHeader* checkedHeaderOf(void* block,
+                                            ZtypesetAllocatorId asked) {
+  ZtypesetBlockHeader* header = headerOf(block);
   if (!headerIsPlausible(header)) {
-    ztextAllocatorFatal("the block prefix is not a ztext allocation header",
+    ztypesetAllocatorFatal("the block prefix is not a ztypeset "
+                           "allocation header",
                         block, (unsigned long)header->allocator,
                         (unsigned long)asked);
   }
-  if (asked != ZTEXT_ALLOCATOR_ANY && header->allocator != asked) {
-    ztextAllocatorFatal("a block was released through the wrong allocator",
+  if (asked != ZTYPESET_ALLOCATOR_ANY && header->allocator != asked) {
+    ztypesetAllocatorFatal("a block was released through the wrong allocator",
                         block, (unsigned long)header->allocator,
                         (unsigned long)asked);
   }
   return header;
 }
 
-void* ztextAllocFrom(ZtextAllocatorId id, size_t size, size_t alignment) {
+void* ztypesetAllocFrom(ZtypesetAllocatorId id, size_t size, size_t alignment) {
   if (alignment == 0u || (alignment & (alignment - 1u)) != 0u) return NULL;
-  // Nothing in ztext, FreeType, HarfBuzz or SheenBidi asks for more than
+  // Nothing in ztypeset, FreeType, HarfBuzz or SheenBidi asks for more than
   // malloc's guarantee, and a host allocator is only ever promised that much.
   // Refusing here means an over-aligned request can never be served
   // under-aligned by the default allocator -- it fails visibly instead.
-  if (alignment > ZTEXT_DEFAULT_ALIGN) return NULL;
+  if (alignment > ZTYPESET_DEFAULT_ALIGN) return NULL;
   if (size == 0u) size = 1u;  // A distinct, freeable pointer, never NULL.
 
-  const ZtextAllocator* allocator = g_registry[id];
+  const ZtypesetAllocator* allocator = g_registry[id];
   const size_t backing = backingAlignment(alignment);
   const size_t prefix = prefixSize(backing);
   if (size > SIZE_MAX - prefix) return NULL;
@@ -299,45 +304,45 @@ void* ztextAllocFrom(ZtextAllocatorId id, size_t size, size_t alignment) {
   if (base == NULL) return NULL;
 
   unsigned char* payload = base + prefix;
-  ZtextBlockHeader* header = headerOf(payload);
+  ZtypesetBlockHeader* header = headerOf(payload);
   header->total_size = total;
   header->allocator = id;
   header->backing_alignment = (uint32_t)backing;
   return payload;
 }
 
-void* ztextCalloc(size_t count, size_t size) {
+void* ztypesetCalloc(size_t count, size_t size) {
   if (count != 0u && size > SIZE_MAX / count) return NULL;
   const size_t total = count * size;
-  void* block = ztextAlloc(total, ZTEXT_DEFAULT_ALIGN);
+  void* block = ztypesetAlloc(total, ZTYPESET_DEFAULT_ALIGN);
   if (block != NULL) memset(block, 0, total == 0u ? 1u : total);
   return block;
 }
 
-void ztextFreeFrom(ZtextAllocatorId id, void* block) {
+void ztypesetFreeFrom(ZtypesetAllocatorId id, void* block) {
   if (block == NULL) return;
-  const ZtextBlockHeader* header = checkedHeaderOf(block, id);
-  const ZtextAllocator* allocator = g_registry[header->allocator];
+  const ZtypesetBlockHeader* header = checkedHeaderOf(block, id);
+  const ZtypesetAllocator* allocator = g_registry[header->allocator];
   const size_t total = header->total_size;
   const size_t backing = header->backing_alignment;
   unsigned char* base = (unsigned char*)block - prefixSize(backing);
   allocator->deallocate(allocator->user, base, total, backing);
 }
 
-void* ztextReallocFrom(ZtextAllocatorId id, void* block, size_t new_size,
+void* ztypesetReallocFrom(ZtypesetAllocatorId id, void* block, size_t new_size,
                        size_t alignment) {
   if (block == NULL) {
-    return ztextAllocFrom(id == ZTEXT_ALLOCATOR_ANY ? g_installed : id,
+    return ztypesetAllocFrom(id == ZTYPESET_ALLOCATOR_ANY ? g_installed : id,
                           new_size, alignment);
   }
   if (new_size == 0u) new_size = 1u;
 
-  const ZtextBlockHeader* header = checkedHeaderOf(block, id);
+  const ZtypesetBlockHeader* header = checkedHeaderOf(block, id);
   // The block keeps its own allocator across a grow. Handing a grown block to
   // a different heap than the one that issued it is the same defect as
   // freeing it there, one step later.
-  const ZtextAllocatorId owner = header->allocator;
-  const ZtextAllocator* allocator = g_registry[owner];
+  const ZtypesetAllocatorId owner = header->allocator;
+  const ZtypesetAllocator* allocator = g_registry[owner];
   const size_t old_total = header->total_size;
   const size_t backing = header->backing_alignment;
   const size_t prefix = prefixSize(backing);
@@ -351,7 +356,7 @@ void* ztextReallocFrom(ZtextAllocatorId id, void* block, size_t new_size,
         allocator->user, base, old_total, new_total, backing);
     if (moved != NULL) {
       unsigned char* payload = moved + prefix;
-      ZtextBlockHeader* moved_header = headerOf(payload);
+      ZtypesetBlockHeader* moved_header = headerOf(payload);
       moved_header->total_size = new_total;
       moved_header->allocator = owner;
       moved_header->backing_alignment = (uint32_t)backing;
@@ -377,11 +382,11 @@ void* ztextReallocFrom(ZtextAllocatorId id, void* block, size_t new_size,
 
   // Allocated from the block's OWN allocator, with the alignment the block
   // actually has rather than the one the caller happened to pass this time.
-  void* fresh = ztextAllocFrom(owner, new_size, backing);
+  void* fresh = ztypesetAllocFrom(owner, new_size, backing);
   if (fresh == NULL) return NULL;
   const size_t old_payload = old_total - prefix;
   memcpy(fresh, block, old_payload < new_size ? old_payload : new_size);
-  ztextFreeFrom(owner, block);
+  ztypesetFreeFrom(owner, block);
   return fresh;
 }
 
@@ -394,41 +399,43 @@ void* ztextReallocFrom(ZtextAllocatorId id, void* block, size_t new_size,
 // freed through the entry it recorded, whatever is installed now.
 //===----------------------------------------------------------------------===//
 
-void* ztextAlloc(size_t size, size_t alignment) {
-  return ztextAllocFrom(g_installed, size, alignment);
+void* ztypesetAlloc(size_t size, size_t alignment) {
+  return ztypesetAllocFrom(g_installed, size, alignment);
 }
 
-void* ztextRealloc(void* block, size_t new_size, size_t alignment) {
-  return ztextReallocFrom(ZTEXT_ALLOCATOR_ANY, block, new_size, alignment);
+void* ztypesetRealloc(void* block, size_t new_size, size_t alignment) {
+  return ztypesetReallocFrom(ZTYPESET_ALLOCATOR_ANY, block, new_size,
+                             alignment);
 }
 
-void ztextFree(void* block) { ztextFreeFrom(ZTEXT_ALLOCATOR_ANY, block); }
+void ztypesetFree(void* block) { ztypesetFreeFrom(ZTYPESET_ALLOCATOR_ANY,
+                  block); }
 
-ZtextAllocatorId ztextAllocatorOf(void* block) {
-  return checkedHeaderOf(block, ZTEXT_ALLOCATOR_ANY)->allocator;
+ZtypesetAllocatorId ztypesetAllocatorOf(void* block) {
+  return checkedHeaderOf(block, ZTYPESET_ALLOCATOR_ANY)->allocator;
 }
 
 //===----------------------------------------------------------------------===//
 // FreeType's seam
 //
 // Per FT_Library. FreeType hands every allocation call the FT_Memory it was
-// built with, and ztext points that at the owning library, so a library's
+// built with, and ztypeset points that at the owning library, so a library's
 // FreeType memory names the library's allocator entry rather than whatever is
 // installed at the time.
 //===----------------------------------------------------------------------===//
 
-static ZtextAllocatorId memoryAllocator(FT_Memory memory) {
-  return ((const ZtextLibrary*)memory->user)->allocator;
+static ZtypesetAllocatorId memoryAllocator(FT_Memory memory) {
+  return ((const ZtypesetLibrary*)memory->user)->allocator;
 }
 
 static void* ftAlloc(FT_Memory memory, long size) {
   if (size <= 0) return NULL;
-  return ztextAllocFrom(memoryAllocator(memory), (size_t)size,
-                        ZTEXT_DEFAULT_ALIGN);
+  return ztypesetAllocFrom(memoryAllocator(memory), (size_t)size,
+                        ZTYPESET_DEFAULT_ALIGN);
 }
 
 static void ftFree(FT_Memory memory, void* block) {
-  ztextFreeFrom(memoryAllocator(memory), block);
+  ztypesetFreeFrom(memoryAllocator(memory), block);
 }
 
 static void* ftRealloc(FT_Memory memory, long cur_size, long new_size,
@@ -436,20 +443,21 @@ static void* ftRealloc(FT_Memory memory, long cur_size, long new_size,
   // cur_size is FreeType's idea of the old size; the block header is
   // authoritative, so it is deliberately ignored rather than trusted.
   (void)cur_size;
-  const ZtextAllocatorId id = memoryAllocator(memory);
+  const ZtypesetAllocatorId id = memoryAllocator(memory);
   if (new_size <= 0) {
-    ztextFreeFrom(id, block);
+    ztypesetFreeFrom(id, block);
     return NULL;
   }
-  return ztextReallocFrom(id, block, (size_t)new_size, ZTEXT_DEFAULT_ALIGN);
+  return ztypesetReallocFrom(id, block, (size_t)new_size,
+                             ZTYPESET_DEFAULT_ALIGN);
 }
 
-void ztextInitFtMemory(ZtextLibrary* library) {
-  // Recorded now, so a later ztextSetAllocator cannot redirect the memory this
-  // library has already handed to FreeType -- and, because the registry entry
-  // outlives the allocator, the library stays able to free its own blocks even
-  // after the host has moved on.
-  library->allocator = ztextInstalledAllocator();
+void ztypesetInitFtMemory(ZtypesetLibrary* library) {
+  // Recorded now, so a later ztypesetSetAllocator cannot redirect the memory
+  // this library has already handed to FreeType -- and, because the registry
+  // entry outlives the allocator, the library stays able to free its own blocks
+  // even after the host has moved on.
+  library->allocator = ztypesetInstalledAllocator();
   library->memory.user = library;
   library->memory.alloc = ftAlloc;
   library->memory.free = ftFree;
@@ -461,27 +469,27 @@ void ztextInitFtMemory(ZtextLibrary* library) {
 //
 // build.zig defines hb_malloc_impl and friends to these names, which is what
 // makes HarfBuzz define HB_CUSTOM_MALLOC for itself and declare them extern
-// "C". Compile-time, and therefore process-wide -- see ztext.h.
+// "C". Compile-time, and therefore process-wide -- see ztypeset.h.
 //===----------------------------------------------------------------------===//
 
-void* ztext_hb_malloc(size_t size);
-void* ztext_hb_calloc(size_t count, size_t size);
-void* ztext_hb_realloc(void* block, size_t size);
-void ztext_hb_free(void* block);
+void* ztypeset_hb_malloc(size_t size);
+void* ztypeset_hb_calloc(size_t count, size_t size);
+void* ztypeset_hb_realloc(void* block, size_t size);
+void ztypeset_hb_free(void* block);
 
-void* ztext_hb_malloc(size_t size) {
-  return ztextAlloc(size, ZTEXT_DEFAULT_ALIGN);
+void* ztypeset_hb_malloc(size_t size) {
+  return ztypesetAlloc(size, ZTYPESET_DEFAULT_ALIGN);
 }
 
-void* ztext_hb_calloc(size_t count, size_t size) {
-  return ztextCalloc(count, size);
+void* ztypeset_hb_calloc(size_t count, size_t size) {
+  return ztypesetCalloc(count, size);
 }
 
-void* ztext_hb_realloc(void* block, size_t size) {
-  return ztextRealloc(block, size, ZTEXT_DEFAULT_ALIGN);
+void* ztypeset_hb_realloc(void* block, size_t size) {
+  return ztypesetRealloc(block, size, ZTYPESET_DEFAULT_ALIGN);
 }
 
-void ztext_hb_free(void* block) { ztextFree(block); }
+void ztypeset_hb_free(void* block) { ztypesetFree(block); }
 
 //===----------------------------------------------------------------------===//
 // SheenBidi's seam
@@ -502,14 +510,14 @@ void ztext_hb_free(void* block) { ztextFree(block); }
 /// after it is refused. Filling every SheenBidi block with 0xCD made that
 /// 60 out of 60; zeroing made it 0 out of 400.
 ///
-/// ztext may not patch a vendored upstream (see UPSTREAM.md), and there is no
-/// route to that failure path that does not go through this function, so the
-/// containment belongs here: SheenBidi never sees a byte ztext has not
+/// ztypeset may not patch a vendored upstream (see UPSTREAM.md), and there is
+/// no route to that failure path that does not go through this function, so the
+/// containment belongs here: SheenBidi never sees a byte ztypeset has not
 /// written. tests/c_smoke.c's poisoning arm holds it -- remove the memset and
 /// that arm dies every run rather than one run in fifty.
 static void* sbAllocateBlock(SBUInteger size, void* info) {
   (void)info;
-  void* block = ztextAlloc((size_t)size, ZTEXT_DEFAULT_ALIGN);
+  void* block = ztypesetAlloc((size_t)size, ZTYPESET_DEFAULT_ALIGN);
   if (block != NULL) memset(block, 0, (size_t)size);
   return block;
 }
@@ -519,8 +527,9 @@ static void* sbAllocateBlock(SBUInteger size, void* info) {
 /// everything past that is fresh memory it may read before writing.
 static void* sbReallocateBlock(void* pointer, SBUInteger new_size, void* info) {
   (void)info;
-  const size_t old_payload = pointer == NULL ? 0u : ztextBlockSize(pointer);
-  void* block = ztextRealloc(pointer, (size_t)new_size, ZTEXT_DEFAULT_ALIGN);
+  const size_t old_payload = pointer == NULL ? 0u : ztypesetBlockSize(pointer);
+  void* block = ztypesetRealloc(pointer, (size_t)new_size,
+                                ZTYPESET_DEFAULT_ALIGN);
   if (block != NULL && (size_t)new_size > old_payload) {
     memset((unsigned char*)block + old_payload, 0,
            (size_t)new_size - old_payload);
@@ -530,15 +539,16 @@ static void* sbReallocateBlock(void* pointer, SBUInteger new_size, void* info) {
 
 static void sbDeallocateBlock(void* pointer, void* info) {
   (void)info;
-  ztextFree(pointer);
+  ztypesetFree(pointer);
 }
 
 /// Created once and kept for the life of the process.
 ///
-/// SBAllocatorSetDefault stores the pointer without retaining it, so ztext has
-/// to hold the reference. One instance is enough for any number of
-/// ztextSetAllocator calls, because the three functions above dispatch through
-/// whichever allocator is installed at the time rather than capturing one.
+/// SBAllocatorSetDefault stores the pointer without retaining it, so ztypeset
+/// has to hold the reference. One instance is enough for any number of
+/// ztypesetSetAllocator calls, because the three functions above dispatch
+/// through whichever allocator is installed at the time rather than capturing
+/// one.
 static SBAllocatorRef g_sb_allocator = NULL;
 
 /// What makes "once" true when several threads ask at the same instant.
@@ -550,13 +560,13 @@ static SBAllocatorRef g_sb_allocator = NULL;
 /// g_sb_allocator is written before the state moves to 2 and never again, so
 /// the release/acquire pair on the state is what publishes it. A plain
 /// check-then-set stood here, and the paragraph and shaping paths both reach
-/// it -- on threads the header explicitly invites, since a ZtextLibrary per
+/// it -- on threads the header explicitly invites, since a ZtypesetLibrary per
 /// thread is what it asks for.
 static _Atomic int g_sb_install_state = 0;
 
-ZtextResult ztextInstallSheenbidiAllocator(void) {
+ZtypesetResult ztypesetInstallSheenbidiAllocator(void) {
   if (atomic_load_explicit(&g_sb_install_state, memory_order_acquire) == 2) {
-    return ZTEXT_RESULT_OK;
+    return ZTYPESET_RESULT_OK;
   }
 
   int idle = 0;
@@ -576,8 +586,8 @@ ZtextResult ztextInstallSheenbidiAllocator(void) {
            1) {
     }
     return atomic_load_explicit(&g_sb_install_state, memory_order_acquire) == 2
-               ? ZTEXT_RESULT_OK
-               : ZTEXT_RESULT_OUT_OF_MEMORY;
+               ? ZTYPESET_RESULT_OK
+               : ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   SBAllocatorProtocol protocol;
@@ -597,13 +607,13 @@ ZtextResult ztextInstallSheenbidiAllocator(void) {
     // state machine that latched on failure would turn one bad moment into a
     // library that can never lay out bidirectional text again.
     atomic_store_explicit(&g_sb_install_state, 0, memory_order_release);
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   g_sb_allocator = made;
   SBAllocatorSetDefault(made);
   atomic_store_explicit(&g_sb_install_state, 2, memory_order_release);
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 //===----------------------------------------------------------------------===//
@@ -614,24 +624,25 @@ static uint32_t pack(uint32_t major, uint32_t minor, uint32_t patch) {
   return (major << 16) | (minor << 8) | patch;
 }
 
-uint32_t ztextVersion(void) {
-  return pack(ZTEXT_VERSION_MAJOR, ZTEXT_VERSION_MINOR, ZTEXT_VERSION_PATCH);
+uint32_t ztypesetVersion(void) {
+  return pack(ZTYPESET_VERSION_MAJOR, ZTYPESET_VERSION_MINOR,
+              ZTYPESET_VERSION_PATCH);
 }
 
-uint32_t ztextFreetypeVersion(void) {
+uint32_t ztypesetFreetypeVersion(void) {
   return pack(FREETYPE_MAJOR, FREETYPE_MINOR, FREETYPE_PATCH);
 }
 
-uint32_t ztextHarfbuzzVersion(void) {
+uint32_t ztypesetHarfbuzzVersion(void) {
   return pack(HB_VERSION_MAJOR, HB_VERSION_MINOR, HB_VERSION_MICRO);
 }
 
-uint32_t ztextSheenbidiVersion(void) {
+uint32_t ztypesetSheenbidiVersion(void) {
   return pack(SHEENBIDI_VERSION_MAJOR, SHEENBIDI_VERSION_MINOR,
               SHEENBIDI_VERSION_PATCH);
 }
 
-uint32_t ztextUnibreakVersion(void) {
+uint32_t ztypesetUnibreakVersion(void) {
   // libunibreak packs its version as one hex integer -- 0x0700 for 7.0 -- so
   // unlike the other three there are no separate major/minor macros to read.
   return pack((unsigned)((UNIBREAK_VERSION >> 8) & 0xFFu),
@@ -642,29 +653,29 @@ uint32_t ztextUnibreakVersion(void) {
 // Results
 //===----------------------------------------------------------------------===//
 
-const char* ztextResultName(ZtextResult result) {
+const char* ztypesetResultName(ZtypesetResult result) {
   switch (result) {
-    case ZTEXT_RESULT_OK:
+    case ZTYPESET_RESULT_OK:
       return "ok";
-    case ZTEXT_RESULT_OUT_OF_MEMORY:
+    case ZTYPESET_RESULT_OUT_OF_MEMORY:
       return "out of memory";
-    case ZTEXT_RESULT_INVALID_ARGUMENT:
+    case ZTYPESET_RESULT_INVALID_ARGUMENT:
       return "invalid argument";
-    case ZTEXT_RESULT_INVALID_TEXT:
+    case ZTYPESET_RESULT_INVALID_TEXT:
       return "text not well-formed in its encoding";
-    case ZTEXT_RESULT_BAD_FONT:
+    case ZTYPESET_RESULT_BAD_FONT:
       return "bad font";
-    case ZTEXT_RESULT_UNSUPPORTED:
+    case ZTYPESET_RESULT_UNSUPPORTED:
       return "unsupported font format";
-    case ZTEXT_RESULT_GLYPH_NOT_FOUND:
+    case ZTYPESET_RESULT_GLYPH_NOT_FOUND:
       return "glyph not found";
-    case ZTEXT_RESULT_RENDER_FAILED:
+    case ZTYPESET_RESULT_RENDER_FAILED:
       return "render failed";
-    case ZTEXT_RESULT_SHAPE_FAILED:
+    case ZTYPESET_RESULT_SHAPE_FAILED:
       return "shape failed";
-    case ZTEXT_RESULT_BIDI_FAILED:
+    case ZTYPESET_RESULT_BIDI_FAILED:
       return "bidi failed";
-    case ZTEXT_RESULT_BUFFER_TOO_SMALL:
+    case ZTYPESET_RESULT_BUFFER_TOO_SMALL:
       return "buffer too small";
   }
   // Not reachable through the enum, but a caller can cast anything into it.
@@ -675,13 +686,13 @@ const char* ztextResultName(ZtextResult result) {
 // Generations
 //===----------------------------------------------------------------------===//
 
-int32_t ztextToFixed266(float pixels) {
+int32_t ztypesetToFixed266(float pixels) {
   if (!(pixels > 0.0f) || !(pixels <= 16384.0f)) return 0;
   return (int32_t)(pixels * 64.0f + 0.5f);
 }
 
-uint64_t ztextNextGeneration(void) {
-  // Process-wide, and ztext.h tells callers to use one ZtextLibrary PER
+uint64_t ztypesetNextGeneration(void) {
+  // Process-wide, and ztypeset.h tells callers to use one ZtypesetLibrary PER
   // THREAD -- so two threads bumping this at the same instant is the usage
   // the header asks for, not an abuse of it.
   //
@@ -706,52 +717,52 @@ uint64_t ztextNextGeneration(void) {
 // Error detail
 //===----------------------------------------------------------------------===//
 
-#define ZTEXT_DETAIL_MAX 160
+#define ZTYPESET_DETAIL_MAX 160
 
-static _Thread_local char g_detail[ZTEXT_DETAIL_MAX] = {0};
+static _Thread_local char g_detail[ZTYPESET_DETAIL_MAX] = {0};
 
-void ztextSetErrorDetail(const char* detail) {
+void ztypesetSetErrorDetail(const char* detail) {
   if (detail == NULL) {
     g_detail[0] = '\0';
     return;
   }
   size_t i = 0;
-  while (i + 1u < ZTEXT_DETAIL_MAX && detail[i] != '\0') {
+  while (i + 1u < ZTYPESET_DETAIL_MAX && detail[i] != '\0') {
     g_detail[i] = detail[i];
     i++;
   }
   g_detail[i] = '\0';
 }
 
-const char* ztextLastErrorDetail(void) { return g_detail; }
+const char* ztypesetLastErrorDetail(void) { return g_detail; }
 
-ZtextResult ztextFromFtError(FT_Error error) {
-  if (error == FT_Err_Ok) return ZTEXT_RESULT_OK;
+ZtypesetResult ztypesetFromFtError(FT_Error error) {
+  if (error == FT_Err_Ok) return ZTYPESET_RESULT_OK;
 
   const char* string = FT_Error_String(error);
-  ztextSetErrorDetail(string != NULL ? string : "FreeType error");
+  ztypesetSetErrorDetail(string != NULL ? string : "FreeType error");
 
   switch (error) {
     case FT_Err_Out_Of_Memory:
-      return ZTEXT_RESULT_OUT_OF_MEMORY;
+      return ZTYPESET_RESULT_OUT_OF_MEMORY;
     case FT_Err_Invalid_Argument:
     case FT_Err_Invalid_Face_Handle:
     case FT_Err_Invalid_Size_Handle:
     case FT_Err_Invalid_Library_Handle:
-      return ZTEXT_RESULT_INVALID_ARGUMENT;
+      return ZTYPESET_RESULT_INVALID_ARGUMENT;
     case FT_Err_Invalid_Glyph_Index:
-      return ZTEXT_RESULT_GLYPH_NOT_FOUND;
+      return ZTYPESET_RESULT_GLYPH_NOT_FOUND;
     // FreeType reports "unknown file format" both for a format this build has
     // no driver for and for bytes that are not a font at all, which are worth
-    // telling apart. ztext_face.c sniffs the known-but-not-compiled formats
-    // before FreeType sees them and reports ZTEXT_RESULT_UNSUPPORTED itself, so
-    // anything reaching here really is unrecognisable.
+    // telling apart. ztypeset_face.c sniffs the known-but-not-compiled formats
+    // before FreeType sees them and reports ZTYPESET_RESULT_UNSUPPORTED itself,
+    // so anything reaching here really is unrecognisable.
     case FT_Err_Unknown_File_Format:
-      return ZTEXT_RESULT_BAD_FONT;
+      return ZTYPESET_RESULT_BAD_FONT;
     case FT_Err_Missing_Module:
-      return ZTEXT_RESULT_UNSUPPORTED;
+      return ZTYPESET_RESULT_UNSUPPORTED;
     default:
-      return ZTEXT_RESULT_BAD_FONT;
+      return ZTYPESET_RESULT_BAD_FONT;
   }
 }
 
@@ -759,18 +770,18 @@ ZtextResult ztextFromFtError(FT_Error error) {
 // Text
 //===----------------------------------------------------------------------===//
 
-size_t ztextEncodingUnitSize(ZtextEncoding encoding) {
+size_t ztypesetEncodingUnitSize(ZtypesetEncoding encoding) {
   switch (encoding) {
-    case ZTEXT_ENCODING_UTF8:
+    case ZTYPESET_ENCODING_UTF8:
       return 1u;
-    case ZTEXT_ENCODING_UTF16:
+    case ZTYPESET_ENCODING_UTF16:
       return 2u;
-    case ZTEXT_ENCODING_UTF32:
+    case ZTYPESET_ENCODING_UTF32:
       return 4u;
     default:
       // Not an encoding this build names. Reported as a size of zero rather
-      // than defaulted to one, so a caller compiled against a newer header
-      // gets ZTEXT_RESULT_INVALID_ARGUMENT instead of its text read as UTF-8.
+      // than defaulted to one, so a caller compiled against a newer header gets
+      // ZTYPESET_RESULT_INVALID_ARGUMENT instead of its text read as UTF-8.
       return 0u;
   }
 }
@@ -856,18 +867,18 @@ static bool isValidUtf32(const uint32_t* text, size_t length) {
   return true;
 }
 
-bool ztextTextIsWellFormed(const void* text, size_t length,
-                           ZtextEncoding encoding) {
+bool ztypesetTextIsWellFormed(const void* text, size_t length,
+                           ZtypesetEncoding encoding) {
   // A zero length is well-formed in every encoding, including with a NULL
   // pointer: an empty label is not a malformed one.
   if (length == 0u) return true;
   if (text == NULL) return false;
   switch (encoding) {
-    case ZTEXT_ENCODING_UTF8:
+    case ZTYPESET_ENCODING_UTF8:
       return isValidUtf8((const char*)text, length);
-    case ZTEXT_ENCODING_UTF16:
+    case ZTYPESET_ENCODING_UTF16:
       return isValidUtf16((const uint16_t*)text, length);
-    case ZTEXT_ENCODING_UTF32:
+    case ZTYPESET_ENCODING_UTF32:
       return isValidUtf32((const uint32_t*)text, length);
     default:
       return false;
@@ -900,7 +911,7 @@ static size_t decodeUtf8(const char* text, size_t length, uint32_t* out) {
   // there. The bound is kept anyway: this decodes from the same pointer the
   // validator walked, and a future caller that forgets is a read past the end.
   //
-  // `length - 1u` cannot underflow here: ztextTextDecode refuses an index at
+  // `length - 1u` cannot underflow here: ztypesetTextDecode refuses an index at
   // or past the end, so this is never entered with a length of zero. That
   // was not true before -- and an underflow turns this bound into one that
   // can never fire, which is worse than not having it.
@@ -914,8 +925,8 @@ static size_t decodeUtf8(const char* text, size_t length, uint32_t* out) {
   return extra + 1u;
 }
 
-size_t ztextTextDecode(const void* text, size_t length,
-                       ZtextEncoding encoding, size_t index, uint32_t* out) {
+size_t ztypesetTextDecode(const void* text, size_t length,
+                       ZtypesetEncoding encoding, size_t index, uint32_t* out) {
   // The one bound, for all three encodings, before the switch.
   //
   // Every branch below reads the unit at `index` before it can know anything
@@ -934,7 +945,7 @@ size_t ztextTextDecode(const void* text, size_t length,
   }
 
   switch (encoding) {
-    case ZTEXT_ENCODING_UTF16: {
+    case ZTYPESET_ENCODING_UTF16: {
       const uint16_t* units = (const uint16_t*)text;
       const uint16_t lead = units[index];
       if (lead >= 0xD800u && lead <= 0xDBFFu && index + 1u < length) {
@@ -946,30 +957,30 @@ size_t ztextTextDecode(const void* text, size_t length,
       *out = lead;
       return 1u;
     }
-    case ZTEXT_ENCODING_UTF32:
+    case ZTYPESET_ENCODING_UTF32:
       *out = ((const uint32_t*)text)[index];
       return 1u;
-    case ZTEXT_ENCODING_UTF8:
+    case ZTYPESET_ENCODING_UTF8:
     default:
       return decodeUtf8((const char*)text + index, length - index, out);
   }
 }
 
-bool ztextTextSplitsCharacter(const void* text, size_t length,
-                              ZtextEncoding encoding, size_t index) {
+bool ztypesetTextSplitsCharacter(const void* text, size_t length,
+                              ZtypesetEncoding encoding, size_t index) {
   if (index >= length) return false;
   switch (encoding) {
-    case ZTEXT_ENCODING_UTF16: {
+    case ZTYPESET_ENCODING_UTF16: {
       // Validated text has no unpaired low surrogate, so a low surrogate is
       // always the second half of a pair -- and a boundary there is inside a
       // character.
       const uint16_t unit = ((const uint16_t*)text)[index];
       return unit >= 0xDC00u && unit <= 0xDFFFu;
     }
-    case ZTEXT_ENCODING_UTF32:
+    case ZTYPESET_ENCODING_UTF32:
       // One unit, one character: no index can be inside one.
       return false;
-    case ZTEXT_ENCODING_UTF8:
+    case ZTYPESET_ENCODING_UTF8:
     default:
       return (((const unsigned char*)text)[index] & 0xC0u) == 0x80u;
   }
@@ -979,7 +990,8 @@ bool ztextTextSplitsCharacter(const void* text, size_t length,
 // Growable array
 //===----------------------------------------------------------------------===//
 
-bool ztextArrayReserve(ZtextAllocatorId owner, ZtextArray* array, size_t count,
+bool ztypesetArrayReserve(ZtypesetAllocatorId owner, ZtypesetArray* array,
+                          size_t count,
                        size_t element_size) {
   if (count <= array->capacity) return true;
 
@@ -990,8 +1002,8 @@ bool ztextArrayReserve(ZtextAllocatorId owner, ZtextArray* array, size_t count,
   }
   if (capacity > SIZE_MAX / element_size) return false;
 
-  void* grown = ztextReallocFrom(owner, array->data, capacity * element_size,
-                                 ZTEXT_DEFAULT_ALIGN);
+  void* grown = ztypesetReallocFrom(owner, array->data, capacity * element_size,
+                                 ZTYPESET_DEFAULT_ALIGN);
   if (grown == NULL) return false;
 
   array->data = grown;
@@ -999,10 +1011,10 @@ bool ztextArrayReserve(ZtextAllocatorId owner, ZtextArray* array, size_t count,
   return true;
 }
 
-void ztextArrayFree(ZtextAllocatorId owner, ZtextArray* array,
+void ztypesetArrayFree(ZtypesetAllocatorId owner, ZtypesetArray* array,
                     size_t element_size) {
   (void)element_size;
-  ztextFreeFrom(owner, array->data);
+  ztypesetFreeFrom(owner, array->data);
   array->data = NULL;
   array->count = 0u;
   array->capacity = 0u;

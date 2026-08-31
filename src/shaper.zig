@@ -60,13 +60,13 @@ pub const Shaper = struct {
 
     pub fn init() err.Error!Shaper {
         var handle: *c.Shaper = undefined;
-        try err.check(c.ztextShaperCreate(&handle));
+        try err.check(c.ztypesetShaperCreate(&handle));
         return .{ .handle = handle };
     }
 
     /// Destroys this shaper and the buffers it grew. Call it exactly once.
     pub fn deinit(self: Shaper) void {
-        c.ztextShaperDestroy(self.handle);
+        c.ztypesetShaperDestroy(self.handle);
     }
 
     /// Shapes one run with one face, one direction and one script.
@@ -92,7 +92,7 @@ pub const Shaper = struct {
     ) err.Error![]const types.Glyph {
         const view = text_mod.view(text);
         const c_params = params.toC();
-        try err.check(c.ztextShaperShape(
+        try err.check(c.ztypesetShaperShape(
             self.handle,
             target.handle,
             view.ptr,
@@ -129,7 +129,7 @@ pub const Shaper = struct {
     ) err.Error![]const types.Glyph {
         const view = text_mod.view(text);
         const c_params = params.toC();
-        try err.check(c.ztextShaperShape(
+        try err.check(c.ztypesetShaperShape(
             self.handle,
             target.handle,
             view.ptr,
@@ -160,7 +160,7 @@ pub const Shaper = struct {
         params: Params,
     ) err.Error![]const types.Glyph {
         const c_params = params.toC();
-        try err.check(c.ztextShaperShapeRun(
+        try err.check(c.ztypesetShaperShapeRun(
             self.handle,
             target.handle,
             paragraph.handle,
@@ -176,15 +176,15 @@ pub const Shaper = struct {
     /// Borrowed, and invalidated -- not just overwritten -- by the next
     /// `shape` on this shaper. Prefer the slice `shape` returns.
     pub fn glyphs(self: Shaper) []const types.Glyph {
-        const count = c.ztextShaperGlyphCount(self.handle);
+        const count = c.ztypesetShaperGlyphCount(self.handle);
         if (count == 0) return &.{};
-        const ptr = c.ztextShaperGlyphs(self.handle) orelse return &.{};
+        const ptr = c.ztypesetShaperGlyphs(self.handle) orelse return &.{};
         return ptr[0..count];
     }
 
     /// The direction actually used, which is what `.auto` resolved to.
     pub fn direction(self: Shaper) types.Direction {
-        return c.ztextShaperDirection(self.handle);
+        return c.ztypesetShaperDirection(self.handle);
     }
 
     /// Ink bounds and total advance of the last shape.
@@ -199,7 +199,7 @@ pub const Shaper = struct {
     /// than asking every frame.
     pub fn extents(self: Shaper, target: face_mod.Face) err.Error!types.Extents {
         var out: types.Extents = undefined;
-        try err.check(c.ztextShaperExtents(self.handle, target.handle, &out));
+        try err.check(c.ztypesetShaperExtents(self.handle, target.handle, &out));
         return out;
     }
 };

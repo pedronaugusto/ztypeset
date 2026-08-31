@@ -41,7 +41,7 @@ pub const Paragraph = struct {
     pub fn init(text: anytype, options: Options) err.Error!Paragraph {
         const view = text_mod.view(text);
         var handle: *c.Paragraph = undefined;
-        try err.check(c.ztextParagraphCreate(
+        try err.check(c.ztypesetParagraphCreate(
             view.ptr,
             view.len,
             view.encoding,
@@ -73,19 +73,19 @@ pub const Paragraph = struct {
     /// call that made it, and an empty break array is otherwise
     /// indistinguishable from a pass that was never run.
     pub fn segmentation(self: Paragraph) u32 {
-        return c.ztextParagraphSegmentation(self.handle);
+        return c.ztypesetParagraphSegmentation(self.handle);
     }
 
     /// Destroys this paragraph. Call it exactly once. `Line`s taken from it
     /// may outlive it and are destroyed separately.
     pub fn deinit(self: Paragraph) void {
-        c.ztextParagraphDestroy(self.handle);
+        c.ztypesetParagraphDestroy(self.handle);
     }
 
     /// Code units actually analysed, which is at most the input length --
     /// less if the text contained a paragraph separator.
     pub fn length(self: Paragraph) usize {
-        return c.ztextParagraphLength(self.handle);
+        return c.ztypesetParagraphLength(self.handle);
     }
 
     /// The encoding this paragraph was built from, which is the unit every
@@ -95,13 +95,13 @@ pub const Paragraph = struct {
     /// reading a UTF-16 paragraph's offsets as bytes indexes half a
     /// character. This is what a consumer checks against.
     pub fn encoding(self: Paragraph) types.Encoding {
-        return c.ztextParagraphEncoding(self.handle);
+        return c.ztypesetParagraphEncoding(self.handle);
     }
 
     /// Resolved base embedding level: even for left-to-right, odd for
     /// right-to-left.
     pub fn baseLevel(self: Paragraph) u8 {
-        return c.ztextParagraphBaseLevel(self.handle);
+        return c.ztypesetParagraphBaseLevel(self.handle);
     }
 
     /// Convenience over `baseLevel`, for feeding `Params.direction`.
@@ -118,31 +118,31 @@ pub const Paragraph = struct {
     pub fn levels(self: Paragraph) []const u8 {
         const len = self.length();
         if (len == 0) return &.{};
-        const ptr = c.ztextParagraphLevels(self.handle) orelse return &.{};
+        const ptr = c.ztypesetParagraphLevels(self.handle) orelse return &.{};
         return ptr[0..len];
     }
 
     /// Where a line MAY break, one entry per code unit, describing the
     /// boundary AFTER that unit.
     ///
-    /// ztext says where a break is permitted; you decide where one happens,
+    /// ztypeset says where a break is permitted; you decide where one happens,
     /// because that needs a width. The loop is: walk the non-`.none` positions,
     /// measure with `Shaper.extents` until the next would not fit, then hand
     /// the range you chose to `line`.
     pub fn lineBreaks(self: Paragraph) []const types.Break {
-        return self.breakSlice(c.ztextParagraphLineBreaks(self.handle));
+        return self.breakSlice(c.ztypesetParagraphLineBreaks(self.handle));
     }
 
     /// Grapheme cluster boundaries -- what a caret moves by and what backspace
     /// deletes. Not the same as characters: a base plus its combining marks is
     /// one grapheme, and so is an emoji joined with U+200D.
     pub fn graphemeBreaks(self: Paragraph) []const types.Break {
-        return self.breakSlice(c.ztextParagraphGraphemeBreaks(self.handle));
+        return self.breakSlice(c.ztypesetParagraphGraphemeBreaks(self.handle));
     }
 
     /// Word boundaries -- double-click selection and word-wise caret movement.
     pub fn wordBreaks(self: Paragraph) []const types.Break {
-        return self.breakSlice(c.ztextParagraphWordBreaks(self.handle));
+        return self.breakSlice(c.ztypesetParagraphWordBreaks(self.handle));
     }
 
     fn breakSlice(self: Paragraph, ptr: ?[*]const u8) []const types.Break {
@@ -155,13 +155,13 @@ pub const Paragraph = struct {
     /// The next grapheme boundary at or after `offset`, for moving a caret
     /// right. Returns `length()` at the end rather than running off it.
     pub fn nextGrapheme(self: Paragraph, offset: usize) usize {
-        return c.ztextParagraphNextGrapheme(self.handle, offset);
+        return c.ztypesetParagraphNextGrapheme(self.handle, offset);
     }
 
     /// The previous grapheme boundary before `offset`, for moving a caret
     /// left. Returns 0 at the start.
     pub fn previousGrapheme(self: Paragraph, offset: usize) usize {
-        return c.ztextParagraphPreviousGrapheme(self.handle, offset);
+        return c.ztypesetParagraphPreviousGrapheme(self.handle, offset);
     }
 
     /// Runs of one embedding level in VISUAL order: index 0 is leftmost for an
@@ -170,17 +170,17 @@ pub const Paragraph = struct {
     /// This is the paragraph laid out as ONE line, which is right for a label
     /// and wrong for anything that wraps -- see `line`.
     pub fn visualRuns(self: Paragraph) []const types.VisualRun {
-        const count = c.ztextParagraphVisualRunCount(self.handle);
+        const count = c.ztypesetParagraphVisualRunCount(self.handle);
         if (count == 0) return &.{};
-        const ptr = c.ztextParagraphVisualRuns(self.handle) orelse return &.{};
+        const ptr = c.ztypesetParagraphVisualRuns(self.handle) orelse return &.{};
         return ptr[0..count];
     }
 
     /// Runs of one script in LOGICAL order.
     pub fn scriptRuns(self: Paragraph) []const types.ScriptRun {
-        const count = c.ztextParagraphScriptRunCount(self.handle);
+        const count = c.ztypesetParagraphScriptRunCount(self.handle);
         if (count == 0) return &.{};
-        const ptr = c.ztextParagraphScriptRuns(self.handle) orelse return &.{};
+        const ptr = c.ztypesetParagraphScriptRuns(self.handle) orelse return &.{};
         return ptr[0..count];
     }
 
@@ -192,9 +192,9 @@ pub const Paragraph = struct {
     /// exposed for callers doing something else with them -- shaping straight
     /// from `visualRuns` is wrong the moment a run spans two scripts.
     pub fn shapingRuns(self: Paragraph) []const types.ShapingRun {
-        const count = c.ztextParagraphShapingRunCount(self.handle);
+        const count = c.ztypesetParagraphShapingRunCount(self.handle);
         if (count == 0) return &.{};
-        const ptr = c.ztextParagraphShapingRuns(self.handle) orelse return &.{};
+        const ptr = c.ztypesetParagraphShapingRuns(self.handle) orelse return &.{};
         return ptr[0..count];
     }
 
@@ -208,7 +208,7 @@ pub const Paragraph = struct {
     /// character, is `error.InvalidArgument`.
     pub fn line(self: Paragraph, offset: usize, len: usize) err.Error!Line {
         var handle: *c.Line = undefined;
-        try err.check(c.ztextLineCreate(self.handle, offset, len, &handle));
+        try err.check(c.ztypesetLineCreate(self.handle, offset, len, &handle));
         return .{ .handle = handle };
     }
 };
@@ -229,34 +229,34 @@ pub const Line = struct {
 
     /// Destroys this line. Call it exactly once.
     pub fn deinit(self: Line) void {
-        c.ztextLineDestroy(self.handle);
+        c.ztypesetLineDestroy(self.handle);
     }
 
     /// Code-unit offset of this line within its paragraph.
     pub fn offset(self: Line) usize {
-        return c.ztextLineOffset(self.handle);
+        return c.ztypesetLineOffset(self.handle);
     }
 
     /// Length of this line, in the paragraph's code units.
     pub fn length(self: Line) usize {
-        return c.ztextLineLength(self.handle);
+        return c.ztypesetLineLength(self.handle);
     }
 
     /// Runs of one embedding level in VISUAL order, with L1 and L2 applied
     /// over this line.
     pub fn visualRuns(self: Line) []const types.VisualRun {
-        const count = c.ztextLineVisualRunCount(self.handle);
+        const count = c.ztypesetLineVisualRunCount(self.handle);
         if (count == 0) return &.{};
-        const ptr = c.ztextLineVisualRuns(self.handle) orelse return &.{};
+        const ptr = c.ztypesetLineVisualRuns(self.handle) orelse return &.{};
         return ptr[0..count];
     }
 
     /// What to actually shape for this line: its visual runs intersected with
     /// the paragraph's script runs.
     pub fn shapingRuns(self: Line) []const types.ShapingRun {
-        const count = c.ztextLineShapingRunCount(self.handle);
+        const count = c.ztypesetLineShapingRunCount(self.handle);
         if (count == 0) return &.{};
-        const ptr = c.ztextLineShapingRuns(self.handle) orelse return &.{};
+        const ptr = c.ztypesetLineShapingRuns(self.handle) orelse return &.{};
         return ptr[0..count];
     }
 };

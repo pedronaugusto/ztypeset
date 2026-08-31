@@ -1,9 +1,9 @@
-//! Bridges a Zig `std.mem.Allocator` onto ztext's allocator seam.
+//! Bridges a Zig `std.mem.Allocator` onto ztypeset's allocator seam.
 //!
 //! This is a thinner bridge than it would otherwise be, because the C side
 //! already does the hard part. FreeType, HarfBuzz and SheenBidi all free with
 //! a bare pointer, and Zig's allocator interface needs a size and an alignment
-//! back; `ffi/ztext_core.c` records both in a header ahead of every block and
+//! back; `ffi/ztypeset_core.c` records both in a header ahead of every block and
 //! hands them to `deallocate`, so nothing here has to keep a side table or
 //! pad allocations of its own.
 //!
@@ -21,8 +21,8 @@
 //! copy of it can reach -- which is a lifetime no caller can compute, since it
 //! ends when the last block of a library it destroyed is finally freed. So
 //! `setAllocator` takes the allocator BY VALUE and keeps it in a slot of
-//! ztext's own: one per distinct allocator ever installed, allocated with
-//! malloc and never freed. That is the same bargain `ffi/ztext_core.c` makes
+//! ztypeset's own: one per distinct allocator ever installed, allocated with
+//! malloc and never freed. That is the same bargain `ffi/ztypeset_core.c` makes
 //! for its registry entries, one level up and for the same reason.
 //!
 //! A single mutable global would not do. Every captured copy would point at
@@ -60,7 +60,7 @@ fn reallocate(
     const want = std.mem.Alignment.fromByteUnits(alignment);
     // rawRemap can grow in place; when it cannot it returns null and the C
     // side falls back to allocate-copy-deallocate, which is exactly the
-    // contract ZtextAllocator.reallocate documents -- the old block stays
+    // contract ZtypesetAllocator.reallocate documents -- the old block stays
     // valid on failure.
     const moved = gpa.rawRemap(existing[0..old_size], want, new_size, @returnAddress()) orelse {
         return null;
@@ -85,7 +85,7 @@ fn deallocate(
 /// The C side copies the bridge struct -- `user` included -- into its registry
 /// and into every `Library`, and never frees an entry, because an entry has to
 /// outlive the last block it issued. `user` points at one of these, so these
-/// need the same lifetime, and ztext is the only party in a position to give
+/// need the same lifetime, and ztypeset is the only party in a position to give
 /// them one.
 var slots: std.ArrayList(*std.mem.Allocator) = .empty;
 
@@ -94,13 +94,13 @@ var slots: std.ArrayList(*std.mem.Allocator) = .empty;
 /// Unsynchronised, deliberately and not by omission: this list mirrors the C
 /// side's allocator registry, which is unsynchronised for the same reason.
 /// Installing an allocator replaces a process-wide one and is not a
-/// concurrent operation -- see "Thread safety" in `ffi/ztext.h`. A lock here
+/// concurrent operation -- see "Thread safety" in `ffi/ztypeset.h`. A lock here
 /// and none there would promise a safety the seam does not have, which is
 /// worse than the honest contract.
 fn slotFor(gpa: std.mem.Allocator) err.Error!*std.mem.Allocator {
     // Identity is the pair of pointers, because that is all a
     // std.mem.Allocator is. Installing the same allocator twice reuses its
-    // slot, exactly as installing the same ZtextAllocator twice reuses its
+    // slot, exactly as installing the same ZtypesetAllocator twice reuses its
     // registry entry on the C side.
     for (slots.items) |slot| {
         if (slot.ptr == gpa.ptr and slot.vtable == gpa.vtable) return slot;
@@ -109,7 +109,7 @@ fn slotFor(gpa: std.mem.Allocator) err.Error!*std.mem.Allocator {
     // malloc, deliberately. This has to outlive the last block the allocator
     // issued, and the only allocator still standing at that point is the C
     // runtime's -- the same reasoning, and the same choice, as the registry
-    // entry on the other side of the boundary. ztext links libc on every
+    // entry on the other side of the boundary. ztypeset links libc on every
     // target it builds for, so this is always available.
     const backing = std.heap.c_allocator;
     const slot = backing.create(std.mem.Allocator) catch
@@ -122,14 +122,14 @@ fn slotFor(gpa: std.mem.Allocator) err.Error!*std.mem.Allocator {
     return slot;
 }
 
-/// Routes every subsequent ztext allocation through `gpa`.
+/// Routes every subsequent ztypeset allocation through `gpa`.
 ///
-/// COPIED, not borrowed. ztext keeps its own copy alive for as long as any
+/// COPIED, not borrowed. ztypeset keeps its own copy alive for as long as any
 /// handle can reach it, so a temporary is fine:
 ///
 /// ```zig
 /// var gpa_state: std.heap.DebugAllocator(.{}) = .init;
-/// try ztext.setAllocator(gpa_state.allocator());
+/// try ztypeset.setAllocator(gpa_state.allocator());
 /// ```
 ///
 /// Process-wide, because HarfBuzz's seam is compile-time and cannot be
@@ -139,7 +139,7 @@ fn slotFor(gpa: std.mem.Allocator) err.Error!*std.mem.Allocator {
 /// to.
 ///
 /// Which of two installed allocators a given block comes from is stated in
-/// full beside `ztextSetAllocator` in `ffi/ztext.h`: handle-owned memory
+/// full beside `ztypesetSetAllocator` in `ffi/ztypeset.h`: handle-owned memory
 /// follows the handle, HarfBuzz's follows whatever is installed when it
 /// asks.
 pub fn setAllocator(gpa: std.mem.Allocator) err.Error!void {
@@ -150,7 +150,7 @@ pub fn setAllocator(gpa: std.mem.Allocator) err.Error!void {
         .deallocate = deallocate,
         .user = @ptrCast(slot),
     };
-    try err.check(c.ztextSetAllocator(&bridge));
+    try err.check(c.ztypesetSetAllocator(&bridge));
 }
 
 /// Restores malloc/free.
@@ -160,10 +160,10 @@ pub fn setAllocator(gpa: std.mem.Allocator) err.Error!void {
 /// that are never freed were charged to whatever was installed BEFORE
 /// `setAllocator`. The two that need a face are the exception; see `warmup`.
 pub fn resetAllocator() void {
-    _ = c.ztextSetAllocator(null);
+    _ = c.ztypesetSetAllocator(null);
 }
 
-test "the allocator bridge round-trips every alignment ztext may ask for" {
+test "the allocator bridge round-trips every alignment ztypeset may ask for" {
     try setAllocator(std.testing.allocator);
     defer resetAllocator();
 

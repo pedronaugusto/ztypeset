@@ -10,9 +10,9 @@ const std = @import("std");
 // deliberate edit here, which is the point.
 //=============================================================================
 
-/// FreeType, reduced to the modules ztext registers.
+/// FreeType, reduced to the modules ztypeset registers.
 ///
-/// Kept in step with `ffi/ztext_ftmodules.h` by the linker: a module named
+/// Kept in step with `ffi/ztypeset_ftmodules.h` by the linker: a module named
 /// there whose sources are missing here is an undefined symbol. The `.c` files
 /// named here are FreeType's own aggregate translation units -- `ftbase.c`
 /// includes eighteen further sources, `smooth.c` two, `sdf.c` four -- which is
@@ -58,7 +58,7 @@ const freetype_sources = [_][]const u8{
 /// published until it is added here, which is a visible omission rather than a
 /// silent one.
 /// Only headers whose implementation is in `freetype_sources`. A header for a
-/// module ztext does not compile would compile fine for a consumer and then
+/// module ztypeset does not compile would compile fine for a consumer and then
 /// fail at link with an undefined symbol -- `ftsynth.h` is the standing
 /// example: `FT_GlyphSlot_Embolden` is declared there, `ftsynth.c` is not
 /// compiled here, and the header is therefore not installed.
@@ -178,7 +178,7 @@ const harfbuzz_sources = [_][]const u8{
 /// `libharfbuzz` and then four more beside it, each behind its own option and
 /// its own external dependencies: `libharfbuzz-subset` (`hb_subset_sources`),
 /// `-raster` (`hb_raster_sources`, libpng), `-vector` (`hb_vector_sources`,
-/// zlib) and `-gpu` (`hb_gpu_sources`, plus generated shader sources). ztext
+/// zlib) and `-gpu` (`hb_gpu_sources`, plus generated shader sources). ztypeset
 /// vendors `libharfbuzz`. So `hb-subset-depend.h`, `hb-raster.h`,
 /// `hb-vector.h` and `hb-gpu.h` are NOT installed here -- they are the public
 /// faces of libraries this package does not build, and each was installed with
@@ -188,7 +188,7 @@ const harfbuzz_sources = [_][]const u8{
 /// `#error "Include <hb-subset.h> instead."`, and hb-subset.h belongs to the
 /// subset library. The other three compile and then fail at link.
 ///
-/// This is upstream's own division, not a ceiling ztext invented. Building any
+/// This is upstream's own division, not a ceiling ztypeset invented. Building any
 /// of the four is a decision about a dependency (libpng, zlib, a shader
 /// pipeline), and it is made by adding that library's sources here and its
 /// header below -- at which point the gate proves the two agree.
@@ -292,19 +292,19 @@ const sheenbidi_sources = [_][]const u8{
     "libs/sheenbidi/Source/UBA/StatusStack.c",
 };
 
-/// The ztext boundary. One translation unit per concern.
+/// The ztypeset boundary. One translation unit per concern.
 ///
 /// C, not C++: every upstream exposes a C API, so there is nothing here for
 /// C++ to do. See README -- this layer exists to stop FreeType's large,
 /// config-conditional structs at the C boundary, not to re-present HarfBuzz to
 /// the world under a different name.
-const ztext_sources = [_][]const u8{
-    "ffi/ztext_core.c",
-    "ffi/ztext_face.c",
-    "ffi/ztext_shape.c",
-    "ffi/ztext_bidi.c",
-    "ffi/ztext_raster.c",
-    "ffi/ztext_abi.c",
+const ztypeset_sources = [_][]const u8{
+    "ffi/ztypeset_core.c",
+    "ffi/ztypeset_face.c",
+    "ffi/ztypeset_shape.c",
+    "ffi/ztypeset_bidi.c",
+    "ffi/ztypeset_raster.c",
+    "ffi/ztypeset_abi.c",
 };
 
 /// The three environment variables HarfBuzz reads, set to values that change
@@ -318,10 +318,10 @@ fn setHostileEnvironment(run: *std.Build.Step.Run) void {
     // The fallback shaper: no OpenType layout at all.
     run.setEnvironmentVariable("HB_SHAPER_LIST", "fallback");
     // FreeType's font funcs instead of the OpenType ones. They allocate an
-    // FT_Face of their own, outside ztext's allocator and outside its
+    // FT_Face of their own, outside ztypeset's allocator and outside its
     // lifetime.
     run.setEnvironmentVariable("HB_FONT_FUNCS", "ft");
-    // A face loader that does not exist. Inert today because ztext never
+    // A face loader that does not exist. Inert today because ztypeset never
     // opens a face by file name, and here so that it stays inert.
     run.setEnvironmentVariable("HB_FACE_LOADER", "no-such-loader");
 }
@@ -334,18 +334,18 @@ fn setHostileEnvironment(run: *std.Build.Step.Run) void {
 //=============================================================================
 
 /// Tells FreeType it is being compiled (rather than consumed), and points it at
-/// ztext's configuration instead of the vendored defaults. Every translation
-/// unit that includes a FreeType header while ztext's build is in effect needs
+/// ztypeset's configuration instead of the vendored defaults. Every translation
+/// unit that includes a FreeType header while ztypeset's build is in effect needs
 /// these, or it sees a different FreeType than the one that was compiled.
 const freetype_defines = [_][]const u8{
     "-DFT2_BUILD_LIBRARY",
-    "-DFT_CONFIG_OPTIONS_H=<ztext_ftoption.h>",
-    "-DFT_CONFIG_MODULES_H=<ztext_ftmodules.h>",
+    "-DFT_CONFIG_OPTIONS_H=<ztypeset_ftoption.h>",
+    "-DFT_CONFIG_MODULES_H=<ztypeset_ftmodules.h>",
 };
 
-/// Switches HarfBuzz onto ztext's allocator. Defining all four macros is what
+/// Switches HarfBuzz onto ztypeset's allocator. Defining all four macros is what
 /// makes HarfBuzz define HB_CUSTOM_MALLOC for itself; it then declares these
-/// names `extern "C"` and ztext_core.c implements them. Naming them ztext_hb_*
+/// names `extern "C"` and ztypeset_core.c implements them. Naming them ztypeset_hb_*
 /// rather than accepting HarfBuzz's default hb_*_impl keeps the symbols out of
 /// a namespace a host might also be using.
 const harfbuzz_defines = [_][]const u8{
@@ -362,12 +362,12 @@ const harfbuzz_defines = [_][]const u8{
     // Freeing them at exit is not wanted. An atexit handler that calls the
     // installed allocator runs after a host has torn its own allocator down,
     // and the ordering between the two is not something a library can promise.
-    // ztextWarmup() exists so a host can populate the caches before it starts
-    // auditing instead; see ffi/ztext.h.
+    // ztypesetWarmup() exists so a host can populate the caches before it starts
+    // auditing instead; see ffi/ztypeset.h.
     "-DHB_NO_ATEXIT",
     // HarfBuzz reads three environment variables: HB_SHAPER_LIST
     // (hb-shaper.cc:48), HB_FONT_FUNCS (hb-font.cc:2599) and HB_FACE_LOADER
-    // (hb-face.cc:371). Two of them change what ztext renders. Measured on
+    // (hb-face.cc:371). Two of them change what ztypeset renders. Measured on
     // this tree before this define existed:
     //
     //   HB_SHAPER_LIST=fallback -- five golden tests fail. Standard ligatures
@@ -375,13 +375,13 @@ const harfbuzz_defines = [_][]const u8{
     //     result. The picture changes and nothing says so.
     //   HB_FONT_FUNCS=ft -- the C smoke test reports 216 bytes leaked, plus
     //     26 blocks under the injection sweep: hb-ft's font funcs open an
-    //     FT_Face of their own from an FT_Library ztext does not own or free.
-    //   HB_FACE_LOADER -- inert here, because ztext builds faces from memory
+    //     FT_Face of their own from an FT_Library ztypeset does not own or free.
+    //   HB_FACE_LOADER -- inert here, because ztypeset builds faces from memory
     //     and never from a file name. Covered anyway; it costs nothing and
     //     the next entry point that takes a path would make it live.
     //
     // HB_NO_GETENV makes getenv(Name) expand to nullptr (hb.hh:427-429), so
-    // all three read empty and the defaults stand. ffi/ztext_face.c already
+    // all three read empty and the defaults stand. ffi/ztypeset_face.c already
     // refused FreeType's FREETYPE_PROPERTIES for the same reason; this is the
     // other half of the same argument, and it was the half that was live.
     //
@@ -396,8 +396,8 @@ const harfbuzz_defines = [_][]const u8{
     // it. It reaches this build through FreeType: with
     // FT_CONFIG_OPTION_USE_HARFBUZZ the autohinter shapes each script's
     // blue-zone strings and lets HarfBuzz guess their segment properties,
-    // which asks for the default language. Nothing ztext shapes does --
-    // ztext names a language on every buffer.
+    // which asks for the default language. Nothing ztypeset shapes does --
+    // ztypeset names a language on every buffer.
     //
     // Without this define the behaviour is already what is wanted, twice
     // over: hb.hh:493-495 turns HB_NO_SETLOCALE on whenever HAVE_NEWLOCALE or
@@ -413,10 +413,10 @@ const harfbuzz_defines = [_][]const u8{
     // every host that has not called setlocale. It is held by this define and
     // by the two conditions above, not by ci/check-guards.sh.
     "-DHB_NO_SETLOCALE",
-    "-Dhb_malloc_impl=ztext_hb_malloc",
-    "-Dhb_calloc_impl=ztext_hb_calloc",
-    "-Dhb_realloc_impl=ztext_hb_realloc",
-    "-Dhb_free_impl=ztext_hb_free",
+    "-Dhb_malloc_impl=ztypeset_hb_malloc",
+    "-Dhb_calloc_impl=ztypeset_hb_calloc",
+    "-Dhb_realloc_impl=ztypeset_hb_realloc",
+    "-Dhb_free_impl=ztypeset_hb_free",
 };
 
 /// Zig defaults the Windows ABI to gnu, so an `abi == .msvc` branch is dead in
@@ -433,26 +433,26 @@ const cxx_base_other = [_][]const u8{ "-std=c++17", "-fno-exceptions", "-fno-rtt
 
 const c_base = [_][]const u8{"-std=c11"};
 
-/// Warnings, as errors, for the C ztext WROTE -- never for the C it vendors.
+/// Warnings, as errors, for the C ztypeset WROTE -- never for the C it vendors.
 ///
 /// The two cannot share a flag list. libs/ is pristine upstream and stays
 /// that way: FreeType, HarfBuzz, SheenBidi and libunibreak are compiled with
-/// whatever their authors chose to leave warning, and turning ztext's
+/// whatever their authors chose to leave warning, and turning ztypeset's
 /// standards into build failures for their code would either break the build
 /// or force a local patch, which is the one thing the vendor rules forbid.
 ///
 /// So these apply to ffi/*.c and to the C test translation units, and to
-/// nothing else. Without them ztext's own C was the only code in the
+/// nothing else. Without them ztypeset's own C was the only code in the
 /// repository whose warnings nobody had to read: -Wall and -Wextra were never
 /// passed, so an unused parameter, a signed/unsigned comparison or a missing
-/// field initialiser in a ztext source compiled silently.
+/// field initialiser in a ztypeset source compiled silently.
 ///
 /// -Wno-unused-parameter is the one exception, and it is upstream's shape
-/// rather than ztext's: a callback matching a FreeType or HarfBuzz function
+/// rather than ztypeset's: a callback matching a FreeType or HarfBuzz function
 /// pointer takes the parameters that signature has, whether or not this
 /// implementation reads them, and every one of those would otherwise need a
 /// (void) cast that says nothing.
-const ztext_warnings = [_][]const u8{
+const ztypeset_warnings = [_][]const u8{
     "-Wall",
     "-Wextra",
     "-Werror",
@@ -460,7 +460,7 @@ const ztext_warnings = [_][]const u8{
 };
 
 /// Applied only to a shared build; see the comment at its use site.
-const visibility_flags = [_][]const u8{ "-fvisibility=hidden", "-DZTEXT_SHARED", "-DZTEXT_BUILD" };
+const visibility_flags = [_][]const u8{ "-fvisibility=hidden", "-DZTYPESET_SHARED", "-DZTYPESET_BUILD" };
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -476,13 +476,13 @@ pub fn build(b: *std.Build) void {
         //
         // Zig's full C sanitizer emits calls into a runtime that is linked
         // only into a compilation that is itself sanitized. Defaulting this on
-        // in Debug means a consumer who writes `b.dependency("ztext", .{})` --
+        // in Debug means a consumer who writes `b.dependency("ztypeset", .{})` --
         // forgetting to forward `optimize`, the most common Zig packaging
-        // mistake -- gets a Debug ztext inside a release executable and a link
+        // mistake -- gets a Debug ztypeset inside a release executable and a link
         // failure reading `undefined symbol: __ubsan_handle_shift_out_of_bounds`,
         // which names nothing they can act on.
         //
-        // ztext's own suite turns it on explicitly instead: ci/run.sh and CI
+        // ztypeset's own suite turns it on explicitly instead: ci/run.sh and CI
         // both pass -Dsanitize_c=true for the Debug runs. A library should not
         // decide that its consumers are running a sanitizer.
         .sanitize_c = b.option(
@@ -503,7 +503,7 @@ pub fn build(b: *std.Build) void {
     const sanitize: std.zig.SanitizeC = if (options.sanitize_c) .full else .off;
     const msvc = target.result.abi == .msvc;
 
-    // A shared ztext must not re-export the upstreams it statically contains.
+    // A shared ztypeset must not re-export the upstreams it statically contains.
     // Hidden visibility costs nothing in a static build -- the static linker
     // ignores it -- but it is only needed for the shared one, so it is only
     // applied there and the default build's flags stay minimal.
@@ -521,22 +521,22 @@ pub fn build(b: *std.Build) void {
     else
         &(c_base ++ freetype_defines);
 
-    // The same flags plus ztext's own warning settings. Used for ffi/*.c and
+    // The same flags plus ztypeset's own warning settings. Used for ffi/*.c and
     // for the C tests; never for anything under libs/.
-    const ztext_c_flags: []const []const u8 = if (shared_elf)
-        &(c_base ++ freetype_defines ++ visibility_flags ++ ztext_warnings)
+    const ztypeset_c_flags: []const []const u8 = if (shared_elf)
+        &(c_base ++ freetype_defines ++ visibility_flags ++ ztypeset_warnings)
     else
-        &(c_base ++ freetype_defines ++ ztext_warnings);
+        &(c_base ++ freetype_defines ++ ztypeset_warnings);
 
-    // A C test links the installed library and includes only ffi/ztext.h, so
+    // A C test links the installed library and includes only ffi/ztypeset.h, so
     // it needs the warnings without any of FreeType's build-time defines.
-    const c_test_flags: []const []const u8 = &(c_base ++ ztext_warnings);
+    const c_test_flags: []const []const u8 = &(c_base ++ ztypeset_warnings);
 
     // SheenBidi wants no FreeType defines, but does want the visibility flag:
     // its SB_PUBLIC is empty outside Windows, so hiding actually takes effect
     // there. FreeType's does not -- it marks its public API
     // `visibility("default")` itself (config/public-macros.h:76), which
-    // overrides -fvisibility=hidden, so a shared ztext still re-exports
+    // overrides -fvisibility=hidden, so a shared ztypeset still re-exports
     // FreeType's API. That is upstream's decision and not overridable without
     // editing the vendored tree; the README says so.
     const sheenbidi_flags: []const []const u8 = if (shared_elf)
@@ -555,7 +555,7 @@ pub fn build(b: *std.Build) void {
     });
     freetype.root_module.link_libc = true;
     freetype.root_module.addIncludePath(b.path("libs/freetype/include"));
-    // ztext_ftoption.h and ztext_ftmodules.h live here, not in libs/.
+    // ztypeset_ftoption.h and ztypeset_ftmodules.h live here, not in libs/.
     freetype.root_module.addIncludePath(b.path("ffi"));
     freetype.root_module.addCSourceFiles(.{
         .files = &freetype_sources,
@@ -665,11 +665,11 @@ pub fn build(b: *std.Build) void {
     }
 
     //=====================================================================
-    // ztext
+    // ztypeset
     //=====================================================================
 
     const lib = b.addLibrary(.{
-        .name = "ztext",
+        .name = "ztypeset",
         .linkage = if (options.shared) .dynamic else .static,
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
@@ -681,35 +681,35 @@ pub fn build(b: *std.Build) void {
     lib.root_module.addIncludePath(b.path("libs/sheenbidi/Headers"));
     lib.root_module.addIncludePath(b.path("libs/libunibreak/src"));
     if (options.shared and msvc) {
-        lib.root_module.addCMacro("ZTEXT_SHARED", "");
-        lib.root_module.addCMacro("ZTEXT_BUILD", "");
+        lib.root_module.addCMacro("ZTYPESET_SHARED", "");
+        lib.root_module.addCMacro("ZTYPESET_BUILD", "");
     }
     // Non-MSVC shared builds get the same two macros through visibility_flags,
-    // where they turn ZTEXT_API into an explicit default-visibility marker.
+    // where they turn ZTYPESET_API into an explicit default-visibility marker.
     lib.root_module.addCSourceFiles(.{
-        .files = &ztext_sources,
-        .flags = ztext_c_flags,
+        .files = &ztypeset_sources,
+        .flags = ztypeset_c_flags,
     });
     lib.root_module.sanitize_c = sanitize;
     lib.root_module.linkLibrary(freetype);
     lib.root_module.linkLibrary(harfbuzz);
     lib.root_module.linkLibrary(sheenbidi);
     lib.root_module.linkLibrary(libunibreak);
-    lib.installHeader(b.path("ffi/ztext.h"), "ztext.h");
+    lib.installHeader(b.path("ffi/ztypeset.h"), "ztypeset.h");
 
     //=====================================================================
     // The Zig module.
     //=====================================================================
 
-    const module = b.addModule("ztext", .{
-        .root_source_file = b.path("src/ztext.zig"),
+    const module = b.addModule("ztypeset", .{
+        .root_source_file = b.path("src/ztypeset.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{
-            .{ .name = "ztext_options", .module = options_module },
+            .{ .name = "ztypeset_options", .module = options_module },
         },
     });
-    // No include path: the wrapper hand-writes its externs against ztext.h
+    // No include path: the wrapper hand-writes its externs against ztypeset.h
     // rather than @cImport-ing it, so nothing Zig-side compiles C.
     module.linkLibrary(lib);
 
@@ -726,31 +726,31 @@ pub fn build(b: *std.Build) void {
     });
 
     const tests = b.addTest(.{
-        .name = "ztext-tests",
+        .name = "ztypeset-tests",
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/ztext.zig"),
+            .root_source_file = b.path("src/ztypeset.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "ztext_options", .module = options_module },
+                .{ .name = "ztypeset_options", .module = options_module },
                 .{ .name = "fonts", .module = fonts_module },
             },
         }),
     });
     tests.root_module.linkLibrary(lib);
 
-    // The ABI cross-check @cImport-s ffi/ztext.h. It is wired here, on the test
+    // The ABI cross-check @cImport-s ffi/ztypeset.h. It is wired here, on the test
     // module, and deliberately NOT on the module above: the shipped module has
     // no include path and never runs translate-c.
     //
     // No macro wiring accompanies it, and that is a measured claim rather than
-    // an omission. ffi/ztext.h includes only <stddef.h> and <stdint.h> and is
-    // sensitive to exactly one macro -- ZTEXT_SHARED, which changes the
-    // ZTEXT_API attribute and no type. Every FreeType and HarfBuzz
+    // an omission. ffi/ztypeset.h includes only <stddef.h> and <stdint.h> and is
+    // sensitive to exactly one macro -- ZTYPESET_SHARED, which changes the
+    // ZTYPESET_API attribute and no type. Every FreeType and HarfBuzz
     // configuration macro reaches the implementation, never the installed
     // header, so a header preprocessed without them still describes what the
     // library ships. A package whose public header changed type widths with its
-    // build options would have to forward those macros here; ztext's does not.
+    // build options would have to forward those macros here; ztypeset's does not.
     tests.root_module.link_libc = true;
     tests.root_module.addIncludePath(b.path("ffi"));
 
@@ -765,10 +765,10 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("README.md"),
     });
     tests.root_module.addAnonymousImport("example_module_doc", .{
-        .root_source_file = b.path("src/ztext.zig"),
+        .root_source_file = b.path("src/ztypeset.zig"),
     });
 
-    const test_step = b.step("test", "Run the ztext test suite");
+    const test_step = b.step("test", "Run the ztypeset test suite");
     test_step.dependOn(&b.addRunArtifact(tests).step);
 
     // And again, in an environment engineered to change what HarfBuzz does.
@@ -786,7 +786,7 @@ pub fn build(b: *std.Build) void {
     // real C contract and the allocator seam is genuinely in use. It asserts
     // allocations balance, which no Zig-side test can prove about the C side.
     const c_smoke = b.addExecutable(.{
-        .name = "ztext-c-smoke",
+        .name = "ztypeset-c-smoke",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     c_smoke.root_module.link_libc = true;
@@ -810,7 +810,7 @@ pub fn build(b: *std.Build) void {
 
     // The same binary under the same hostile environment. This is the arm that
     // catches HB_FONT_FUNCS: with the variable live, hb-ft's font funcs open
-    // an FT_Face from an FT_Library ztext never frees, and the C boundary's
+    // an FT_Face from an FT_Library ztypeset never frees, and the C boundary's
     // own byte accounting reports 216 bytes leaked.
     const run_c_smoke_hostile = b.addRunArtifact(c_smoke);
     setHostileEnvironment(run_c_smoke_hostile);
@@ -826,13 +826,13 @@ pub fn build(b: *std.Build) void {
     // src/example_test.zig is what keeps README.md and the module doc quoting
     // this file rather than paraphrasing it.
     const quickstart = b.addExecutable(.{
-        .name = "ztext-quickstart",
+        .name = "ztypeset-quickstart",
         .root_module = b.createModule(.{
             .root_source_file = b.path("examples/quickstart.zig"),
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "ztext", .module = module },
+                .{ .name = "ztypeset", .module = module },
                 .{ .name = "fonts", .module = fonts_module },
             },
         }),
@@ -840,7 +840,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&b.addRunArtifact(quickstart).step);
 
     const bench = b.addExecutable(.{
-        .name = "ztext-bench",
+        .name = "ztypeset-bench",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     bench.root_module.link_libc = true;
@@ -861,7 +861,7 @@ pub fn build(b: *std.Build) void {
     // c_smoke drives the library the way a consumer would, this drives it the
     // way nobody should. Its own translation unit so the two do not blur.
     const null_sweep = b.addExecutable(.{
-        .name = "ztext-null-sweep",
+        .name = "ztypeset-null-sweep",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     null_sweep.root_module.link_libc = true;
@@ -878,20 +878,20 @@ pub fn build(b: *std.Build) void {
 
     // The implementation-private contracts, exercised directly.
     //
-    // ffi/ztext_internal.h declares helpers ztext.h never exposes, and until
+    // ffi/ztypeset_internal.h declares helpers ztypeset.h never exposes, and until
     // this existed nothing could reach them: the Zig suite enters through
-    // ztext.h and the other two C tests link the installed library, so an
+    // ztypeset.h and the other two C tests link the installed library, so an
     // internal precondition was checkable only by reading every caller --
     // and "no caller does that today" is not a property a header can promise
     // about tomorrow.
     //
-    // The ffi units are compiled INTO it rather than linked from libztext,
+    // The ffi units are compiled INTO it rather than linked from libztypeset,
     // because those symbols are deliberately unexported: a shared build hides
     // them behind -fvisibility=hidden and an MSVC DLL never declares them, so
     // a test that linked the library would run in the static arm alone --
     // which is the arm where the ABI matters least.
     const c_internal = b.addExecutable(.{
-        .name = "ztext-internal",
+        .name = "ztypeset-internal",
         .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
     });
     c_internal.root_module.link_libc = true;
@@ -903,12 +903,12 @@ pub fn build(b: *std.Build) void {
     c_internal.root_module.addIncludePath(b.path("libs/sheenbidi/Headers"));
     c_internal.root_module.addIncludePath(b.path("libs/libunibreak/src"));
     c_internal.root_module.addCSourceFiles(.{
-        .files = &ztext_sources,
-        .flags = ztext_c_flags,
+        .files = &ztypeset_sources,
+        .flags = ztypeset_c_flags,
     });
     c_internal.root_module.addCSourceFile(.{
         .file = b.path("tests/c_internal.c"),
-        .flags = ztext_c_flags,
+        .flags = ztypeset_c_flags,
     });
     c_internal.root_module.linkLibrary(freetype);
     c_internal.root_module.linkLibrary(harfbuzz);
@@ -931,7 +931,7 @@ pub fn build(b: *std.Build) void {
     // happens one time in fifty is indistinguishable from no fault.
     //
     // A step of its own rather than b.installArtifact, so a consumer that
-    // depends on ztext never finds three test binaries in its own prefix.
+    // depends on ztypeset never finds three test binaries in its own prefix.
     const install_c_tests = b.step(
         "install-c-tests",
         "Install the C test executables into zig-out/bin for ci/crash-loop.sh",
@@ -941,13 +941,13 @@ pub fn build(b: *std.Build) void {
     install_c_tests.dependOn(&b.addInstallArtifact(c_internal, .{}).step);
     install_c_tests.dependOn(&b.addInstallArtifact(bench, .{}).step);
 
-    // Registered unconditionally, including when ztext is consumed as a
+    // Registered unconditionally, including when ztypeset is consumed as a
     // dependency. `std.Build.Dependency.artifact` finds an artifact by
     // scanning the dependency's install step, so anything NOT installed here
     // is invisible to a consumer -- `dep.artifact("harfbuzz")` panics rather
     // than failing gracefully.
     //
-    // This does not put ztext's libraries in a consumer's prefix: a
+    // This does not put ztypeset's libraries in a consumer's prefix: a
     // dependency's install step only runs when something the consumer builds
     // actually depends on it.
     b.installArtifact(lib);

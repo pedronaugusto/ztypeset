@@ -1,7 +1,7 @@
 //! The plain-data types, re-exported from the C declarations.
 //!
 //! Deliberately aliases rather than second declarations: a parallel Zig struct
-//! would be a third place for the layout to drift, and the `ztextAbiLayout`
+//! would be a third place for the layout to drift, and the `ztypesetAbiLayout`
 //! test already proves `c.zig` agrees with the header. One definition, checked
 //! once.
 
@@ -19,7 +19,7 @@ const c = @import("c.zig");
 pub const Glyph = c.Glyph;
 
 /// One bit of `Glyph.flags`: what shaping learned about the text around a
-/// glyph. See `ffi/ztext.h` for each flag's full meaning -- and for why ztext
+/// glyph. See `ffi/ztypeset.h` for each flag's full meaning -- and for why ztypeset
 /// always produces all three rather than only the one HarfBuzz gives away.
 pub const GlyphFlag = c.GlyphFlag;
 
@@ -52,7 +52,7 @@ pub fn segmentationHas(mask: u32, kind: Segmentation) bool {
 /// formats. The library's own answer rather than a switch here, so a build
 /// that names a format this wrapper does not still gets it right.
 pub fn bitmapChannels(format: BitmapFormat) u32 {
-    return c.ztextBitmapFormatChannels(format);
+    return c.ztypesetBitmapFormatChannels(format);
 }
 
 pub fn glyphHas(glyph: Glyph, flag: GlyphFlag) bool {
@@ -95,7 +95,7 @@ pub const BitmapFormat = c.BitmapFormat;
 /// One OpenType metric, named by its own four-character tag.
 ///
 /// These are HarfBuzz's `hb_ot_metrics_tag_t` values unchanged, so a reader
-/// who knows that enum already knows this one, and `ffi/ztext_abi.c` asserts
+/// who knows that enum already knows this one, and `ffi/ztypeset_abi.c` asserts
 /// each against its `HB_OT_METRICS_TAG_` counterpart. See `Face.metric` for
 /// what a metric is worth and where it differs from `FaceMetrics`.
 pub const Metric = c.Metric;
@@ -153,7 +153,7 @@ pub const StrokeStyle = c.StrokeStyle;
 
 /// A pen traced round every glyph a face draws. `radius` is HALF the pen's
 /// width, in PIXELS at the face's current size -- unlike synthetic bold's
-/// fraction of the em, and `ffi/ztext.h` has why. A zero radius is no stroke,
+/// fraction of the em, and `ffi/ztypeset.h` has why. A zero radius is no stroke,
 /// and `stroke_none` is the value a face is created with.
 pub const Stroke = c.Stroke;
 

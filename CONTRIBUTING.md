@@ -1,4 +1,4 @@
-# Contributing to ztext
+# Contributing to ztypeset
 
 The rules live in [README.md](README.md#contributing), and this file does not
 repeat them — a second copy of a rule is a copy that can disagree with the
@@ -26,7 +26,7 @@ every number the documentation states. If you add a rule, add the thing
 that enforces it; if you add a number, add the line that recomputes it.
 
 **`libs/` is upstream, byte for byte.** Nothing in a patch may touch it, not
-even a warning fix. ztext's own C compiles with `-Wall -Wextra -Werror`;
-upstream's does not, deliberately, because turning ztext's standards into build
+even a warning fix. ztypeset's own C compiles with `-Wall -Wextra -Werror`;
+upstream's does not, deliberately, because turning ztypeset's standards into build
 failures for four other projects' code would mean patching them locally.
 Workarounds go in `ffi/` and are recorded in [UPSTREAM.md](UPSTREAM.md).

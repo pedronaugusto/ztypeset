@@ -6,19 +6,19 @@
 //! golden that starts failing means one of those three moved -- which is
 //! precisely the change worth reviewing rather than absorbing.
 //!
-//! Every test installs `std.testing.allocator`, so any allocation ztext or an
+//! Every test installs `std.testing.allocator`, so any allocation ztypeset or an
 //! upstream fails to return is a test failure. That works because installing
 //! an allocator populates the upstreams' process-lifetime caches before it
 //! swaps, and because `warmProcessCaches` below reaches the two that need a
-//! face and so cannot be reached from inside ztext; see UPSTREAM.md.
+//! face and so cannot be reached from inside ztypeset; see UPSTREAM.md.
 
 const std = @import("std");
-const ztext = @import("ztext.zig");
+const ztypeset = @import("ztypeset.zig");
 const fonts = @import("fonts");
 
 const ppem: u32 = 32;
 
-/// The two process-lifetime caches `ztext.warmup()` cannot reach on its own,
+/// The two process-lifetime caches `ztypeset.warmup()` cannot reach on its own,
 /// touched here on the default allocator before the test allocator goes in.
 ///
 /// Both need a real face, which warmup has no way to obtain:
@@ -32,13 +32,13 @@ const ppem: u32 = 32;
 /// A host that shapes without a language and never asks for FreeType metrics
 /// allocates neither. Both are recorded in UPSTREAM.md.
 fn warmProcessCaches() !void {
-    const library = try ztext.Library.init();
+    const library = try ztypeset.Library.init();
     defer library.deinit();
     const font = try library.createFont(fonts.hebrew, 0);
     defer font.deinit();
     const face = try font.face(0, ppem);
     defer face.deinit();
-    const shaper = try ztext.Shaper.init();
+    const shaper = try ztypeset.Shaper.init();
     defer shaper.deinit();
 
     _ = try shaper.shape(face, "a", .{ .use_freetype_metrics = true });
@@ -53,22 +53,22 @@ const test_languages = [_][:0]const u8{ "en", "tr", "de", "ar" };
 
 /// Everything a test needs, torn down in one place.
 const Fixture = struct {
-    library: ztext.Library,
-    shaper: ztext.Shaper,
+    library: ztypeset.Library,
+    shaper: ztypeset.Shaper,
 
     fn init() !Fixture {
         try warmProcessCaches();
-        try ztext.setAllocator(std.testing.allocator);
+        try ztypeset.setAllocator(std.testing.allocator);
         return .{
-            .library = try ztext.Library.init(),
-            .shaper = try ztext.Shaper.init(),
+            .library = try ztypeset.Library.init(),
+            .shaper = try ztypeset.Shaper.init(),
         };
     }
 
     fn deinit(self: Fixture) void {
         self.shaper.deinit();
         self.library.deinit();
-        ztext.resetAllocator();
+        ztypeset.resetAllocator();
     }
 
     /// A face at the suite's default size, for the many tests that want one
@@ -77,14 +77,14 @@ const Fixture = struct {
     /// The font handle is released immediately and the face keeps it alive,
     /// which means every test built on this exercises the destroy-the-font-
     /// first path rather than only the tidy order.
-    fn face(self: Fixture, bytes: []const u8) !ztext.Face {
+    fn face(self: Fixture, bytes: []const u8) !ztypeset.Face {
         const font = try self.library.createFont(bytes, 0);
         defer font.deinit();
         return font.face(0, ppem);
     }
 
     /// A face at a caller-chosen size, same lifetime bargain.
-    fn faceAt(self: Fixture, bytes: []const u8, size: f32) !ztext.Face {
+    fn faceAt(self: Fixture, bytes: []const u8, size: f32) !ztypeset.Face {
         const font = try self.library.createFont(bytes, 0);
         defer font.deinit();
         return font.face(0, size);
@@ -96,14 +96,14 @@ const Fixture = struct {
 /// that still catches a one-unit drift.
 const tolerance: f32 = 1.0 / 1024.0;
 
-fn expectAdvances(glyphs: []const ztext.Glyph, expected: []const f32) !void {
+fn expectAdvances(glyphs: []const ztypeset.Glyph, expected: []const f32) !void {
     try std.testing.expectEqual(expected.len, glyphs.len);
     for (glyphs, expected) |glyph, want| {
         try std.testing.expectApproxEqAbs(want, glyph.x_advance, tolerance);
     }
 }
 
-fn expectGlyphIds(glyphs: []const ztext.Glyph, expected: []const u32) !void {
+fn expectGlyphIds(glyphs: []const ztypeset.Glyph, expected: []const u32) !void {
     try std.testing.expectEqual(expected.len, glyphs.len);
     for (glyphs, expected) |glyph, want| {
         try std.testing.expectEqual(want, glyph.glyph_id);
@@ -181,7 +181,7 @@ test "FreeType grid-fits face metrics even when the size does not" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    // Worth pinning because it looks like a ztext bug and is not. FreeType
+    // Worth pinning because it looks like a ztypeset bug and is not. FreeType
     // computes a face's ascender, descender, height and max_advance with
     // FT_PIX_CEIL/FLOOR/ROUND -- see ft_recompute_scaled_metrics in
     // src/base/ftobjs.c, under a GRID_FIT_METRICS that is #defined
@@ -245,7 +245,7 @@ test "a pixel size that cannot mean anything is refused" {
     };
     for (nonsense) |case| {
         try std.testing.expectError(
-            ztext.Error.InvalidArgument,
+            ztypeset.Error.InvalidArgument,
             face.setPixelSize(case.w, case.h),
         );
     }
@@ -268,8 +268,8 @@ test "a face always has a size, so there is no unsized state to refuse" {
     // The size is an argument to `face`, not a second call that might be
     // forgotten, so a face that exists can always be measured and rendered.
     // A size the face could not have is refused at creation instead.
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.face(0, 0));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.face(0, -3));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.face(0, 0));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.face(0, -3));
 
     const face = try font.face(0, ppem);
     defer face.deinit();
@@ -294,7 +294,7 @@ test "a font and its faces may be destroyed in either order" {
         _ = try fixture.shaper.shape(face, "abc", .{});
 
         // What a released font cannot do is hand out more faces.
-        try std.testing.expectError(ztext.Error.InvalidArgument, font.face(0, ppem));
+        try std.testing.expectError(ztypeset.Error.InvalidArgument, font.face(0, ppem));
 
         face.deinit();
     }
@@ -377,14 +377,14 @@ test "a rendered bitmap survives anything but the next render on its own face" {
     // a crash.
     const h = font.glyphIndex('H');
     const big = try face.renderGlyph(h, .a8, .normal, 0, 0);
-    const big_rows = ztext.bitmapRows(big).?;
+    const big_rows = ztypeset.bitmapRows(big).?;
     const twin_bitmap = try twin.renderGlyph(h, .a8, .normal, 0, 0);
-    const twin_rows = ztext.bitmapRows(twin_bitmap).?;
+    const twin_rows = ztypeset.bitmapRows(twin_bitmap).?;
     try std.testing.expect(big_rows.ptr != twin_rows.ptr);
     try std.testing.expectEqualSlices(u8, big_rows, twin_rows);
 
     const wee = try sibling.renderGlyph(h, .a8, .normal, 0, 0);
-    const wee_rows = ztext.bitmapRows(wee).?;
+    const wee_rows = ztypeset.bitmapRows(wee).?;
     try std.testing.expect(big_rows.ptr != wee_rows.ptr);
     try std.testing.expect(big.height > wee.height);
     try std.testing.expect(big_rows.len > wee_rows.len);
@@ -407,7 +407,7 @@ test "a rendered bitmap survives anything but the next render on its own face" {
     // The face's own next render is the one thing that does replace it, and
     // the same glyph must come back the same way.
     const again = try face.renderGlyph(h, .a8, .normal, 0, 0);
-    try std.testing.expectEqualSlices(u8, big_rows, ztext.bitmapRows(again).?);
+    try std.testing.expectEqualSlices(u8, big_rows, ztypeset.bitmapRows(again).?);
 }
 
 test "a rasterised bitmap is tightly packed and top-down" {
@@ -419,11 +419,11 @@ test "a rasterised bitmap is tightly packed and top-down" {
 
     // Copying out of the slot normalises FreeType's pitch, so a consumer that
     // ignores the sign cannot render upside down. Asserted rather than
-    // assumed, because the guarantee is now ztext's rather than FreeType's.
+    // assumed, because the guarantee is now ztypeset's rather than FreeType's.
     for ("HWjgq") |ch| {
         const bitmap = try face.renderGlyph(face.font.glyphIndex(ch), .a8, .normal, 0, 0);
         try std.testing.expectEqual(@as(i32, @intCast(bitmap.width)), bitmap.pitch);
-        try std.testing.expect(ztext.bitmapRows(bitmap) != null);
+        try std.testing.expect(ztypeset.bitmapRows(bitmap) != null);
     }
 }
 
@@ -440,7 +440,7 @@ test "line breaks are offered between words, never inside one" {
     defer fixture.deinit();
 
     const text = "hello wonderful world";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const breaks = paragraph.lineBreaks();
@@ -450,7 +450,7 @@ test "line breaks are offered between words, never inside one" {
     // "wonderful" is what an ASCII-space approximation gets wrong the moment
     // the text is not English.
     for (breaks, 0..) |b, i| {
-        const expected: ztext.Break = if (i == text.len - 1)
+        const expected: ztypeset.Break = if (i == text.len - 1)
             .mandatory
         else if (text[i] == ' ')
             .allowed
@@ -473,10 +473,10 @@ test "a line break is offered where no space is" {
         .{ .text = "\u{4ECA}\u{65E5}\u{306F}", .at = 2 },
     };
     for (cases) |case| {
-        const paragraph = try ztext.Paragraph.init(case.text, .{});
+        const paragraph = try ztypeset.Paragraph.init(case.text, .{});
         defer paragraph.deinit();
         try std.testing.expectEqual(
-            ztext.Break.allowed,
+            ztypeset.Break.allowed,
             paragraph.lineBreaks()[case.at],
         );
     }
@@ -490,7 +490,7 @@ test "a caret moves by grapheme, not by character" {
     // bytes. A caret that steps by character lands between the letter and its
     // accent, which is the bug this API exists to prevent.
     const text = "ae\u{301}b";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(@as(usize, 1), paragraph.nextGrapheme(0));
@@ -526,7 +526,7 @@ test "an emoji joined with ZWJ is one grapheme" {
     // U+200D are one grapheme of eleven bytes; backspace must delete all of
     // it, not half a family.
     const text = "\u{1F468}\u{200D}\u{1F469}";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(text.len, paragraph.nextGrapheme(0));
@@ -538,16 +538,16 @@ test "word boundaries are where a double-click would select" {
     defer fixture.deinit();
 
     const text = "one two";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const words = paragraph.wordBreaks();
     try std.testing.expectEqual(text.len, words.len);
     // A boundary after "one", after the space, and at the end -- and never
     // MANDATORY, which only line breaking uses.
-    try std.testing.expectEqual(ztext.Break.allowed, words[2]);
-    try std.testing.expectEqual(ztext.Break.allowed, words[3]);
-    try std.testing.expectEqual(ztext.Break.none, words[0]);
+    try std.testing.expectEqual(ztypeset.Break.allowed, words[2]);
+    try std.testing.expectEqual(ztypeset.Break.allowed, words[3]);
+    try std.testing.expectEqual(ztypeset.Break.none, words[0]);
     for (words) |w| try std.testing.expect(w != .mandatory);
 }
 
@@ -559,10 +559,10 @@ test "the documented wrap loop covers a paragraph exactly once" {
     defer face.deinit();
 
     // The whole point of the package, end to end: break opportunities from
-    // ztext, the width decision from the host, reordering per line from
-    // ztext, shaping with context from ztext.
+    // ztypeset, the width decision from the host, reordering per line from
+    // ztypeset, shaping with context from ztypeset.
     const text = "the quick brown fox jumps over the lazy dog";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
     const breaks = paragraph.lineBreaks();
 
@@ -580,7 +580,7 @@ test "the documented wrap loop covers a paragraph exactly once" {
             if (breaks[i] == .none) continue;
             _ = try fixture.shaper.shapeRange(face, text, start, i + 1 - start, .{
                 .direction = .ltr,
-                .script = ztext.tag("Latn"),
+                .script = ztypeset.tag("Latn"),
             });
             const width = (try fixture.shaper.extents(face)).x_advance;
             if (width <= limit or chosen == 0) chosen = i + 1;
@@ -629,8 +629,8 @@ test "vertical direction produces vertical advances" {
     // Top-to-bottom: the pen moves down instead, so x stops advancing and y
     // starts. Noto Sans has no vmtx, so these are the advances HarfBuzz
     // SYNTHESISES from the font's ascender and descender -- which is the
-    // honest extent of what ztext can demonstrate with the fonts it ships.
-    for ([_]ztext.Direction{ .ttb, .btt }) |direction| {
+    // honest extent of what ztypeset can demonstrate with the fonts it ships.
+    for ([_]ztypeset.Direction{ .ttb, .btt }) |direction| {
         _ = try fixture.shaper.shape(face, "Hi", .{ .direction = direction });
         // The shaper reports back the direction it was given, not a
         // normalisation of it: btt stays btt.
@@ -650,7 +650,7 @@ test "vertical face metrics are synthesised for a font with no vmtx" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    // ZtextFaceMetrics now carries column-direction analogues of ascender,
+    // ZtypesetFaceMetrics now carries column-direction analogues of ascender,
     // descender, line_height and max_advance, plus has_vertical_metrics
     // saying whether they came from a real vhea/vmtx or were synthesised.
     //
@@ -662,7 +662,7 @@ test "vertical face metrics are synthesised for a font with no vmtx" {
     try std.testing.expect(metrics.line_height > 0);
     try std.testing.expectEqual(
         @as(usize, 14),
-        @typeInfo(ztext.FaceMetrics).@"struct".fields.len,
+        @typeInfo(ztypeset.FaceMetrics).@"struct".fields.len,
     );
 
     try std.testing.expectEqual(@as(u32, 0), metrics.has_vertical_metrics);
@@ -697,9 +697,9 @@ test "shaping a run with context matches shaping the whole text" {
     // A fully joining Arabic word, where every interior letter's glyph depends
     // on both of its neighbours. Latin would pass this test with the bug in.
     const word = "\u{645}\u{631}\u{62D}\u{628}\u{627}";
-    const params: ztext.ShapeParams = .{
+    const params: ztypeset.ShapeParams = .{
         .direction = .rtl,
-        .script = ztext.tag("Arab"),
+        .script = ztypeset.tag("Arab"),
     };
 
     var whole: [16]u32 = undefined;
@@ -742,9 +742,9 @@ test "shaping a run WITHOUT context is measurably different" {
     // one above has stopped proving anything -- either HarfBuzz changed, or
     // the context is no longer reaching it.
     const word = "\u{645}\u{631}\u{62D}\u{628}\u{627}";
-    const params: ztext.ShapeParams = .{
+    const params: ztypeset.ShapeParams = .{
         .direction = .rtl,
-        .script = ztext.tag("Arab"),
+        .script = ztypeset.tag("Arab"),
     };
 
     var with_context: [8]u32 = undefined;
@@ -780,7 +780,7 @@ test "a run range is refused when it is out of bounds or splits a character" {
     };
     for (bad) |range| {
         try std.testing.expectError(
-            ztext.Error.InvalidArgument,
+            ztypeset.Error.InvalidArgument,
             fixture.shaper.shapeRange(face, text, range[0], range[1], .{}),
         );
     }
@@ -802,8 +802,8 @@ test "clusters from a run are offsets into the whole text" {
     // A run's clusters index the buffer the caller passed, not the run, so
     // they can be used against the same slice a ShapingRun's offsets are.
     const text = "Hello world";
-    const run: ztext.ShapingRun =
-        .{ .offset = 6, .length = 5, .script = ztext.tag("Latn"), .level = 0 };
+    const run: ztypeset.ShapingRun =
+        .{ .offset = 6, .length = 5, .script = ztypeset.tag("Latn"), .level = 0 };
     const glyphs =
         try fixture.shaper.shapeRange(face, text, run.offset, run.length, .{});
 
@@ -843,7 +843,7 @@ test "covered prefix stops where the font does" {
     try std.testing.expectEqual(@as(usize, 0), try latin.coveredPrefix(""));
 
     try std.testing.expectError(
-        ztext.Error.InvalidText,
+        ztypeset.Error.InvalidText,
         latin.coveredPrefix(&[_]u8{ 0xC3, 0x28 }),
     );
 }
@@ -853,7 +853,7 @@ test "the documented fallback loop covers text no single font can" {
     defer fixture.deinit();
 
     const chain = [_][]const u8{ fonts.latin, fonts.hebrew, fonts.arabic };
-    var fontlist: [3]ztext.Font = undefined;
+    var fontlist: [3]ztypeset.Font = undefined;
     for (chain, 0..) |bytes, i| fontlist[i] = try fixture.library.createFont(bytes, 0);
     defer for (fontlist) |f| f.deinit();
 
@@ -945,7 +945,7 @@ test "format characters never break a run" {
 /// rasterise out of it. Shared so "the advance changed" and "the ink changed"
 /// are demonstrably about the same text at the same size.
 const variable_word = "\u{5E9}\u{5DC}\u{5D5}\u{5DD}";
-const variable_params: ztext.ShapeParams = .{ .direction = .rtl, .script = ztext.tag("Hebr") };
+const variable_params: ztypeset.ShapeParams = .{ .direction = .rtl, .script = ztypeset.tag("Hebr") };
 
 test "a variable font reports the axes it declares" {
     const fixture = try Fixture.init();
@@ -960,13 +960,13 @@ test "a variable font reports the axes it declares" {
     // binding that sorted these, or that looked them up by tag and handed back
     // an index, would make that a second thing to keep in step.
     const weight = try font.axis(0);
-    try std.testing.expectEqual(ztext.tag("wght"), weight.tag);
+    try std.testing.expectEqual(ztypeset.tag("wght"), weight.tag);
     try std.testing.expectApproxEqAbs(@as(f32, 100), weight.min_value, tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 100), weight.default_value, tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 900), weight.max_value, tolerance);
 
     const width = try font.axis(1);
-    try std.testing.expectEqual(ztext.tag("wdth"), width.tag);
+    try std.testing.expectEqual(ztypeset.tag("wdth"), width.tag);
     try std.testing.expectApproxEqAbs(@as(f32, 62.5), width.min_value, tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 100), width.default_value, tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 100), width.max_value, tolerance);
@@ -981,8 +981,8 @@ test "a variable font reports the axes it declares" {
 
     // One past the end is an error rather than a zeroed struct, which would
     // read as a perfectly plausible axis pinned at 0.
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.axis(2));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.variation(2));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.axis(2));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.variation(2));
 }
 
 test "a static font has no axes and refuses to pretend otherwise" {
@@ -994,17 +994,17 @@ test "a static font has no axes and refuses to pretend otherwise" {
     defer font.deinit();
 
     try std.testing.expectEqual(@as(u32, 0), font.axisCount());
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.axis(0));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.variation(0));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.axis(0));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.variation(0));
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
-        font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 700 }}),
+        ztypeset.Error.InvalidArgument,
+        font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 700 }}),
     );
 
     // Including an empty request, which could have been a harmless no-op. A
     // host that reaches this call at all is holding the wrong font, and an
     // error here is cheaper than working out later why the text never changed.
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.setVariations(&.{}));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.setVariations(&.{}));
 }
 
 test "moving an axis moves shaping and rasterisation together" {
@@ -1019,14 +1019,14 @@ test "moving an axis moves shaping and rasterisation together" {
     const shin = font.glyphIndex('\u{5E9}');
     try std.testing.expect(shin != 0);
 
-    const freetype_params: ztext.ShapeParams = .{
+    const freetype_params: ztypeset.ShapeParams = .{
         .direction = .rtl,
-        .script = ztext.tag("Hebr"),
+        .script = ztypeset.tag("Hebr"),
         .use_freetype_metrics = true,
     };
 
     // The lightest weight the font has.
-    try font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 100 }});
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 100 }});
 
     var light_advance: f32 = 0;
     for (try fixture.shaper.shape(face, variable_word, variable_params)) |glyph| {
@@ -1037,13 +1037,13 @@ test "moving an axis moves shaping and rasterisation together" {
     for (fixture.shaper.glyphs()) |glyph| light_freetype += glyph.x_advance;
 
     const light_bitmap = try face.renderGlyph(shin, .a8, .none, 0, 0);
-    const light_rows = ztext.bitmapRows(light_bitmap) orelse return error.TestUnexpectedResult;
+    const light_rows = ztypeset.bitmapRows(light_bitmap) orelse return error.TestUnexpectedResult;
     var light_ink: u64 = 0;
     for (light_rows) |value| light_ink += value;
     const light_width = light_bitmap.width;
 
     // And the heaviest.
-    try font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 900 }});
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 900 }});
 
     var black_advance: f32 = 0;
     for (try fixture.shaper.shape(face, variable_word, variable_params)) |glyph| {
@@ -1054,13 +1054,13 @@ test "moving an axis moves shaping and rasterisation together" {
     for (fixture.shaper.glyphs()) |glyph| black_freetype += glyph.x_advance;
 
     const black_bitmap = try face.renderGlyph(shin, .a8, .none, 0, 0);
-    const black_rows = ztext.bitmapRows(black_bitmap) orelse return error.TestUnexpectedResult;
+    const black_rows = ztypeset.bitmapRows(black_bitmap) orelse return error.TestUnexpectedResult;
     var black_ink: u64 = 0;
     for (black_rows) |value| black_ink += value;
 
     // (a) HarfBuzz's side. These advances come from HVAR, read by HarfBuzz's
     // own table reader out of the hb_font_t's coordinates -- so if
-    // ztextFontSetVariations had set FreeType alone, both numbers would be the
+    // ztypesetFontSetVariations had set FreeType alone, both numbers would be the
     // Light one and this is the assertion that would fail.
     try std.testing.expectApproxEqAbs(@as(f32, 66.65625), light_advance, tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 78.984375), black_advance, tolerance);
@@ -1098,8 +1098,8 @@ test "setting one axis leaves every other axis where it was" {
     // Width first, all the way to its condensed end, then weight. A weight
     // slider and a width slider are two controls in a host's UI, and moving
     // one must not snap the other back to its default.
-    try font.setVariations(&.{.{ .tag = ztext.tag("wdth"), .value = 62.5 }});
-    try font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 700 }});
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wdth"), .value = 62.5 }});
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 700 }});
 
     try std.testing.expectApproxEqAbs(@as(f32, 700), try font.variation(0), tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 62.5), try font.variation(1), tolerance);
@@ -1108,8 +1108,8 @@ test "setting one axis leaves every other axis where it was" {
     // is derived from the other, and the order within the call does not
     // matter.
     try font.setVariations(&.{
-        .{ .tag = ztext.tag("wdth"), .value = 80 },
-        .{ .tag = ztext.tag("wght"), .value = 300 },
+        .{ .tag = ztypeset.tag("wdth"), .value = 80 },
+        .{ .tag = ztypeset.tag("wght"), .value = 300 },
     });
     try std.testing.expectApproxEqAbs(@as(f32, 300), try font.variation(0), tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 80), try font.variation(1), tolerance);
@@ -1122,16 +1122,16 @@ test "a refused variation leaves the font exactly as it was" {
     const font = try fixture.library.createFont(fonts.variable, 0);
     defer font.deinit();
 
-    try font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 500 }});
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 500 }});
 
     // Above the maximum, below the minimum, and two values that are not
-    // numbers. FreeType clamps every one of these; ztext refuses, so a caller
+    // numbers. FreeType clamps every one of these; ztypeset refuses, so a caller
     // who asks for a weight this font does not have finds out rather than
     // quietly receiving 900 and wondering why the slider stopped responding.
     for ([_]f32{ 901, 99, std.math.inf(f32), -std.math.inf(f32), std.math.nan(f32) }) |bad| {
         try std.testing.expectError(
-            ztext.Error.InvalidArgument,
-            font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = bad }}),
+            ztypeset.Error.InvalidArgument,
+            font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = bad }}),
         );
         try std.testing.expectApproxEqAbs(@as(f32, 500), try font.variation(0), tolerance);
     }
@@ -1140,17 +1140,17 @@ test "a refused variation leaves the font exactly as it was" {
     // inside a four-character constant is otherwise invisible, and "the
     // slider does nothing" is a much worse symptom than an error.
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
-        font.setVariations(&.{.{ .tag = ztext.tag("slnt"), .value = 0 }}),
+        ztypeset.Error.InvalidArgument,
+        font.setVariations(&.{.{ .tag = ztypeset.tag("slnt"), .value = 0 }}),
     );
     try std.testing.expectApproxEqAbs(@as(f32, 500), try font.variation(0), tolerance);
 
     // And the whole request is validated before any of it lands, so a good
     // axis sharing a call with a bad one moves neither. Without that, a host
     // retrying the corrected call would be starting from a half-applied font.
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.setVariations(&.{
-        .{ .tag = ztext.tag("wdth"), .value = 80 },
-        .{ .tag = ztext.tag("wght"), .value = 2000 },
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.setVariations(&.{
+        .{ .tag = ztypeset.tag("wdth"), .value = 80 },
+        .{ .tag = ztypeset.tag("wght"), .value = 2000 },
     }));
     try std.testing.expectApproxEqAbs(@as(f32, 500), try font.variation(0), tolerance);
     try std.testing.expectApproxEqAbs(@as(f32, 100), try font.variation(1), tolerance);
@@ -1166,12 +1166,12 @@ test "a face created after the axes moved inherits them" {
     const before = try font.face(0, ppem);
     defer before.deinit();
 
-    try font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 900 }});
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 900 }});
 
     // HarfBuzz's coordinates live on the hb_font_t, one per face, so a face
     // built after the change has to be seeded from the font rather than from
     // HarfBuzz's defaults. Nothing about this face went through
-    // ztextFontSetVariations, which is the case that is easy to miss.
+    // ztypesetFontSetVariations, which is the case that is easy to miss.
     const after = try font.face(0, ppem);
     defer after.deinit();
 
@@ -1206,8 +1206,8 @@ test "moving an axis invalidates a run already measured against a face" {
     // shaped and the ink bounds `extents` would now measure belong to two
     // different instances. The face's generation is bumped for exactly this,
     // and a refusal is the only honest answer.
-    try font.setVariations(&.{.{ .tag = ztext.tag("wght"), .value = 900 }});
-    try std.testing.expectError(ztext.Error.InvalidArgument, fixture.shaper.extents(face));
+    try font.setVariations(&.{.{ .tag = ztypeset.tag("wght"), .value = 900 }});
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, fixture.shaper.extents(face));
 
     // Re-shaping against the new instance makes it answerable again, at the
     // new advance rather than the old one.
@@ -1226,7 +1226,7 @@ test "golden: Latin applies standard ligatures, and turning them off undoes it" 
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    const latin: ztext.ShapeParams = .{ .direction = .ltr, .script = ztext.tag("Latn") };
+    const latin: ztypeset.ShapeParams = .{ .direction = .ltr, .script = ztypeset.tag("Latn") };
 
     // "Waffle" -> W, a, ffl-ligature, e. Four glyphs for six characters is the
     // whole point: an advance table cannot produce this.
@@ -1236,12 +1236,12 @@ test "golden: Latin applies standard ligatures, and turning them off undoes it" 
 
     // The same string with liga off is six glyphs again, and the two `f`s are
     // the same glyph id twice.
-    const no_liga = [_]ztext.Feature{
-        .{ .tag = ztext.tag("liga"), .value = 0, .start = 0, .end = ztext.feature_global },
+    const no_liga = [_]ztypeset.Feature{
+        .{ .tag = ztypeset.tag("liga"), .value = 0, .start = 0, .end = ztypeset.feature_global },
     };
     _ = try fixture.shaper.shape(face, "Waffle", .{
         .direction = .ltr,
-        .script = ztext.tag("Latn"),
+        .script = ztypeset.tag("Latn"),
         .features = &no_liga,
     });
     try expectGlyphIds(fixture.shaper.glyphs(), &.{ 58, 68, 73, 73, 79, 72 });
@@ -1260,16 +1260,16 @@ test "golden: Latin kerning moves glyphs, and turning it off restores them" {
 
     // "AV" is the textbook kerning pair. The glyph ids must not change -- only
     // the advance -- which is what separates kerning from substitution.
-    _ = try fixture.shaper.shape(face, "AV", .{ .direction = .ltr, .script = ztext.tag("Latn") });
+    _ = try fixture.shaper.shape(face, "AV", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
     try expectGlyphIds(fixture.shaper.glyphs(), &.{ 36, 57 });
     try expectAdvances(fixture.shaper.glyphs(), &.{ 19.171875, 19.203125 });
 
-    const no_kern = [_]ztext.Feature{
-        .{ .tag = ztext.tag("kern"), .value = 0, .start = 0, .end = ztext.feature_global },
+    const no_kern = [_]ztypeset.Feature{
+        .{ .tag = ztypeset.tag("kern"), .value = 0, .start = 0, .end = ztypeset.feature_global },
     };
     _ = try fixture.shaper.shape(face, "AV", .{
         .direction = .ltr,
-        .script = ztext.tag("Latn"),
+        .script = ztypeset.tag("Latn"),
         .features = &no_kern,
     });
     try expectGlyphIds(fixture.shaper.glyphs(), &.{ 36, 57 });
@@ -1285,7 +1285,7 @@ test "golden: Arabic joins, and the joined forms are not the nominal glyphs" {
     const word = "مرحبا"; // MEEM REH HAH BEH ALEF -- five letters, ten bytes.
     try std.testing.expectEqual(@as(usize, 10), word.len);
 
-    _ = try fixture.shaper.shape(face, word, .{ .direction = .rtl, .script = ztext.tag("Arab") });
+    _ = try fixture.shaper.shape(face, word, .{ .direction = .rtl, .script = ztypeset.tag("Arab") });
     const glyphs = fixture.shaper.glyphs();
 
     // Six glyphs from five characters: the extra one is a mark, positioned by
@@ -1330,7 +1330,7 @@ test "golden: shaping reports where a line may be broken, and where it may be el
     // visual order: cluster 8 first.
     _ = try fixture.shaper.shape(arabic, "\u{645}\u{631}\u{62d}\u{628}\u{627}", .{
         .direction = .rtl,
-        .script = ztext.tag("Arab"),
+        .script = ztypeset.tag("Arab"),
     });
 
     // Measured, not predicted -- what this vendored HarfBuzz produces for
@@ -1349,14 +1349,14 @@ test "golden: shaping reports where a line may be broken, and where it may be el
 
     // The claims that survive a re-vendor changing the numbers above.
     //
-    // First: every bit set is a bit ztext names. A HarfBuzz that grew a
+    // First: every bit set is a bit ztypeset names. A HarfBuzz that grew a
     // fourth flag would set it here, and a consumer switching on the mask
     // would see a value it has no meaning for.
     for (fixture.shaper.glyphs()) |glyph| {
         try std.testing.expectEqual(@as(u32, 0), glyph.flags & ~@as(u32, 0x7));
     }
 
-    // Second, and this is what the buffer flags in ztext_shape.c buy: the two
+    // Second, and this is what the buffer flags in ztypeset_shape.c buy: the two
     // OPTIONAL flags are actually produced. HarfBuzz emits unsafe-to-break
     // whether or not it is asked; the other two it withholds unless told,
     // and a consumer cannot tell a withheld flag from an absent one.
@@ -1364,9 +1364,9 @@ test "golden: shaping reports where a line may be broken, and where it may be el
     var saw_unsafe_to_concat = false;
     var saw_tatweel = false;
     for (fixture.shaper.glyphs()) |glyph| {
-        if (ztext.glyphHas(glyph, .unsafe_to_break)) saw_unsafe_to_break = true;
-        if (ztext.glyphHas(glyph, .unsafe_to_concat)) saw_unsafe_to_concat = true;
-        if (ztext.glyphHas(glyph, .safe_to_insert_tatweel)) saw_tatweel = true;
+        if (ztypeset.glyphHas(glyph, .unsafe_to_break)) saw_unsafe_to_break = true;
+        if (ztypeset.glyphHas(glyph, .unsafe_to_concat)) saw_unsafe_to_concat = true;
+        if (ztypeset.glyphHas(glyph, .safe_to_insert_tatweel)) saw_tatweel = true;
     }
     try std.testing.expect(saw_unsafe_to_break);
     try std.testing.expect(saw_unsafe_to_concat);
@@ -1379,18 +1379,18 @@ test "golden: shaping reports where a line may be broken, and where it may be el
     // property of the script rather than of the font.
     _ = try fixture.shaper.shape(latin, "office fluff", .{
         .direction = .ltr,
-        .script = ztext.tag("Latn"),
+        .script = ztypeset.tag("Latn"),
     });
     for (fixture.shaper.glyphs()) |glyph| {
-        try std.testing.expect(!ztext.glyphHas(glyph, .unsafe_to_break));
-        try std.testing.expect(!ztext.glyphHas(glyph, .safe_to_insert_tatweel));
+        try std.testing.expect(!ztypeset.glyphHas(glyph, .unsafe_to_break));
+        try std.testing.expect(!ztypeset.glyphHas(glyph, .safe_to_insert_tatweel));
     }
 
     // And the flags belong to the CURRENT run: a second shape must not leave
     // the first one's answers behind for the glyphs it happens to reuse.
-    _ = try fixture.shaper.shape(latin, "a", .{ .direction = .ltr, .script = ztext.tag("Latn") });
+    _ = try fixture.shaper.shape(latin, "a", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
     try std.testing.expectEqual(@as(usize, 1), fixture.shaper.glyphs().len);
-    try std.testing.expect(!ztext.glyphHas(fixture.shaper.glyphs()[0], .unsafe_to_break));
+    try std.testing.expect(!ztypeset.glyphHas(fixture.shaper.glyphs()[0], .unsafe_to_break));
 }
 
 test "golden: Hebrew is right-to-left without joining" {
@@ -1402,13 +1402,13 @@ test "golden: Hebrew is right-to-left without joining" {
     // SHIN LAMED VAV MEM-FINAL: four letters, four glyphs, no substitution --
     // an RTL script that does NOT join, so a direction bug cannot hide behind
     // a joining bug.
-    _ = try fixture.shaper.shape(face, "שלום", .{ .direction = .rtl, .script = ztext.tag("Hebr") });
+    _ = try fixture.shaper.shape(face, "שלום", .{ .direction = .rtl, .script = ztypeset.tag("Hebr") });
     try expectGlyphIds(fixture.shaper.glyphs(), &.{ 23, 124, 55, 96 });
     try expectAdvances(fixture.shaper.glyphs(), &.{ 21.890625, 9.3125, 16.703125, 23.359375 });
-    try std.testing.expectEqual(ztext.Direction.rtl, fixture.shaper.direction());
+    try std.testing.expectEqual(ztypeset.Direction.rtl, fixture.shaper.direction());
 }
 
-test "HarfBuzz mirrors paired brackets in an RTL run, so ztext need not" {
+test "HarfBuzz mirrors paired brackets in an RTL run, so ztypeset need not" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
     // Noto Sans Hebrew has no brackets at all -- both map to .notdef -- so
@@ -1420,7 +1420,7 @@ test "HarfBuzz mirrors paired brackets in an RTL run, so ztext need not" {
     // Rule L4 of UAX #9: a paired bracket in a right-to-left run is rendered
     // with its MIRROR glyph, so "(" opens on the right. HarfBuzz applies this
     // itself, at shaping time, before OpenType features run
-    // (`hb_ot_rotate_chars` in hb-ot-shape.cc). ztext therefore exposes no
+    // (`hb_ot_rotate_chars` in hb-ot-shape.cc). ztypeset therefore exposes no
     // mirroring API and does no mirroring of its own.
     //
     // That is a claim about a vendored upstream, so it is pinned here rather
@@ -1450,7 +1450,7 @@ test "shaped extents enclose the ink and report the pen movement" {
     const face = try fixture.face(fonts.arabic);
     defer face.deinit();
 
-    _ = try fixture.shaper.shape(face, "مرحبا", .{ .direction = .rtl, .script = ztext.tag("Arab") });
+    _ = try fixture.shaper.shape(face, "مرحبا", .{ .direction = .rtl, .script = ztypeset.tag("Arab") });
     const extents = try fixture.shaper.extents(face);
 
     var advance: f32 = 0;
@@ -1475,7 +1475,7 @@ test "clusters are byte offsets that stay inside the text and stay monotone" {
     const cases = [_]struct {
         bytes: []const u8,
         text: []const u8,
-        direction: ztext.Direction,
+        direction: ztypeset.Direction,
         script: *const [4:0]u8,
     }{
         .{ .bytes = fonts.latin, .text = "Waffle wins", .direction = .ltr, .script = "Latn" },
@@ -1488,7 +1488,7 @@ test "clusters are byte offsets that stay inside the text and stay monotone" {
         defer face.deinit();
         _ = try fixture.shaper.shape(face, case.text, .{
             .direction = case.direction,
-            .script = ztext.tag(case.script),
+            .script = ztypeset.tag(case.script),
         });
 
         const glyphs = fixture.shaper.glyphs();
@@ -1529,7 +1529,7 @@ test "a ligature merges clusters and the mapping still round-trips" {
     // Six characters, four glyphs. The ffl ligature must carry the cluster of
     // the FIRST character it swallowed, so a caret placed at byte 2, 3 or 4
     // still lands on it.
-    _ = try fixture.shaper.shape(face, "Waffle", .{ .direction = .ltr, .script = ztext.tag("Latn") });
+    _ = try fixture.shaper.shape(face, "Waffle", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
     const glyphs = fixture.shaper.glyphs();
     try std.testing.expectEqual(@as(usize, 4), glyphs.len);
     try std.testing.expectEqual(@as(u32, 0), glyphs[0].cluster); // W
@@ -1538,7 +1538,7 @@ test "a ligature merges clusters and the mapping still round-trips" {
     try std.testing.expectEqual(@as(u32, 5), glyphs[3].cluster); // e
 
     // Multi-byte characters must produce byte offsets, not character indices.
-    _ = try fixture.shaper.shape(face, "aéb", .{ .direction = .ltr, .script = ztext.tag("Latn") });
+    _ = try fixture.shaper.shape(face, "aéb", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
     const accented = fixture.shaper.glyphs();
     try std.testing.expectEqual(@as(usize, 3), accented.len);
     try std.testing.expectEqual(@as(u32, 0), accented[0].cluster);
@@ -1555,12 +1555,12 @@ test "bidi orders a mixed paragraph into visual runs that tile the text" {
     defer fixture.deinit();
 
     const text = "Hello مرحبا world";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     // First strong character is Latin, so the base is left-to-right.
     try std.testing.expectEqual(@as(u8, 0), paragraph.baseLevel());
-    try std.testing.expectEqual(ztext.Direction.ltr, paragraph.baseDirection());
+    try std.testing.expectEqual(ztypeset.Direction.ltr, paragraph.baseDirection());
     try std.testing.expectEqual(text.len, paragraph.length());
     try std.testing.expectEqual(text.len, paragraph.levels().len);
 
@@ -1570,9 +1570,9 @@ test "bidi orders a mixed paragraph into visual runs that tile the text" {
     try std.testing.expectEqualStrings("مرحبا", text[runs[1].offset..][0..runs[1].length]);
     try std.testing.expectEqualStrings(" world", text[runs[2].offset..][0..runs[2].length]);
 
-    try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(runs[0].level));
-    try std.testing.expectEqual(ztext.Direction.rtl, ztext.runDirection(runs[1].level));
-    try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(runs[2].level));
+    try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(runs[0].level));
+    try std.testing.expectEqual(ztypeset.Direction.rtl, ztypeset.runDirection(runs[1].level));
+    try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(runs[2].level));
 
     // The runs must cover every byte exactly once, or a layout engine built on
     // them would drop or double-draw text.
@@ -1593,22 +1593,22 @@ test "bidi resolves an RTL base and reverses the run order" {
     // First strong character is Arabic, so the base is right-to-left and the
     // Latin word becomes the embedded run.
     const text = "مرحبا Hello";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(@as(u8, 1), paragraph.baseLevel());
-    try std.testing.expectEqual(ztext.Direction.rtl, paragraph.baseDirection());
+    try std.testing.expectEqual(ztypeset.Direction.rtl, paragraph.baseDirection());
 
     const runs = paragraph.visualRuns();
     try std.testing.expectEqual(@as(usize, 2), runs.len);
     // Visual order with an RTL base: the Latin run is drawn leftmost, so it
     // comes first even though it is last in the text.
     try std.testing.expectEqualStrings("Hello", text[runs[0].offset..][0..runs[0].length]);
-    try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(runs[0].level));
-    try std.testing.expectEqual(ztext.Direction.rtl, ztext.runDirection(runs[1].level));
+    try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(runs[0].level));
+    try std.testing.expectEqual(ztypeset.Direction.rtl, ztypeset.runDirection(runs[1].level));
 
     // Forcing the base the other way must change the answer.
-    const forced = try ztext.Paragraph.init(text, .{ .base = .ltr });
+    const forced = try ztypeset.Paragraph.init(text, .{ .base = .ltr });
     defer forced.deinit();
     try std.testing.expectEqual(@as(u8, 0), forced.baseLevel());
 }
@@ -1618,13 +1618,13 @@ test "script itemisation splits a mixed paragraph into shapeable runs" {
     defer fixture.deinit();
 
     const text = "Hello مرحبا";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const runs = paragraph.scriptRuns();
     try std.testing.expectEqual(@as(usize, 2), runs.len);
-    try std.testing.expectEqual(ztext.tag("Latn"), runs[0].script);
-    try std.testing.expectEqual(ztext.tag("Arab"), runs[1].script);
+    try std.testing.expectEqual(ztypeset.tag("Latn"), runs[0].script);
+    try std.testing.expectEqual(ztypeset.tag("Arab"), runs[1].script);
 
     // Logical order, contiguous, covering the whole paragraph.
     try std.testing.expectEqual(@as(u32, 0), runs[0].offset);
@@ -1637,12 +1637,12 @@ test "a paragraph stops at the first separator, and says how far it got" {
     defer fixture.deinit();
 
     // The bidi algorithm is defined per paragraph, so a buffer holding two of
-    // them describes two. ztext analyses the first and reports the length it
+    // them describes two. ztypeset analyses the first and reports the length it
     // covered -- which INCLUDES the separator, matching SheenBidi. A caller
     // that ignores `length()` and indexes the whole buffer with these runs
     // would silently drop the second paragraph.
     const text = "abc\ndef";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     try std.testing.expectEqual(@as(usize, 4), paragraph.length());
@@ -1653,12 +1653,12 @@ test "a paragraph stops at the first separator, and says how far it got" {
     try std.testing.expectEqual(paragraph.length(), covered);
 
     // Both CR and LF are separators, but CRLF counts as one boundary.
-    const crlf = try ztext.Paragraph.init("abc\r\ndef", .{});
+    const crlf = try ztypeset.Paragraph.init("abc\r\ndef", .{});
     defer crlf.deinit();
     try std.testing.expectEqual(@as(usize, 5), crlf.length());
 
     // Text with no separator is covered whole.
-    const single = try ztext.Paragraph.init("abc def", .{});
+    const single = try ztypeset.Paragraph.init("abc def", .{});
     defer single.deinit();
     try std.testing.expectEqual(@as(usize, 7), single.length());
 }
@@ -1667,13 +1667,13 @@ test "an empty paragraph is analysed rather than refused" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init("", .{});
+    const paragraph = try ztypeset.Paragraph.init("", .{});
     defer paragraph.deinit();
     try std.testing.expectEqual(@as(usize, 0), paragraph.length());
     try std.testing.expectEqual(@as(usize, 0), paragraph.visualRuns().len);
     try std.testing.expectEqual(@as(u8, 0), paragraph.baseLevel());
 
-    const rtl = try ztext.Paragraph.init("", .{ .base = .rtl });
+    const rtl = try ztypeset.Paragraph.init("", .{ .base = .rtl });
     defer rtl.deinit();
     try std.testing.expectEqual(@as(u8, 1), rtl.baseLevel());
 }
@@ -1684,7 +1684,7 @@ test "the paragraph, itemiser and shaper compose into a whole line" {
 
     // The pipeline a host is meant to build: order, itemise, shape each piece.
     const text = "Hi שלום";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const latin_face = try fixture.face(fonts.latin);
@@ -1695,7 +1695,7 @@ test "the paragraph, itemiser and shaper compose into a whole line" {
     var total_glyphs: usize = 0;
     for (paragraph.visualRuns()) |run| {
         const slice = text[run.offset..][0..run.length];
-        const direction = ztext.runDirection(run.level);
+        const direction = ztypeset.runDirection(run.level);
         const face = if (direction == .rtl) hebrew_face else latin_face;
         _ = try fixture.shaper.shape(face, slice, .{ .direction = direction });
         total_glyphs += fixture.shaper.glyphs().len;
@@ -1716,7 +1716,7 @@ test "the paragraph, itemiser and shaper compose into a whole line" {
 /// Chosen because the three spaces sit between two right-to-left words, which
 /// makes them right-to-left over the paragraph, and a line that ends just
 /// after them makes them left-to-right by rule L1. That single difference is
-/// the whole reason ZtextLine exists, and it is visible as an indent on the
+/// the whole reason ZtypesetLine exists, and it is visible as an indent on the
 /// wrong side.
 const wrapped = "abc \u{5E9}\u{5DC}\u{5D5}\u{5DD}   \u{5E9}\u{5DC}\u{5D5}\u{5DD}";
 /// Byte offset just past the three spaces: "abc " is 4, each shalom is 8.
@@ -1742,7 +1742,7 @@ test "a line applies rule L1, which the paragraph's own runs cannot" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .{});
+    const paragraph = try ztypeset.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
     try std.testing.expectEqual(@as(u8, 0), paragraph.baseLevel());
 
@@ -1752,8 +1752,8 @@ test "a line applies rule L1, which the paragraph's own runs cannot" {
     const para_runs = paragraph.visualRuns();
     try std.testing.expectEqual(@as(usize, 2), para_runs.len);
     try std.testing.expectEqualStrings("abc ", wrapped[para_runs[0].offset..][0..para_runs[0].length]);
-    try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(para_runs[0].level));
-    try std.testing.expectEqual(ztext.Direction.rtl, ztext.runDirection(para_runs[1].level));
+    try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(para_runs[0].level));
+    try std.testing.expectEqual(ztypeset.Direction.rtl, ztypeset.runDirection(para_runs[1].level));
     // The spaces are inside the RTL run, at level 1.
     try std.testing.expectEqual(@as(u8, 1), paragraph.levels()[first_line_end - 1]);
 
@@ -1765,10 +1765,10 @@ test "a line applies rule L1, which the paragraph's own runs cannot" {
     const line_runs = line.visualRuns();
     try std.testing.expectEqual(@as(usize, 3), line_runs.len);
     try std.testing.expectEqualStrings("abc ", wrapped[line_runs[0].offset..][0..line_runs[0].length]);
-    try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(line_runs[0].level));
-    try std.testing.expectEqual(ztext.Direction.rtl, ztext.runDirection(line_runs[1].level));
+    try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(line_runs[0].level));
+    try std.testing.expectEqual(ztypeset.Direction.rtl, ztypeset.runDirection(line_runs[1].level));
     try std.testing.expectEqualStrings("   ", wrapped[line_runs[2].offset..][0..line_runs[2].length]);
-    try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(line_runs[2].level));
+    try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(line_runs[2].level));
 
     // This is the assertion that would fail if lines were derived from the
     // paragraph's runs: the spaces are drawn last, to the right of the Hebrew
@@ -1782,7 +1782,7 @@ test "a line covers exactly its own range, and offsets stay paragraph-relative" 
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .{});
+    const paragraph = try ztypeset.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
 
     const second = try paragraph.line(first_line_end, wrapped.len - first_line_end);
@@ -1805,19 +1805,19 @@ test "a line spanning the whole paragraph agrees with the paragraph" {
     // The paragraph's runs are not a different algorithm, they are this same
     // one asked for the whole range -- so the two must agree exactly.
     for ([_][]const u8{ wrapped, "Hello مرحبا world", "\u{5E9}\u{5DC}\u{5D5}\u{5DD} abc" }) |text| {
-        const paragraph = try ztext.Paragraph.init(text, .{});
+        const paragraph = try ztypeset.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         const line = try paragraph.line(0, paragraph.length());
         defer line.deinit();
 
         try std.testing.expectEqualSlices(
-            ztext.VisualRun,
+            ztypeset.VisualRun,
             paragraph.visualRuns(),
             line.visualRuns(),
         );
         try std.testing.expectEqualSlices(
-            ztext.ShapingRun,
+            ztypeset.ShapingRun,
             paragraph.shapingRuns(),
             line.shapingRuns(),
         );
@@ -1832,7 +1832,7 @@ test "a line's shaping runs are split by script as well as direction" {
     // A shaper handed that as one run would get it wrong, which is what the
     // intersection is for -- and a line has to do it too, not just a paragraph.
     const text = "x \u{5E9}\u{5DC} \u{645}\u{631} y";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const line = try paragraph.line(0, text.len);
@@ -1843,8 +1843,8 @@ test "a line's shaping runs are split by script as well as direction" {
 
     var scripts = std.mem.zeroes([2]bool);
     for (runs) |run| {
-        if (run.script == ztext.tag("Hebr")) scripts[0] = true;
-        if (run.script == ztext.tag("Arab")) scripts[1] = true;
+        if (run.script == ztypeset.tag("Hebr")) scripts[0] = true;
+        if (run.script == ztypeset.tag("Arab")) scripts[1] = true;
     }
     try std.testing.expect(scripts[0] and scripts[1]);
     try expectTiles(runs, 0, text.len);
@@ -1857,9 +1857,9 @@ test "a line outlives the paragraph it came from" {
     // The contract says a line copies what it needs. Destroying the paragraph
     // first is how that is proved rather than asserted -- under the testing
     // allocator a borrowed pointer here would be a use-after-free.
-    var line: ztext.Line = undefined;
+    var line: ztypeset.Line = undefined;
     {
-        const paragraph = try ztext.Paragraph.init(wrapped, .{});
+        const paragraph = try ztypeset.Paragraph.init(wrapped, .{});
         defer paragraph.deinit();
         line = try paragraph.line(0, first_line_end);
     }
@@ -1873,7 +1873,7 @@ test "a line refuses a range that is out of bounds or splits a character" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .{});
+    const paragraph = try ztypeset.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
 
     try std.testing.expectError(error.InvalidArgument, paragraph.line(0, wrapped.len + 1));
@@ -1897,7 +1897,7 @@ test "an empty line is analysed rather than refused" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
 
-    const paragraph = try ztext.Paragraph.init(wrapped, .{});
+    const paragraph = try ztypeset.Paragraph.init(wrapped, .{});
     defer paragraph.deinit();
 
     const empty = try paragraph.line(4, 0);
@@ -1908,7 +1908,7 @@ test "an empty line is analysed rather than refused" {
     try std.testing.expectEqual(@as(usize, 0), empty.shapingRuns().len);
 
     // And so is a line of an empty paragraph, which never reaches SheenBidi.
-    const blank = try ztext.Paragraph.init("", .{});
+    const blank = try ztypeset.Paragraph.init("", .{});
     defer blank.deinit();
     const blank_line = try blank.line(0, 0);
     defer blank_line.deinit();
@@ -1926,7 +1926,7 @@ test "FreeType and HarfBuzz metrics agree closely but not exactly" {
     defer face.deinit();
 
     const text = "Hamburgefonstiv";
-    const base: ztext.ShapeParams = .{ .direction = .ltr, .script = ztext.tag("Latn") };
+    const base: ztypeset.ShapeParams = .{ .direction = .ltr, .script = ztypeset.tag("Latn") };
 
     _ = try fixture.shaper.shape(face, text, base);
     var harfbuzz_total: f32 = 0;
@@ -1935,7 +1935,7 @@ test "FreeType and HarfBuzz metrics agree closely but not exactly" {
 
     _ = try fixture.shaper.shape(face, text, .{
         .direction = .ltr,
-        .script = ztext.tag("Latn"),
+        .script = ztypeset.tag("Latn"),
         .use_freetype_metrics = true,
     });
     var freetype_total: f32 = 0;
@@ -1971,7 +1971,7 @@ test "A8 rasterisation produces coverage with ink in it" {
     try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
     try std.testing.expect(bitmap.pitch > 0);
 
-    const rows = ztext.bitmapRows(bitmap) orelse return error.TestUnexpectedResult;
+    const rows = ztypeset.bitmapRows(bitmap) orelse return error.TestUnexpectedResult;
     var max: u8 = 0;
     var lit: usize = 0;
     for (rows) |value| {
@@ -2009,7 +2009,7 @@ test "SDF is a real distance field, not a coverage bitmap in disguise" {
     try std.testing.expectEqual(coverage_height + 2 * spread, sdf.height);
     try std.testing.expectEqual(coverage_left - @as(i32, @intCast(spread)), sdf.left);
 
-    const rows = ztext.bitmapRows(sdf) orelse return error.TestUnexpectedResult;
+    const rows = ztypeset.bitmapRows(sdf) orelse return error.TestUnexpectedResult;
     const pitch: usize = @intCast(sdf.pitch);
 
     // Scan the middle row of an 'o'. Crossing its left stroke, the field must
@@ -2049,8 +2049,8 @@ test "SDF is a real distance field, not a coverage bitmap in disguise" {
     try std.testing.expectEqual(coverage_width + 32, wider.width);
     try fixture.library.setSdfSpread(spread);
 
-    try std.testing.expectError(ztext.Error.InvalidArgument, fixture.library.setSdfSpread(1));
-    try std.testing.expectError(ztext.Error.InvalidArgument, fixture.library.setSdfSpread(33));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, fixture.library.setSdfSpread(1));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, fixture.library.setSdfSpread(33));
 }
 
 test "a rendered bitmap says which format its bytes are in" {
@@ -2064,17 +2064,17 @@ test "a rendered bitmap says which format its bytes are in" {
     // washed out and plausible. The bitmap therefore carries its own format.
     const glyph = face.font.glyphIndex('o');
     try std.testing.expectEqual(
-        ztext.BitmapFormat.a8,
+        ztypeset.BitmapFormat.a8,
         (try face.renderGlyph(glyph, .a8, .none, 0, 0)).format,
     );
     try std.testing.expectEqual(
-        ztext.BitmapFormat.sdf,
+        ztypeset.BitmapFormat.sdf,
         (try face.renderGlyph(glyph, .sdf, .none, 0, 0)).format,
     );
     // Back again: the field is written by every render, not left at whatever
     // the last one set.
     try std.testing.expectEqual(
-        ztext.BitmapFormat.a8,
+        ztypeset.BitmapFormat.a8,
         (try face.renderGlyph(glyph, .a8, .none, 0, 0)).format,
     );
 
@@ -2084,7 +2084,7 @@ test "a rendered bitmap says which format its bytes are in" {
     // exactly the special case that gets written once and then forgotten.
     const space = try face.renderGlyph(face.font.glyphIndex(' '), .sdf, .none, 0, 0);
     try std.testing.expectEqual(@as(?[*]const u8, null), space.pixels);
-    try std.testing.expectEqual(ztext.BitmapFormat.sdf, space.format);
+    try std.testing.expectEqual(ztypeset.BitmapFormat.sdf, space.format);
 }
 
 test "glyph extents match the rasterised bitmap" {
@@ -2129,14 +2129,14 @@ test "a whole-pixel offset shifts the bitmap by exactly one pixel" {
     // the second call below.
     const plain_rows = try std.testing.allocator.dupe(
         u8,
-        ztext.bitmapRows(plain) orelse return error.TestUnexpectedResult,
+        ztypeset.bitmapRows(plain) orelse return error.TestUnexpectedResult,
     );
     defer std.testing.allocator.free(plain_rows);
 
     // 64 in 26.6 is exactly one pixel, so this is a pure repositioning: same
     // shape, same coverage, moved by one pixel on each axis.
     const shifted = try face.renderGlyph(glyph, .a8, .none, 64, 64);
-    const shifted_rows = ztext.bitmapRows(shifted) orelse return error.TestUnexpectedResult;
+    const shifted_rows = ztypeset.bitmapRows(shifted) orelse return error.TestUnexpectedResult;
 
     try std.testing.expectEqual(plain.width, shifted.width);
     try std.testing.expectEqual(plain.height, shifted.height);
@@ -2155,7 +2155,7 @@ test "a fractional offset changes the antialiasing rather than the pixel grid" {
     const plain = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     const plain_rows = try std.testing.allocator.dupe(
         u8,
-        ztext.bitmapRows(plain) orelse return error.TestUnexpectedResult,
+        ztypeset.bitmapRows(plain) orelse return error.TestUnexpectedResult,
     );
     defer std.testing.allocator.free(plain_rows);
 
@@ -2163,7 +2163,7 @@ test "a fractional offset changes the antialiasing rather than the pixel grid" {
     // at every partially-covered edge pixel has to change -- that is the
     // entire point of subpixel positioning.
     const half = try face.renderGlyph(glyph, .a8, .none, 32, 0);
-    const half_rows = ztext.bitmapRows(half) orelse return error.TestUnexpectedResult;
+    const half_rows = ztypeset.bitmapRows(half) orelse return error.TestUnexpectedResult;
 
     var identical = plain.width == half.width and plain.height == half.height;
     if (identical) identical = std.mem.eql(u8, plain_rows, half_rows);
@@ -2180,7 +2180,7 @@ test "SDF ignores the subpixel offset" {
     const plain = try face.renderGlyph(glyph, .sdf, .none, 0, 0);
     const plain_rows = try std.testing.allocator.dupe(
         u8,
-        ztext.bitmapRows(plain) orelse return error.TestUnexpectedResult,
+        ztypeset.bitmapRows(plain) orelse return error.TestUnexpectedResult,
     );
     defer std.testing.allocator.free(plain_rows);
 
@@ -2188,7 +2188,7 @@ test "SDF ignores the subpixel offset" {
     // nothing here: SDF is baked once and sampled at any position later, so
     // baking a sub-pixel shift in would be work with no way to undo it.
     const offset = try face.renderGlyph(glyph, .sdf, .none, 32, 32);
-    const offset_rows = ztext.bitmapRows(offset) orelse return error.TestUnexpectedResult;
+    const offset_rows = ztypeset.bitmapRows(offset) orelse return error.TestUnexpectedResult;
 
     try std.testing.expectEqual(plain.width, offset.width);
     try std.testing.expectEqual(plain.height, offset.height);
@@ -2216,7 +2216,7 @@ const OutlineCollector = struct {
     }
 };
 
-fn outlineMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result {
+fn outlineMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztypeset.c.Result {
     _ = y;
     const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
     self.move_to_count += 1;
@@ -2224,7 +2224,7 @@ fn outlineMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result 
     return .ok;
 }
 
-fn outlineLineTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result {
+fn outlineLineTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztypeset.c.Result {
     _ = y;
     const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
     self.line_to_count += 1;
@@ -2232,7 +2232,7 @@ fn outlineLineTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result 
     return .ok;
 }
 
-fn outlineConicTo(user: ?*anyopaque, control_x: i32, control_y: i32, x: i32, y: i32) callconv(.c) ztext.c.Result {
+fn outlineConicTo(user: ?*anyopaque, control_x: i32, control_y: i32, x: i32, y: i32) callconv(.c) ztypeset.c.Result {
     _ = control_x;
     _ = control_y;
     _ = y;
@@ -2250,7 +2250,7 @@ fn outlineCubicTo(
     control2_y: i32,
     x: i32,
     y: i32,
-) callconv(.c) ztext.c.Result {
+) callconv(.c) ztypeset.c.Result {
     _ = control1_x;
     _ = control1_y;
     _ = control2_x;
@@ -2262,13 +2262,13 @@ fn outlineCubicTo(
     return .ok;
 }
 
-fn outlineClose(user: ?*anyopaque) callconv(.c) ztext.c.Result {
+fn outlineClose(user: ?*anyopaque) callconv(.c) ztypeset.c.Result {
     const self: *OutlineCollector = @ptrCast(@alignCast(user.?));
     self.close_count += 1;
     return .ok;
 }
 
-fn outlineFuncsInto(collector: *OutlineCollector) ztext.OutlineFuncs {
+fn outlineFuncsInto(collector: *OutlineCollector) ztypeset.OutlineFuncs {
     return .{
         .move_to = outlineMoveTo,
         .line_to = outlineLineTo,
@@ -2320,7 +2320,7 @@ test "an inkless glyph decomposes to nothing" {
     try std.testing.expectEqual(@as(u32, 0), collector.close_count);
 }
 
-fn abortingMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztext.c.Result {
+fn abortingMoveTo(user: ?*anyopaque, x: i32, y: i32) callconv(.c) ztypeset.c.Result {
     _ = user;
     _ = x;
     _ = y;
@@ -2338,7 +2338,7 @@ test "a callback's own failure aborts decomposition and propagates" {
     var funcs = outlineFuncsInto(&collector);
     funcs.move_to = abortingMoveTo;
 
-    try std.testing.expectError(ztext.Error.OutOfMemory, face.decomposeOutline(glyph, .none, &funcs));
+    try std.testing.expectError(ztypeset.Error.OutOfMemory, face.decomposeOutline(glyph, .none, &funcs));
     // Aborted before the first line/curve of the contour it never opened.
     try std.testing.expectEqual(@as(u32, 0), collector.line_to_count);
 }
@@ -2354,7 +2354,7 @@ test "decomposeOutline refuses an incomplete callback set" {
     var funcs = outlineFuncsInto(&collector);
     funcs.close = null;
 
-    try std.testing.expectError(ztext.Error.InvalidArgument, face.decomposeOutline(glyph, .none, &funcs));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, face.decomposeOutline(glyph, .none, &funcs));
 }
 
 //=============================================================================
@@ -2373,9 +2373,9 @@ test "an LCD bitmap is three samples per pixel, and says so" {
     const grey_height = grey.height;
 
     const lcd = try face.renderGlyph(glyph, .lcd, .none, 0, 0);
-    try std.testing.expectEqual(ztext.BitmapFormat.lcd, lcd.format);
-    try std.testing.expectEqual(@as(u32, 3), ztext.bitmapChannels(lcd.format));
-    try std.testing.expectEqual(@as(u32, 1), ztext.bitmapChannels(.a8));
+    try std.testing.expectEqual(ztypeset.BitmapFormat.lcd, lcd.format);
+    try std.testing.expectEqual(@as(u32, 3), ztypeset.bitmapChannels(lcd.format));
+    try std.testing.expectEqual(@as(u32, 1), ztypeset.bitmapChannels(.a8));
 
     // width is in PIXELS, in every format. FreeType counts an LCD bitmap's
     // width in samples, so a wrapper that passed its number on would report a
@@ -2400,7 +2400,7 @@ test "an LCD_V bitmap is three sub-rows per pixel row, and says so" {
     const grey_height = grey.height;
 
     const lcd = try face.renderGlyph(glyph, .lcd_v, .none, 0, 0);
-    try std.testing.expectEqual(ztext.BitmapFormat.lcd_v, lcd.format);
+    try std.testing.expectEqual(ztypeset.BitmapFormat.lcd_v, lcd.format);
     try std.testing.expectEqual(grey_width, lcd.width);
     try std.testing.expect(lcd.height >= grey_height);
     try std.testing.expect(lcd.height <= grey_height + 2);
@@ -2443,8 +2443,8 @@ test "a subpixel render honours the hinting it was asked for" {
     // produces ink. Normal hinting targets the subpixel grid; light is its
     // own target and unrelated to the render mode.
     const glyph = face.font.glyphIndex('H');
-    for ([_]ztext.RenderMode{ .lcd, .lcd_v }) |mode| {
-        for ([_]ztext.Hinting{ .normal, .light, .none }) |hinting| {
+    for ([_]ztypeset.RenderMode{ .lcd, .lcd_v }) |mode| {
+        for ([_]ztypeset.Hinting{ .normal, .light, .none }) |hinting| {
             const bitmap = try face.renderGlyph(glyph, mode, hinting, 0, 0);
             try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
             try std.testing.expect(bitmap.pixels != null);
@@ -2464,7 +2464,7 @@ test "a subpixel render honours the hinting it was asked for" {
 /// numbers would carry an overshoot that depends on the glyph. `H` is all
 /// straight lines, and a bevelled, butt-capped pen keeps it that way, so a
 /// radius of R widens the box by exactly 2R.
-fn squarePen(radius: f32) ztext.Stroke {
+fn squarePen(radius: f32) ztypeset.Stroke {
     return .{
         .radius = radius,
         .miter_limit = 0,
@@ -2474,7 +2474,7 @@ fn squarePen(radius: f32) ztext.Stroke {
     };
 }
 
-fn inkedPixels(bitmap: ztext.GlyphBitmap) usize {
+fn inkedPixels(bitmap: ztypeset.GlyphBitmap) usize {
     const pixels = bitmap.pixels orelse return 0;
     const pitch: usize = @intCast(bitmap.pitch);
     var inked: usize = 0;
@@ -2492,18 +2492,18 @@ test "a face has no pen until one is set, and null puts the glyph back" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    try std.testing.expectEqual(ztext.stroke_none, try face.stroke());
+    try std.testing.expectEqual(ztypeset.stroke_none, try face.stroke());
 
     const glyph = face.font.glyphIndex('H');
     const plain = try face.glyphExtents(glyph, .none);
 
     try face.setStroke(squarePen(4));
     try std.testing.expectEqual(@as(f32, 4), (try face.stroke()).radius);
-    try std.testing.expectEqual(ztext.LineJoin.bevel, (try face.stroke()).join);
+    try std.testing.expectEqual(ztypeset.LineJoin.bevel, (try face.stroke()).join);
     try std.testing.expect((try face.glyphExtents(glyph, .none)).x_max > plain.x_max);
 
     try face.setStroke(null);
-    try std.testing.expectEqual(ztext.stroke_none, try face.stroke());
+    try std.testing.expectEqual(ztypeset.stroke_none, try face.stroke());
     const restored = try face.glyphExtents(glyph, .none);
     try std.testing.expectEqual(plain.x_min, restored.x_min);
     try std.testing.expectEqual(plain.x_max, restored.x_max);
@@ -2594,7 +2594,7 @@ test "the glyph grown, shrunk, and the band between them" {
 
     // Big enough that the stems are several times the pen. The inward contour
     // of a stem thinner than the pen turns itself inside out -- that is what
-    // upstream produces, and ffi/ztext.h says so -- and this test is about
+    // upstream produces, and ffi/ztypeset.h says so -- and this test is about
     // the case where the pen fits.
     try face.setPixelSize(128, 128);
     const glyph = face.font.glyphIndex('H');
@@ -2655,7 +2655,7 @@ test "the pen traces the styled glyph, and the matrix maps what it traced" {
 
     // What the pen CONTRIBUTES to the width, measured rather than modelled.
     const widthOf = struct {
-        fn f(f_: ztext.Face, g: u32) !f32 {
+        fn f(f_: ztypeset.Face, g: u32) !f32 {
             const e = try f_.glyphExtents(g, .none);
             return e.x_max - e.x_min;
         }
@@ -2692,7 +2692,7 @@ test "the pen traces the styled glyph, and the matrix maps what it traced" {
     // The same question on the other side of the pen. Stroked THEN mapped by
     // 3x, the gain is stretched to 3 * 2R; mapped first, it would still be
     // 2R -- 24 px against 12.
-    try face.setTransform(ztext.scaling(3, 1));
+    try face.setTransform(ztypeset.scaling(3, 1));
     const wide = try widthOf(face, glyph);
     try face.setStroke(squarePen(radius));
     const wide_stroked = try widthOf(face, glyph);
@@ -2716,16 +2716,16 @@ test "a pen that cannot be drawn is refused, and a glyph with no ink is left alo
     for (bad) |value| {
         var pen = squarePen(4);
         pen.radius = value;
-        try std.testing.expectError(ztext.Error.InvalidArgument, face.setStroke(pen));
+        try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setStroke(pen));
         pen = squarePen(4);
         pen.miter_limit = value;
-        try std.testing.expectError(ztext.Error.InvalidArgument, face.setStroke(pen));
+        try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setStroke(pen));
     }
     // Larger than FreeType's 26.6 can hold: refused rather than silently
     // converted to zero, which would read as "no stroke".
-    try std.testing.expectError(ztext.Error.InvalidArgument, face.setStroke(squarePen(1.0e6)));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setStroke(squarePen(1.0e6)));
     // None of that left a pen behind.
-    try std.testing.expectEqual(ztext.stroke_none, try face.stroke());
+    try std.testing.expectEqual(ztypeset.stroke_none, try face.stroke());
 
     // A space has no path to trace, and stroking nothing is still nothing.
     try face.setStroke(squarePen(4));
@@ -2736,7 +2736,7 @@ test "a pen that cannot be drawn is refused, and a glyph with no ink is left alo
 }
 
 test "several threads may each drive their own library at once" {
-    // ztext.h's rule is one ZtextLibrary PER THREAD, which makes concurrent
+    // ztypeset.h's rule is one ZtypesetLibrary PER THREAD, which makes concurrent
     // use supported usage rather than abuse -- and two pieces of process-wide
     // state sit squarely on that path: the face generation counter, bumped by
     // every size, variation, synthetic and stroke change, and SheenBidi's
@@ -2754,7 +2754,7 @@ test "several threads may each drive their own library at once" {
     // hands over instead of deadlocking. A spin that never ends is a hang,
     // and a hang is what a wrong one-time-init looks like.
     //
-    // The default allocator, deliberately: ztextSetAllocator is documented as
+    // The default allocator, deliberately: ztypesetSetAllocator is documented as
     // start-up-only and mutates a registry no lock protects, so a test that
     // installed one from four threads would be testing the thing the header
     // forbids.
@@ -2762,7 +2762,7 @@ test "several threads may each drive their own library at once" {
         fn body(bytes: []const u8, rounds: usize) !void {
             var round: usize = 0;
             while (round < rounds) : (round += 1) {
-                const library = try ztext.Library.init();
+                const library = try ztypeset.Library.init();
                 defer library.deinit();
                 const font = try library.createFont(bytes, 0);
                 defer font.deinit();
@@ -2773,13 +2773,13 @@ test "several threads may each drive their own library at once" {
                 const size: f32 = @floatFromInt(16 + (round % 24));
                 try face.setPixelSize(size, size);
                 try face.setSyntheticBold(@as(f32, @floatFromInt(round % 3)) / 64.0);
-                try face.setStroke(if (round % 2 == 0) null else ztext.outline(1.0));
+                try face.setStroke(if (round % 2 == 0) null else ztypeset.outline(1.0));
                 try face.setTransform(null);
 
                 _ = try face.renderGlyph(font.glyphIndex('A'), .a8, .none, 0, 0);
 
                 // And the one-time SheenBidi install, from every thread.
-                const paragraph = try ztext.Paragraph.init("abc \u{5D0}\u{5D1}\u{5D2}", .{});
+                const paragraph = try ztypeset.Paragraph.init("abc \u{5D0}\u{5D1}\u{5D2}", .{});
                 defer paragraph.deinit();
                 _ = paragraph.baseLevel();
                 _ = paragraph.lineBreaks();
@@ -2861,15 +2861,15 @@ test "a face is created with the identity, and null clears back to it" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    try std.testing.expectEqual(ztext.matrix_identity, try face.transform());
+    try std.testing.expectEqual(ztypeset.matrix_identity, try face.transform());
 
     const glyph = face.font.glyphIndex('H');
     const plain = try face.glyphExtents(glyph, .none);
 
-    try face.setTransform(ztext.scaling(2, 1));
+    try face.setTransform(ztypeset.scaling(2, 1));
     try std.testing.expectEqual(@as(f32, 2), (try face.transform()).xx);
     try face.setTransform(null);
-    try std.testing.expectEqual(ztext.matrix_identity, try face.transform());
+    try std.testing.expectEqual(ztypeset.matrix_identity, try face.transform());
 
     // Cleared means cleared: the glyph is the one it was.
     const restored = try face.glyphExtents(glyph, .none);
@@ -2878,7 +2878,7 @@ test "a face is created with the identity, and null clears back to it" {
     try std.testing.expectEqual(plain.y_max, restored.y_max);
 
     // Explicitly setting the identity is the same as clearing it.
-    try face.setTransform(ztext.matrix_identity);
+    try face.setTransform(ztypeset.matrix_identity);
     try std.testing.expectEqual(plain.x_max, (try face.glyphExtents(glyph, .none)).x_max);
 }
 
@@ -2892,7 +2892,7 @@ test "a transform maps the ink and leaves every advance in text space" {
     const plain = try face.glyphExtents(glyph, .none);
     const plain_shaped = try shapedAdvance(fixture, face, false);
 
-    try face.setTransform(ztext.scaling(2, 1));
+    try face.setTransform(ztypeset.scaling(2, 1));
     const wide = try face.glyphExtents(glyph, .none);
     try face.setTransform(null);
 
@@ -2907,7 +2907,7 @@ test "a transform maps the ink and leaves every advance in text space" {
     // A shear, which is the only shape that can tell the two off-diagonal
     // terms apart: xy leans the glyph along x as y rises, and yx would lean
     // it along y instead. A diagonal matrix cannot see the difference.
-    try face.setTransform(ztext.shear(0.5));
+    try face.setTransform(ztypeset.shear(0.5));
     const leaned = try face.glyphExtents(glyph, .none);
     try face.setTransform(null);
     try std.testing.expect(leaned.x_max > plain.x_max);
@@ -2918,7 +2918,7 @@ test "a transform maps the ink and leaves every advance in text space" {
     // FT_Set_Transform would have doubled this one, and a shaped run's
     // advances -- which come from HarfBuzz, with no matrix to be told about --
     // could not have followed it.
-    try face.setTransform(ztext.scaling(2, 1));
+    try face.setTransform(ztypeset.scaling(2, 1));
     try std.testing.expectEqual(plain.x_advance, (try face.glyphExtents(glyph, .none)).x_advance);
     try std.testing.expectEqual(plain_shaped, try shapedAdvance(fixture, face, false));
     try face.setTransform(null);
@@ -2938,7 +2938,7 @@ test "a transform reaches render and outline decomposition, not only extents" {
     const plain_funcs = outlineFuncsInto(&plain_points);
     try face.decomposeOutline(glyph, .none, &plain_funcs);
 
-    try face.setTransform(ztext.scaling(2, 1));
+    try face.setTransform(ztypeset.scaling(2, 1));
     const wide_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     var wide_points = OutlineCollector{};
     const wide_funcs = outlineFuncsInto(&wide_points);
@@ -2961,7 +2961,7 @@ test "a transform composes after the synthetic styles, not before" {
 
     // Emboldening is isotropic: it adds the same amount to width and to
     // height, in the FONT's space.
-    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default);
     const bold = try face.glyphExtents(glyph, .none);
     const grew_x = (bold.x_max - bold.x_min) - (plain.x_max - plain.x_min);
     const grew_y = (bold.y_max - bold.y_min) - (plain.y_max - plain.y_min);
@@ -2971,7 +2971,7 @@ test "a transform composes after the synthetic styles, not before" {
     // included. Applied the other way round, the widening would be added
     // after the stretch and the width would grow by grew_x rather than by
     // 2 * grew_x.
-    try face.setTransform(ztext.scaling(2, 1));
+    try face.setTransform(ztypeset.scaling(2, 1));
     const bold_wide = try face.glyphExtents(glyph, .none);
     try face.setTransform(null);
     try face.setSyntheticBold(0);
@@ -2992,18 +2992,18 @@ test "a transform that is not made of numbers is refused" {
     const bad = [_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) };
     for (bad) |value| {
         for (0..4) |i| {
-            var matrix = ztext.matrix_identity;
+            var matrix = ztypeset.matrix_identity;
             switch (i) {
                 0 => matrix.xx = value,
                 1 => matrix.xy = value,
                 2 => matrix.yx = value,
                 else => matrix.yy = value,
             }
-            try std.testing.expectError(ztext.Error.InvalidArgument, face.setTransform(matrix));
+            try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setTransform(matrix));
         }
     }
     // Refused, and the face is where it was.
-    try std.testing.expectEqual(ztext.matrix_identity, try face.transform());
+    try std.testing.expectEqual(ztypeset.matrix_identity, try face.transform());
 }
 
 //=============================================================================
@@ -3022,25 +3022,25 @@ test "a font lists its character maps and says which one is selected" {
     try std.testing.expect(font.charmapCount() >= 1);
     const active = font.activeCharmap().?;
     try std.testing.expect(active < font.charmapCount());
-    try std.testing.expectEqual(ztext.charmap_unicode, (try font.charmap(active)).encoding);
+    try std.testing.expectEqual(ztypeset.charmap_unicode, (try font.charmap(active)).encoding);
 
     // Every map this font has is a Unicode one -- asserted rather than
     // assumed, because it is what makes the fixture in the next test
     // necessary.
     for (0..font.charmapCount()) |i| {
         const map = try font.charmap(@intCast(i));
-        try std.testing.expectEqual(ztext.charmap_unicode, map.encoding);
+        try std.testing.expectEqual(ztypeset.charmap_unicode, map.encoding);
         try std.testing.expect(map.platform_id == 0 or map.platform_id == 3);
     }
 
     // An encoding the font does not carry is a refusal, which is how "does
     // this font have a symbol map" is asked.
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
-        font.selectCharmapEncoding(ztext.charmap_ms_symbol),
+        ztypeset.Error.InvalidArgument,
+        font.selectCharmapEncoding(ztypeset.charmap_ms_symbol),
     );
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.charmap(font.charmapCount()));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.selectCharmap(font.charmapCount()));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.charmap(font.charmapCount()));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.selectCharmap(font.charmapCount()));
     // Refused, and the selection is where it was.
     try std.testing.expectEqual(active, font.activeCharmap().?);
 }
@@ -3069,20 +3069,20 @@ test "a symbol charmap reaches glyphs no Unicode character maps to" {
     // sort in tests/fonts.zig keeps (3, 0) below (3, 1), and FreeType walks
     // the list backwards looking for a Unicode one.
     const unicode_index = font.activeCharmap().?;
-    try std.testing.expectEqual(ztext.charmap_unicode, (try font.charmap(unicode_index)).encoding);
+    try std.testing.expectEqual(ztypeset.charmap_unicode, (try font.charmap(unicode_index)).encoding);
     try std.testing.expectEqual(a_glyph, font.glyphIndex('A'));
     try std.testing.expectEqual(@as(u32, 0), font.glyphIndex(0xF041));
 
     // Selected, the argument is a symbol code rather than a Unicode scalar --
     // both directions, so this cannot pass by answering the same glyph for
     // everything.
-    try font.selectCharmapEncoding(ztext.charmap_ms_symbol);
+    try font.selectCharmapEncoding(ztypeset.charmap_ms_symbol);
     const symbol_index = font.activeCharmap().?;
     try std.testing.expect(symbol_index != unicode_index);
     const map = try font.charmap(symbol_index);
     try std.testing.expectEqual(@as(u16, 3), map.platform_id);
     try std.testing.expectEqual(@as(u16, 0), map.encoding_id);
-    try std.testing.expectEqual(ztext.charmap_ms_symbol, map.encoding);
+    try std.testing.expectEqual(ztypeset.charmap_ms_symbol, map.encoding);
     try std.testing.expectEqual(a_glyph, font.glyphIndex(0xF041));
     try std.testing.expectEqual(@as(u32, 0), font.glyphIndex('A'));
 
@@ -3110,7 +3110,7 @@ test "the selected charmap reaches coverage, and never reaches shaping" {
     defer face.deinit();
 
     try std.testing.expectEqual(@as(usize, 1), try font.coveredPrefix("A"));
-    try font.selectCharmapEncoding(ztext.charmap_ms_symbol);
+    try font.selectCharmapEncoding(ztypeset.charmap_ms_symbol);
     // Coverage goes through the same lookup, so it moves with the selection.
     try std.testing.expectEqual(@as(usize, 0), try font.coveredPrefix("A"));
 
@@ -3136,14 +3136,14 @@ test "synthetic bold widens the ink and the advance, and rasterisation agrees" {
     const plain = try face.glyphExtents(glyph, .none);
     const plain_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
 
-    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default);
     const bold = try face.glyphExtents(glyph, .none);
     const bold_bitmap = try face.renderGlyph(glyph, .a8, .none, 0, 0);
     try face.setSyntheticBold(0);
 
     // The advance has to widen or bold text overlaps the next glyph.
     try std.testing.expect(bold.x_advance > plain.x_advance);
-    // The ink widens too, and ztextFaceGlyphExtents and renderGlyph agree on
+    // The ink widens too, and ztypesetFaceGlyphExtents and renderGlyph agree on
     // it -- both flow through the same glyph-loading path.
     try std.testing.expect(bold.x_max - bold.x_min > plain.x_max - plain.x_min);
     try std.testing.expect(bold_bitmap.width >= plain_bitmap.width);
@@ -3162,13 +3162,13 @@ test "synthetic oblique shears the ink but leaves the advance alone" {
     const glyph = face.font.glyphIndex('H');
     const upright = try face.glyphExtents(glyph, .none);
 
-    try face.setSyntheticOblique(ztext.synthetic_oblique_default);
+    try face.setSyntheticOblique(ztypeset.synthetic_oblique_default);
     const sheared = try face.glyphExtents(glyph, .none);
     try face.setSyntheticOblique(0);
 
     // A shear does not change how far the pen moves.
     try std.testing.expectEqual(upright.x_advance, sheared.x_advance);
-    // But it does move the ink -- ztextFaceGlyphExtents has to recompute the
+    // But it does move the ink -- ztypesetFaceGlyphExtents has to recompute the
     // bounds from the sheared outline rather than report the upright ones.
     try std.testing.expect(sheared.x_min != upright.x_min or sheared.x_max != upright.x_max);
 }
@@ -3185,7 +3185,7 @@ test "synthetic style reaches outline decomposition, not just render and extents
     const plain_funcs = outlineFuncsInto(&plain_collector);
     try face.decomposeOutline(glyph, .none, &plain_funcs);
 
-    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default);
     var bold_collector = OutlineCollector{};
     const bold_funcs = outlineFuncsInto(&bold_collector);
     try face.decomposeOutline(glyph, .none, &bold_funcs);
@@ -3201,7 +3201,7 @@ test "synthetic style reaches outline decomposition, not just render and extents
 /// metric sources are checked, because they are two different HarfBuzz fonts
 /// and the FreeType-backed one is built lazily, long after a style may have
 /// been set.
-fn shapedAdvance(fixture: Fixture, face: ztext.Face, freetype: bool) !f32 {
+fn shapedAdvance(fixture: Fixture, face: ztypeset.Face, freetype: bool) !f32 {
     var total: f32 = 0;
     for (try fixture.shaper.shape(face, "HHHH", .{
         .direction = .ltr,
@@ -3221,7 +3221,7 @@ test "synthetic bold widens a shaped run's advances, both metric sources" {
     const plain_ot = try shapedAdvance(fixture, face, false);
     const plain_ft = try shapedAdvance(fixture, face, true);
 
-    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default);
     const bold_ot = try shapedAdvance(fixture, face, false);
     const bold_ft = try shapedAdvance(fixture, face, true);
     try face.setSyntheticBold(0);
@@ -3230,7 +3230,7 @@ test "synthetic bold widens a shaped run's advances, both metric sources" {
     // given, which is ppem * 64, and adds it to every advance that is not
     // already zero -- four glyphs, four additions.
     const strength = @round(@as(f32, @floatFromInt(ppem * 64)) *
-        ztext.synthetic_bold_default);
+        ztypeset.synthetic_bold_default);
     const expected = 4 * strength / 64.0;
     try std.testing.expectApproxEqAbs(expected, bold_ot - plain_ot, 1.0 / 64.0);
     try std.testing.expectApproxEqAbs(expected, bold_ft - plain_ft, 1.0 / 64.0);
@@ -3253,11 +3253,11 @@ test "a style set before the FreeType metrics font exists still reaches it" {
 
     const styled_face = try fixture.face(fonts.latin);
     defer styled_face.deinit();
-    try styled_face.setSyntheticBold(ztext.synthetic_bold_default);
+    try styled_face.setSyntheticBold(ztypeset.synthetic_bold_default);
     const bold = try shapedAdvance(fixture, styled_face, true);
 
     const strength = @round(@as(f32, @floatFromInt(ppem * 64)) *
-        ztext.synthetic_bold_default);
+        ztypeset.synthetic_bold_default);
     try std.testing.expectApproxEqAbs(4 * strength / 64.0, bold - plain, 1.0 / 64.0);
 }
 
@@ -3270,9 +3270,9 @@ test "synthetic bold is a strength the caller chooses, not a switch" {
     const glyph = face.font.glyphIndex('H');
     const plain = try face.glyphExtents(glyph, .none);
 
-    try face.setSyntheticBold(ztext.synthetic_bold_default);
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default);
     const reference = try face.glyphExtents(glyph, .none);
-    try face.setSyntheticBold(ztext.synthetic_bold_default * 3);
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default * 3);
     const heavy = try face.glyphExtents(glyph, .none);
     // Nothing clamps the strength at the reference weight: a display face at
     // three times it is a legitimate thing to ask for.
@@ -3281,15 +3281,15 @@ test "synthetic bold is a strength the caller chooses, not a switch" {
         reference.x_advance - plain.x_advance);
 
     // A negative strength thins rather than being read as "off".
-    try face.setSyntheticBold(-ztext.synthetic_bold_default);
+    try face.setSyntheticBold(-ztypeset.synthetic_bold_default);
     const thin = try face.glyphExtents(glyph, .none);
     try std.testing.expect(thin.x_advance < plain.x_advance);
     try face.setSyntheticBold(0);
 
     // The shear is a number too, and a bigger one leans further.
-    try face.setSyntheticOblique(ztext.synthetic_oblique_default);
+    try face.setSyntheticOblique(ztypeset.synthetic_oblique_default);
     const leaned = try face.glyphExtents(glyph, .none);
-    try face.setSyntheticOblique(ztext.synthetic_oblique_default * 2);
+    try face.setSyntheticOblique(ztypeset.synthetic_oblique_default * 2);
     const leaned_more = try face.glyphExtents(glyph, .none);
     try face.setSyntheticOblique(0);
     try std.testing.expect(leaned_more.x_max - leaned_more.x_min >
@@ -3303,14 +3303,14 @@ test "a synthetic strength that is not a number is refused" {
     defer face.deinit();
 
     for ([_]f32{ std.math.nan(f32), std.math.inf(f32), -std.math.inf(f32) }) |bad| {
-        try std.testing.expectError(ztext.Error.InvalidArgument, face.setSyntheticBold(bad));
-        try std.testing.expectError(ztext.Error.InvalidArgument, face.setSyntheticOblique(bad));
+        try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setSyntheticBold(bad));
+        try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setSyntheticOblique(bad));
     }
 
     // A refused strength leaves the face where it was, rather than half-set.
     const glyph = face.font.glyphIndex('H');
     const plain = try face.glyphExtents(glyph, .none);
-    try std.testing.expectError(ztext.Error.InvalidArgument, face.setSyntheticBold(std.math.nan(f32)));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, face.setSyntheticBold(std.math.nan(f32)));
     try std.testing.expectEqual(plain.x_advance, (try face.glyphExtents(glyph, .none)).x_advance);
 }
 
@@ -3325,8 +3325,8 @@ test "setting a synthetic style ages a run shaped before it" {
 
     // Shaped advances move with the strength now, so extents taken across the
     // change would mix two weights rather than report either.
-    try face.setSyntheticBold(ztext.synthetic_bold_default);
-    try std.testing.expectError(ztext.Error.InvalidArgument, fixture.shaper.extents(face));
+    try face.setSyntheticBold(ztypeset.synthetic_bold_default);
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, fixture.shaper.extents(face));
     try face.setSyntheticBold(0);
 }
 
@@ -3353,19 +3353,19 @@ test "malformed UTF-8 is refused rather than repaired" {
 
     for (bad) |text| {
         try std.testing.expectError(
-            ztext.Error.InvalidText,
+            ztypeset.Error.InvalidText,
             fixture.shaper.shape(face, text, .{}),
         );
         try std.testing.expectError(
-            ztext.Error.InvalidText,
-            ztext.Paragraph.init(text, .{}),
+            ztypeset.Error.InvalidText,
+            ztypeset.Paragraph.init(text, .{}),
         );
     }
 
     // Valid text that merely looks unusual must still be accepted.
     for ([_][]const u8{ "", "a", "é", "€", "𝄞", "\x00between\x00" }) |text| {
         _ = try fixture.shaper.shape(face, text, .{});
-        const paragraph = try ztext.Paragraph.init(text, .{});
+        const paragraph = try ztypeset.Paragraph.init(text, .{});
         paragraph.deinit();
     }
 }
@@ -3375,32 +3375,32 @@ test "non-font bytes are refused" {
     defer fixture.deinit();
 
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.library.createFont("", 0),
     );
     try std.testing.expectError(
-        ztext.Error.BadFont,
+        ztypeset.Error.BadFont,
         fixture.library.createFont("this is definitely not a font" ** 8, 0),
     );
 
-    // A format ztext recognises but does not compile support for is reported
+    // A format ztypeset recognises but does not compile support for is reported
     // as unsupported, not as a broken font -- the difference tells a host to
     // re-cook rather than to go looking for corruption.
     try std.testing.expectError(
-        ztext.Error.Unsupported,
+        ztypeset.Error.Unsupported,
         fixture.library.createFont("wOFF" ++ "\x00" ** 60, 0),
     );
     try std.testing.expectError(
-        ztext.Error.Unsupported,
+        ztypeset.Error.Unsupported,
         fixture.library.createFont("wOF2" ++ "\x00" ** 60, 0),
     );
-    try std.testing.expect(ztext.lastErrorDetail().len > 0);
+    try std.testing.expect(ztypeset.lastErrorDetail().len > 0);
 
     // A face index past the end of a real font. FreeType calls this an
     // invalid argument rather than a bad font, which is right -- the bytes are
     // fine, the request is not.
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.library.createFont(fonts.hebrew, 99),
     );
 }
@@ -3423,10 +3423,10 @@ test "every truncated prefix of a font fails cleanly or behaves" {
             // Any typed error is acceptable. A crash, a hang or an untyped
             // failure is not, and is what this sweep exists to rule out.
             switch (e) {
-                ztext.Error.BadFont,
-                ztext.Error.Unsupported,
-                ztext.Error.InvalidArgument,
-                ztext.Error.OutOfMemory,
+                ztypeset.Error.BadFont,
+                ztypeset.Error.Unsupported,
+                ztypeset.Error.InvalidArgument,
+                ztypeset.Error.OutOfMemory,
                 => rejected += 1,
                 else => return e,
             }
@@ -3518,16 +3518,16 @@ test "a shaper is reusable across faces, scripts and directions" {
     // Interleaving is where stale buffer state would show up: a leftover
     // script or direction from the previous call producing different output
     // than the same call made first.
-    _ = try fixture.shaper.shape(arabic, "مرحبا", .{ .direction = .rtl, .script = ztext.tag("Arab") });
-    const arabic_first = try std.testing.allocator.dupe(ztext.Glyph, fixture.shaper.glyphs());
+    _ = try fixture.shaper.shape(arabic, "مرحبا", .{ .direction = .rtl, .script = ztypeset.tag("Arab") });
+    const arabic_first = try std.testing.allocator.dupe(ztypeset.Glyph, fixture.shaper.glyphs());
     defer std.testing.allocator.free(arabic_first);
 
-    _ = try fixture.shaper.shape(latin, "Waffle", .{ .direction = .ltr, .script = ztext.tag("Latn") });
-    _ = try fixture.shaper.shape(hebrew, "שלום", .{ .direction = .rtl, .script = ztext.tag("Hebr") });
-    _ = try fixture.shaper.shape(latin, "AV", .{ .direction = .ltr, .script = ztext.tag("Latn") });
+    _ = try fixture.shaper.shape(latin, "Waffle", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
+    _ = try fixture.shaper.shape(hebrew, "שלום", .{ .direction = .rtl, .script = ztypeset.tag("Hebr") });
+    _ = try fixture.shaper.shape(latin, "AV", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
 
-    _ = try fixture.shaper.shape(arabic, "مرحبا", .{ .direction = .rtl, .script = ztext.tag("Arab") });
-    try std.testing.expectEqualSlices(ztext.Glyph, arabic_first, fixture.shaper.glyphs());
+    _ = try fixture.shaper.shape(arabic, "مرحبا", .{ .direction = .rtl, .script = ztypeset.tag("Arab") });
+    try std.testing.expectEqualSlices(ztypeset.Glyph, arabic_first, fixture.shaper.glyphs());
 }
 
 test "shaping is stable across repeated calls" {
@@ -3536,13 +3536,13 @@ test "shaping is stable across repeated calls" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    _ = try fixture.shaper.shape(face, "Waffle wins", .{ .direction = .ltr, .script = ztext.tag("Latn") });
-    const first = try std.testing.allocator.dupe(ztext.Glyph, fixture.shaper.glyphs());
+    _ = try fixture.shaper.shape(face, "Waffle wins", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
+    const first = try std.testing.allocator.dupe(ztypeset.Glyph, fixture.shaper.glyphs());
     defer std.testing.allocator.free(first);
 
     for (0..16) |_| {
-        _ = try fixture.shaper.shape(face, "Waffle wins", .{ .direction = .ltr, .script = ztext.tag("Latn") });
-        try std.testing.expectEqualSlices(ztext.Glyph, first, fixture.shaper.glyphs());
+        _ = try fixture.shaper.shape(face, "Waffle wins", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
+        try std.testing.expectEqualSlices(ztypeset.Glyph, first, fixture.shaper.glyphs());
     }
 }
 
@@ -3554,23 +3554,23 @@ test "shaping does not depend on the process locale" {
 
     // HarfBuzz's guess_segment_properties reaches for the process locale when
     // no language is set, which would make output differ between machines.
-    // ztext seeds the language so it cannot. An explicit language must still
+    // ztypeset seeds the language so it cannot. An explicit language must still
     // be honoured, so the two calls below are allowed to differ from each
     // other -- what must not happen is the default silently BEING a locale.
-    _ = try fixture.shaper.shape(face, "fi", .{ .direction = .ltr, .script = ztext.tag("Latn") });
-    const default_glyphs = try std.testing.allocator.dupe(ztext.Glyph, fixture.shaper.glyphs());
+    _ = try fixture.shaper.shape(face, "fi", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
+    const default_glyphs = try std.testing.allocator.dupe(ztypeset.Glyph, fixture.shaper.glyphs());
     defer std.testing.allocator.free(default_glyphs);
 
     for (test_languages) |language| {
         _ = try fixture.shaper.shape(face, "fi", .{
             .direction = .ltr,
-            .script = ztext.tag("Latn"),
+            .script = ztypeset.tag("Latn"),
             .language = language,
         });
     }
 
-    _ = try fixture.shaper.shape(face, "fi", .{ .direction = .ltr, .script = ztext.tag("Latn") });
-    try std.testing.expectEqualSlices(ztext.Glyph, default_glyphs, fixture.shaper.glyphs());
+    _ = try fixture.shaper.shape(face, "fi", .{ .direction = .ltr, .script = ztypeset.tag("Latn") });
+    try std.testing.expectEqualSlices(ztypeset.Glyph, default_glyphs, fixture.shaper.glyphs());
 }
 
 test "face counting reports what a font image contains" {
@@ -3583,15 +3583,15 @@ test "face counting reports what a font image contains" {
     }
 
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.library.countFaces(""),
     );
     try std.testing.expectError(
-        ztext.Error.BadFont,
+        ztypeset.Error.BadFont,
         fixture.library.countFaces("not a font at all, not even close"),
     );
     try std.testing.expectError(
-        ztext.Error.Unsupported,
+        ztypeset.Error.Unsupported,
         fixture.library.countFaces("wOFF" ++ "\x00" ** 60),
     );
 }
@@ -3611,7 +3611,7 @@ test "extents come from the same metrics source the shape used" {
     for ([_]bool{ false, true }) |use_freetype| {
         _ = try fixture.shaper.shape(face, text, .{
             .direction = .ltr,
-            .script = ztext.tag("Latn"),
+            .script = ztypeset.tag("Latn"),
             .use_freetype_metrics = use_freetype,
         });
 
@@ -3630,12 +3630,12 @@ test "extents and glyphs are refused before anything has been shaped" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    const fresh = try ztext.Shaper.init();
+    const fresh = try ztypeset.Shaper.init();
     defer fresh.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), fresh.glyphs().len);
-    try std.testing.expectEqual(ztext.Direction.auto, fresh.direction());
-    try std.testing.expectError(ztext.Error.InvalidArgument, fresh.extents(face));
+    try std.testing.expectEqual(ztypeset.Direction.auto, fresh.direction());
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, fresh.extents(face));
 }
 
 test "versions format the way a log line needs" {
@@ -3645,10 +3645,10 @@ test "versions format the way a log line needs" {
     // Version.format is public API and nothing else in the suite reaches it.
     //
     // No version LITERAL appears here, and that is the point. This test used
-    // to assert "0.1.0" and "2.14.3", which made it a third home for ztext's
+    // to assert "0.1.0" and "2.14.3", which made it a third home for ztypeset's
     // version and a second home for FreeType's -- and the first bump of
     // either turned a formatting test red for a reason that had nothing to do
-    // with formatting. ffi/ztext.h's macros are the one home for the first
+    // with formatting. ffi/ztypeset.h's macros are the one home for the first
     // (gated against build.zig.zon by ci/measurements.sh) and src/pins.zig for
     // the second (gated against the linked libraries by the test below).
     //
@@ -3656,14 +3656,14 @@ test "versions format the way a log line needs" {
     // a real version rarely has, and one real value compared against its own
     // fields.
     var buffer: [64]u8 = undefined;
-    const synthetic = ztext.Version{ .major = 3, .minor = 14, .patch = 159 };
+    const synthetic = ztypeset.Version{ .major = 3, .minor = 14, .patch = 159 };
     try std.testing.expectEqualStrings(
         "3.14.159",
         try std.fmt.bufPrint(&buffer, "{f}", .{synthetic}),
     );
 
     var expected: [64]u8 = undefined;
-    const v = ztext.version();
+    const v = ztypeset.version();
     try std.testing.expectEqualStrings(
         try std.fmt.bufPrint(&expected, "{d}.{d}.{d}", .{ v.major, v.minor, v.patch }),
         try std.fmt.bufPrint(&buffer, "{f}", .{v}),
@@ -3692,15 +3692,15 @@ test "a font FreeType accepts but HarfBuzz cannot read is refused" {
     doctored[3] = 0x00;
 
     try std.testing.expectError(
-        ztext.Error.BadFont,
+        ztypeset.Error.BadFont,
         fixture.library.createFont(doctored, 0),
     );
-    try std.testing.expect(ztext.lastErrorDetail().len > 0);
+    try std.testing.expect(ztypeset.lastErrorDetail().len > 0);
 
     // A face index past the end of the collection is the same class of
     // problem and must also be refused rather than yielding a tableless face.
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.library.createFont(fonts.hebrew, 7),
     );
 }
@@ -3718,12 +3718,12 @@ test "a rejected shape does not leave the previous run queryable" {
     // successful run again. Every rejection path has to clear, not just the
     // ones that fail late.
     try std.testing.expectError(
-        ztext.Error.InvalidText,
+        ztypeset.Error.InvalidText,
         fixture.shaper.shape(face, &[_]u8{ 0xFF, 0xFE }, .{}),
     );
     try std.testing.expectEqual(@as(usize, 0), fixture.shaper.glyphs().len);
-    try std.testing.expectEqual(ztext.Direction.auto, fixture.shaper.direction());
-    try std.testing.expectError(ztext.Error.InvalidArgument, fixture.shaper.extents(face));
+    try std.testing.expectEqual(ztypeset.Direction.auto, fixture.shaper.direction());
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, fixture.shaper.extents(face));
 
     // Same for a rejection that happens before any shaping work at all. This
     // one goes through the C layer directly, because the Zig wrapper makes a
@@ -3732,9 +3732,9 @@ test "a rejected shape does not leave the previous run queryable" {
     _ = try fixture.shaper.shape(face, "Hello", .{ .direction = .ltr });
     try std.testing.expectEqual(@as(usize, 5), fixture.shaper.glyphs().len);
 
-    var inconsistent = std.mem.zeroes(ztext.c.ShapeParams);
+    var inconsistent = std.mem.zeroes(ztypeset.c.ShapeParams);
     inconsistent.feature_count = 3;
-    try std.testing.expectEqual(ztext.c.Result.invalid_argument, ztext.c.ztextShaperShape(
+    try std.testing.expectEqual(ztypeset.c.Result.invalid_argument, ztypeset.c.ztypesetShaperShape(
         fixture.shaper.handle,
         face.handle,
         "Hello",
@@ -3762,7 +3762,7 @@ test "extents refuse a face the run was not shaped against" {
     // Measuring against another face would mix one font's ink bounds with
     // another's advances: wrong, plausible, and silent.
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.shaper.extents(hebrew),
     );
 
@@ -3770,7 +3770,7 @@ test "extents refuse a face the run was not shaped against" {
     // advances were computed at the old size.
     try latin.setPixelSize(0, 8);
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.shaper.extents(latin),
     );
 
@@ -3794,21 +3794,21 @@ test "a library keeps its own allocator when the global one is replaced" {
     // The allocator is process-wide and these two are backed by THIS frame, so
     // every path out of the block below has to take the installed one out
     // again -- a failed assertion included. Without the defer, a test that
-    // fails here leaves ztext allocating and freeing through a dead frame for
+    // fails here leaves ztypeset allocating and freeing through a dead frame for
     // the rest of the process. That is the c_smoke defect this package already
     // paid for once, and in this form it does not announce itself: the next
     // allocation is undefined, and what it did here was hang the run.
     {
-        try ztext.setAllocator(first);
-        defer ztext.resetAllocator();
+        try ztypeset.setAllocator(first);
+        defer ztypeset.resetAllocator();
 
-        const library = try ztext.Library.init();
+        const library = try ztypeset.Library.init();
         const font = try library.createFont(fonts.hebrew, 0);
         const face = try font.face(0, 24);
 
         // Everything from here is nominally the second allocator's.
-        try ztext.setAllocator(second);
-        const other = try ztext.Library.init();
+        try ztypeset.setAllocator(second);
+        const other = try ztypeset.Library.init();
 
         // Destroying the first library must return its memory to the
         // allocator it was born with, not to whichever one happens to be
@@ -3833,16 +3833,16 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
     // Greek and Cyrillic and lets it guess.
     {
         const text = "Hello Ελληνικά мир";
-        const paragraph = try ztext.Paragraph.init(text, .{});
+        const paragraph = try ztypeset.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         try std.testing.expectEqual(@as(usize, 1), paragraph.visualRuns().len);
         const runs = paragraph.shapingRuns();
         try std.testing.expectEqual(@as(usize, 3), runs.len);
-        try std.testing.expectEqual(ztext.tag("Latn"), runs[0].script);
-        try std.testing.expectEqual(ztext.tag("Grek"), runs[1].script);
-        try std.testing.expectEqual(ztext.tag("Cyrl"), runs[2].script);
-        for (runs) |run| try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(run.level));
+        try std.testing.expectEqual(ztypeset.tag("Latn"), runs[0].script);
+        try std.testing.expectEqual(ztypeset.tag("Grek"), runs[1].script);
+        try std.testing.expectEqual(ztypeset.tag("Cyrl"), runs[2].script);
+        for (runs) |run| try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(run.level));
     }
 
     // The subtlety this exists for: inside a right-to-left visual run, the
@@ -3851,7 +3851,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
     // the Hebrew belongs and still look like plausible text.
     {
         const text = "مرحبا שלום";
-        const paragraph = try ztext.Paragraph.init(text, .{});
+        const paragraph = try ztypeset.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         try std.testing.expectEqual(@as(u8, 1), paragraph.baseLevel());
@@ -3859,8 +3859,8 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
 
         const runs = paragraph.shapingRuns();
         try std.testing.expectEqual(@as(usize, 2), runs.len);
-        try std.testing.expectEqual(ztext.tag("Hebr"), runs[0].script);
-        try std.testing.expectEqual(ztext.tag("Arab"), runs[1].script);
+        try std.testing.expectEqual(ztypeset.tag("Hebr"), runs[0].script);
+        try std.testing.expectEqual(ztypeset.tag("Arab"), runs[1].script);
         try std.testing.expectEqualStrings("שלום", text[runs[0].offset..][0..runs[0].length]);
         try std.testing.expect(runs[1].offset < runs[0].offset);
     }
@@ -3868,7 +3868,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
     // Nested directions: Latin embedded in an RTL paragraph gets level 2.
     {
         const text = "مرحبا Hello שלום";
-        const paragraph = try ztext.Paragraph.init(text, .{});
+        const paragraph = try ztypeset.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         const runs = paragraph.shapingRuns();
@@ -3877,8 +3877,8 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
         for (runs) |run| {
             if (run.level == 2) {
                 saw_embedded_latin = true;
-                try std.testing.expectEqual(ztext.tag("Latn"), run.script);
-                try std.testing.expectEqual(ztext.Direction.ltr, ztext.runDirection(run.level));
+                try std.testing.expectEqual(ztypeset.tag("Latn"), run.script);
+                try std.testing.expectEqual(ztypeset.Direction.ltr, ztypeset.runDirection(run.level));
             }
         }
         try std.testing.expect(saw_embedded_latin);
@@ -3895,7 +3895,7 @@ test "shaping runs split a paragraph into spans a shaper can actually take" {
         "plain latin only",
         "",
     }) |text| {
-        const paragraph = try ztext.Paragraph.init(text, .{});
+        const paragraph = try ztypeset.Paragraph.init(text, .{});
         defer paragraph.deinit();
 
         var covered = std.mem.zeroes([64]bool);
@@ -3921,14 +3921,14 @@ test "the documented pipeline shapes every run of a mixed paragraph" {
     defer arabic.deinit();
 
     const text = "Hello مرحبا world";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     var total: usize = 0;
     for (paragraph.shapingRuns()) |run| {
-        const face = if (run.script == ztext.tag("Arab")) arabic else latin;
+        const face = if (run.script == ztypeset.tag("Arab")) arabic else latin;
         const glyphs = try fixture.shaper.shape(face, text[run.offset..][0..run.length], .{
-            .direction = ztext.runDirection(run.level),
+            .direction = ztypeset.runDirection(run.level),
             .script = run.script,
         });
         for (glyphs) |glyph| {
@@ -4028,17 +4028,17 @@ test "a metric the font does not declare is an answer, not a failure" {
     // absent -- and a 0 could not be told from a font that declares zero.
     const latin = try fixture.face(fonts.latin);
     defer latin.deinit();
-    try std.testing.expectError(ztext.Error.Unsupported, latin.metric(.vertical_ascender));
-    try std.testing.expectError(ztext.Error.Unsupported, latin.metric(.vertical_descender));
-    try std.testing.expectError(ztext.Error.Unsupported, latin.metric(.vertical_caret_rise));
+    try std.testing.expectError(ztypeset.Error.Unsupported, latin.metric(.vertical_ascender));
+    try std.testing.expectError(ztypeset.Error.Unsupported, latin.metric(.vertical_descender));
+    try std.testing.expectError(ztypeset.Error.Unsupported, latin.metric(.vertical_caret_rise));
 
     // Noto Naskh Arabic carries OS/2 version 4 with sxHeight and sCapHeight
     // both 0, which HarfBuzz reads as "not declared" rather than as zero
     // heights -- an Arabic font has no x-height to declare.
     const arabic = try fixture.face(fonts.arabic);
     defer arabic.deinit();
-    try std.testing.expectError(ztext.Error.Unsupported, arabic.metric(.x_height));
-    try std.testing.expectError(ztext.Error.Unsupported, arabic.metric(.cap_height));
+    try std.testing.expectError(ztypeset.Error.Unsupported, arabic.metric(.x_height));
+    try std.testing.expectError(ztypeset.Error.Unsupported, arabic.metric(.cap_height));
 
     // The same font still declares everything else.
     try std.testing.expect(try arabic.metric(.strikeout_size) > 0);
@@ -4085,15 +4085,15 @@ test "a metric this build does not name is rejected rather than passed through" 
     // that matters is exercised from C; see tests/c_smoke.c. What can be shown
     // here is that every name this build does have reaches HarfBuzz, which is
     // the other half of the same guarantee: nothing in the enum is a tag
-    // ztextFaceMetric refuses.
+    // ztypesetFaceMetric refuses.
     var named: usize = 0;
-    inline for (@typeInfo(ztext.Metric).@"enum".fields) |field| {
-        const metric: ztext.Metric = @enumFromInt(field.value);
+    inline for (@typeInfo(ztypeset.Metric).@"enum".fields) |field| {
+        const metric: ztypeset.Metric = @enumFromInt(field.value);
         // Never InvalidArgument: that is reserved for a tag this build does
         // not name, and every one of these is named by definition. Unsupported
         // is a real answer and says the font is quiet about this metric.
         if (face.metric(metric)) |_| {} else |e| {
-            if (e != ztext.Error.Unsupported) return e;
+            if (e != ztypeset.Error.Unsupported) return e;
         }
         named += 1;
     }
@@ -4130,22 +4130,22 @@ test "named instances are the points in the axis space the designers chose" {
     try std.testing.expectEqualStrings("Regular", try font.namedInstanceName(3, &exact));
     var tight: [7]u8 = undefined;
     try std.testing.expectError(
-        ztext.Error.BufferTooSmall,
+        ztypeset.Error.BufferTooSmall,
         font.namedInstanceName(3, &tight),
     );
 
     // A buffer shorter than the axis count is refused rather than half filled.
     var one: [1]f32 = undefined;
     try std.testing.expectError(
-        ztext.Error.BufferTooSmall,
+        ztypeset.Error.BufferTooSmall,
         font.namedInstanceCoords(3, &one),
     );
 
     // One past the end, on every entry point that takes an index.
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceCoords(9, &coords));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceName(9, &buffer));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceNameLen(9));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.setNamedInstance(9));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.namedInstanceCoords(9, &coords));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.namedInstanceName(9, &buffer));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.namedInstanceNameLen(9));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.setNamedInstance(9));
 }
 
 test "a static font names no instances and refuses to pretend otherwise" {
@@ -4158,9 +4158,9 @@ test "a static font names no instances and refuses to pretend otherwise" {
     try std.testing.expectEqual(@as(u32, 0), font.namedInstanceCount());
     var coords: [2]f32 = undefined;
     var buffer: [32]u8 = undefined;
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceCoords(0, &coords));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.namedInstanceName(0, &buffer));
-    try std.testing.expectError(ztext.Error.InvalidArgument, font.setNamedInstance(0));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.namedInstanceCoords(0, &coords));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.namedInstanceName(0, &buffer));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, font.setNamedInstance(0));
 }
 
 test "choosing a named instance moves the axes and every face with them" {
@@ -4195,8 +4195,8 @@ test "choosing a named instance moves the axes and every face with them" {
     // And it is the same commit path as setVariations: naming the instance's
     // coordinates by tag lands in the same place.
     try font.setVariations(&.{
-        .{ .tag = ztext.tag("wght"), .value = 900 },
-        .{ .tag = ztext.tag("wdth"), .value = 100 },
+        .{ .tag = ztypeset.tag("wght"), .value = 900 },
+        .{ .tag = ztypeset.tag("wdth"), .value = 100 },
     });
     var by_tag: f32 = 0;
     for (try fixture.shaper.shape(face, variable_word, variable_params)) |glyph| {
@@ -4277,7 +4277,7 @@ test "golden: the autohinter's coverage comes from GSUB, not the cmap alone" {
     // an Arabic medial form, a ligature, an Indic conjunct. Through the
     // character map alone each of those falls into a styleless default with no
     // blue zones, so the glyphs a text renderer actually draws are the ones
-    // hinted worst. ffi/ztext_ftoption.h defines FT_CONFIG_OPTION_USE_HARFBUZZ
+    // hinted worst. ffi/ztypeset_ftoption.h defines FT_CONFIG_OPTION_USE_HARFBUZZ
     // so that it is the second, and this test is what holds that macro down.
     //
     // It matters at `light` in particular, which is the autohinter and nothing
@@ -4345,7 +4345,7 @@ const LightSweep = struct {
     ink: u64,
 };
 
-fn lightSweep(face: ztext.Face) !LightSweep {
+fn lightSweep(face: ztypeset.Face) !LightSweep {
     const metrics = try face.metrics();
     var sweep = LightSweep{
         .glyphs = metrics.num_glyphs,
@@ -4359,9 +4359,9 @@ fn lightSweep(face: ztext.Face) !LightSweep {
     while (glyph < metrics.num_glyphs) : (glyph += 1) {
         const bitmap = face.renderGlyph(glyph, .a8, .light, 0, 0) catch |failure| {
             // One kind of refusal, and it comes from FreeType's rasteriser
-            // rather than from ztext. Asserted so that a NEW failure mode
+            // rather than from ztypeset. Asserted so that a NEW failure mode
             // cannot be absorbed by the count.
-            try std.testing.expectEqual(ztext.Error.RenderFailed, failure);
+            try std.testing.expectEqual(ztypeset.Error.RenderFailed, failure);
             if (sweep.refused == 0) sweep.first_refused = glyph;
             sweep.refused += 1;
             hasher.update("refused");
@@ -4371,7 +4371,7 @@ fn lightSweep(face: ztext.Face) !LightSweep {
         hasher.update(std.mem.asBytes(&bitmap.height));
         hasher.update(std.mem.asBytes(&bitmap.left));
         hasher.update(std.mem.asBytes(&bitmap.top));
-        const rows = ztext.bitmapRows(bitmap) orelse continue;
+        const rows = ztypeset.bitmapRows(bitmap) orelse continue;
         const pitch: usize = @intCast(bitmap.pitch);
         var row: usize = 0;
         while (row < bitmap.height) : (row += 1) {
@@ -4391,14 +4391,14 @@ test "handles have no destruction order: a library may go before its fonts" {
     // FreeType had already returned -- and every assertion after it would be
     // reading whatever the allocator put there next.
     //
-    // ztext counts live fonts instead and defers the library's teardown to
+    // ztypeset counts live fonts instead and defers the library's teardown to
     // whichever handle is released last, so the assertions after that line
     // are the whole test.
     try warmProcessCaches();
-    try ztext.setAllocator(std.testing.allocator);
-    defer ztext.resetAllocator();
+    try ztypeset.setAllocator(std.testing.allocator);
+    defer ztypeset.resetAllocator();
 
-    const library = try ztext.Library.init();
+    const library = try ztypeset.Library.init();
     const font = try library.createFont(fonts.latin, 0);
     const face = try font.face(0, 16);
 
@@ -4416,7 +4416,7 @@ test "handles have no destruction order: a library may go before its fonts" {
     // on a handle the caller has let go of is refused rather than undefined,
     // the same refusal a destroyed font gives.
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         library.createFont(fonts.latin, 0),
     );
 
@@ -4449,10 +4449,10 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
     // resetAllocator would leave a process-wide allocator pointing at this
     // frame after it ends. See the note on the test above.
     {
-        try ztext.setAllocator(first);
-        defer ztext.resetAllocator();
+        try ztypeset.setAllocator(first);
+        defer ztypeset.resetAllocator();
 
-        const library = try ztext.Library.init();
+        const library = try ztypeset.Library.init();
         defer library.deinit();
         const font = try library.createFont(fonts.latin, 0);
         defer font.deinit();
@@ -4460,7 +4460,7 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
         defer face.deinit();
 
         // Everything from here is nominally the second allocator's.
-        try ztext.setAllocator(second);
+        try ztypeset.setAllocator(second);
         const before_first = first_state.total_requested_bytes;
         const before_second = second_state.total_requested_bytes;
 
@@ -4468,7 +4468,7 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
         const bitmap = try face.renderGlyph(glyph, .a8, .normal, 0, 0);
         try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
 
-        // Rendering is FreeType and ztext and nothing else -- no HarfBuzz call
+        // Rendering is FreeType and ztypeset and nothing else -- no HarfBuzz call
         // is reachable from here -- so the second allocator must not have been
         // asked for a single byte, and the first must have been asked for the
         // buffer.
@@ -4483,7 +4483,7 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
     try std.testing.expectEqual(std.heap.Check.ok, second_state.deinit());
 }
 
-/// UTF-16 for `utf8`, in NATIVE byte order -- which is what ztext takes, and
+/// UTF-16 for `utf8`, in NATIVE byte order -- which is what ztypeset takes, and
 /// what `std.unicode.utf8ToUtf16Le` would not give on a big-endian host.
 fn toUtf16(out: []u16, utf8: []const u8) ![]const u16 {
     var count: usize = 0;
@@ -4531,17 +4531,17 @@ test "one text, three encodings: the same answer in different units" {
     const utf16 = try toUtf16(&utf16_storage, utf8);
     const utf32 = try toUtf32(&utf32_storage, utf8);
 
-    const p8 = try ztext.Paragraph.init(utf8, .{});
+    const p8 = try ztypeset.Paragraph.init(utf8, .{});
     defer p8.deinit();
-    const p16 = try ztext.Paragraph.init(utf16, .{});
+    const p16 = try ztypeset.Paragraph.init(utf16, .{});
     defer p16.deinit();
-    const p32 = try ztext.Paragraph.init(utf32, .{});
+    const p32 = try ztypeset.Paragraph.init(utf32, .{});
     defer p32.deinit();
 
     // Each reports the encoding it was built from and a length in ITS units.
-    try std.testing.expectEqual(ztext.Encoding.utf8, p8.encoding());
-    try std.testing.expectEqual(ztext.Encoding.utf16, p16.encoding());
-    try std.testing.expectEqual(ztext.Encoding.utf32, p32.encoding());
+    try std.testing.expectEqual(ztypeset.Encoding.utf8, p8.encoding());
+    try std.testing.expectEqual(ztypeset.Encoding.utf16, p16.encoding());
+    try std.testing.expectEqual(ztypeset.Encoding.utf32, p32.encoding());
     try std.testing.expectEqual(utf8.len, p8.length());
     try std.testing.expectEqual(utf16.len, p16.length());
     try std.testing.expectEqual(utf32.len, p32.length());
@@ -4580,9 +4580,9 @@ test "one text, three encodings: the same answer in different units" {
             const end8 = at8 + len8 - 1;
             const end16 = at16 + len16 - 1;
             inline for (.{ "lineBreaks", "graphemeBreaks", "wordBreaks" }) |name| {
-                const b8 = @field(ztext.Paragraph, name)(p8)[end8];
-                const b16 = @field(ztext.Paragraph, name)(p16)[end16];
-                const b32 = @field(ztext.Paragraph, name)(p32)[at32];
+                const b8 = @field(ztypeset.Paragraph, name)(p8)[end8];
+                const b16 = @field(ztypeset.Paragraph, name)(p16)[end16];
+                const b32 = @field(ztypeset.Paragraph, name)(p32)[at32];
                 try std.testing.expectEqual(b8, b16);
                 try std.testing.expectEqual(b8, b32);
             }
@@ -4601,7 +4601,7 @@ test "one text, three encodings: the same answer in different units" {
     // identical, because it is the same text.
     for (p8.shapingRuns(), p16.shapingRuns(), p32.shapingRuns()) |r8, r16, r32| {
         const g8 = try fixture.shaper.shapeRun(face, p8, r8, .{});
-        var copied: [64]ztext.Glyph = undefined;
+        var copied: [64]ztypeset.Glyph = undefined;
         @memcpy(copied[0..g8.len], g8);
         const kept = copied[0..g8.len];
 
@@ -4637,13 +4637,13 @@ test "a range that would split a character is refused in every encoding" {
     var utf16_storage: [8]u16 = undefined;
     const utf16 = try toUtf16(&utf16_storage, utf8);
 
-    const p8 = try ztext.Paragraph.init(utf8, .{});
+    const p8 = try ztypeset.Paragraph.init(utf8, .{});
     defer p8.deinit();
-    const p16 = try ztext.Paragraph.init(utf16, .{});
+    const p16 = try ztypeset.Paragraph.init(utf16, .{});
     defer p16.deinit();
 
-    try std.testing.expectError(ztext.Error.InvalidArgument, p8.line(3, 1));
-    try std.testing.expectError(ztext.Error.InvalidArgument, p16.line(3, 1));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, p8.line(3, 1));
+    try std.testing.expectError(ztypeset.Error.InvalidArgument, p16.line(3, 1));
     const whole8 = try p8.line(0, p8.length());
     whole8.deinit();
     const whole16 = try p16.line(0, p16.length());
@@ -4652,7 +4652,7 @@ test "a range that would split a character is refused in every encoding" {
     // UTF-32 has nothing to split: every index is a boundary.
     var utf32_storage: [8]u32 = undefined;
     const utf32 = try toUtf32(&utf32_storage, utf8);
-    const p32 = try ztext.Paragraph.init(utf32, .{});
+    const p32 = try ztypeset.Paragraph.init(utf32, .{});
     defer p32.deinit();
     const any = try p32.line(1, 1);
     any.deinit();
@@ -4668,13 +4668,13 @@ test "a paragraph run is shaped from the paragraph's own text" {
     defer face.deinit();
 
     const text = "abc \u{5E9}\u{5DC}\u{5D5}\u{5DD} def";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     for (paragraph.shapingRuns()) |run| {
         const through_paragraph =
             try fixture.shaper.shapeRun(face, paragraph, run, .{});
-        var kept: [64]ztext.Glyph = undefined;
+        var kept: [64]ztypeset.Glyph = undefined;
         @memcpy(kept[0..through_paragraph.len], through_paragraph);
 
         // The same run through the borrowed-text entry point, with the
@@ -4691,7 +4691,7 @@ test "a paragraph run is shaped from the paragraph's own text" {
             },
         );
         try std.testing.expectEqualSlices(
-            ztext.Glyph,
+            ztypeset.Glyph,
             kept[0..through_paragraph.len],
             through_text,
         );
@@ -4707,17 +4707,17 @@ test "a paragraph run refuses a direction or script the caller also set" {
     const face = try fixture.face(fonts.latin);
     defer face.deinit();
 
-    const paragraph = try ztext.Paragraph.init("Hello", .{});
+    const paragraph = try ztypeset.Paragraph.init("Hello", .{});
     defer paragraph.deinit();
     const run = paragraph.shapingRuns()[0];
 
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
+        ztypeset.Error.InvalidArgument,
         fixture.shaper.shapeRun(face, paragraph, run, .{ .direction = .ltr }),
     );
     try std.testing.expectError(
-        ztext.Error.InvalidArgument,
-        fixture.shaper.shapeRun(face, paragraph, run, .{ .script = ztext.tag("Latn") }),
+        ztypeset.Error.InvalidArgument,
+        fixture.shaper.shapeRun(face, paragraph, run, .{ .script = ztypeset.tag("Latn") }),
     );
 
     // Everything else in Params still applies.
@@ -4735,7 +4735,7 @@ test "a run built by hand cannot reach outside its paragraph" {
     // Runs a paragraph produced are inside it and on character boundaries;
     // a struct a caller filled in is neither by construction.
     const text = "ab\u{5D0}cd";
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     const bad = [_][2]u32{
@@ -4745,10 +4745,10 @@ test "a run built by hand cannot reach outside its paragraph" {
         .{ 0, 3 }, // ends inside a character
     };
     for (bad) |range| {
-        const run: ztext.ShapingRun =
+        const run: ztypeset.ShapingRun =
             .{ .offset = range[0], .length = range[1], .script = 0, .level = 0 };
         try std.testing.expectError(
-            ztext.Error.InvalidArgument,
+            ztypeset.Error.InvalidArgument,
             fixture.shaper.shapeRun(face, paragraph, run, .{}),
         );
     }
@@ -4760,10 +4760,10 @@ test "a paragraph runs only the segmentation passes it was asked for" {
     // alone was paying for all three.
     const text = "one two \u{5D0}\u{5D1} three";
 
-    const all = try ztext.Paragraph.init(text, .{});
+    const all = try ztypeset.Paragraph.init(text, .{});
     defer all.deinit();
     try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(ztext.Segmentation.all))),
+        @as(u32, @intCast(@intFromEnum(ztypeset.Segmentation.all))),
         all.segmentation(),
     );
     try std.testing.expectEqual(text.len, all.lineBreaks().len);
@@ -4772,18 +4772,18 @@ test "a paragraph runs only the segmentation passes it was asked for" {
 
     // One pass: the array asked for is identical to the one the full
     // paragraph produced, and the other two do not exist.
-    const lines_only = try ztext.Paragraph.init(text, .{
-        .segmentation = ztext.segmentation(&.{.lines}),
+    const lines_only = try ztypeset.Paragraph.init(text, .{
+        .segmentation = ztypeset.segmentation(&.{.lines}),
     });
     defer lines_only.deinit();
     try std.testing.expect(
-        ztext.segmentationHas(lines_only.segmentation(), .lines),
+        ztypeset.segmentationHas(lines_only.segmentation(), .lines),
     );
     try std.testing.expect(
-        !ztext.segmentationHas(lines_only.segmentation(), .words),
+        !ztypeset.segmentationHas(lines_only.segmentation(), .words),
     );
     try std.testing.expectEqualSlices(
-        ztext.Break,
+        ztypeset.Break,
         all.lineBreaks(),
         lines_only.lineBreaks(),
     );
@@ -4792,12 +4792,12 @@ test "a paragraph runs only the segmentation passes it was asked for" {
 
     // And the pass in the MIDDLE of the mask, which is where an array laid
     // out at a fixed offset would read the wrong one.
-    const words_only = try ztext.Paragraph.init(text, .{
-        .segmentation = ztext.segmentation(&.{.words}),
+    const words_only = try ztypeset.Paragraph.init(text, .{
+        .segmentation = ztypeset.segmentation(&.{.words}),
     });
     defer words_only.deinit();
     try std.testing.expectEqualSlices(
-        ztext.Break,
+        ztypeset.Break,
         all.wordBreaks(),
         words_only.wordBreaks(),
     );
@@ -4805,8 +4805,8 @@ test "a paragraph runs only the segmentation passes it was asked for" {
     try std.testing.expectEqual(@as(usize, 0), words_only.graphemeBreaks().len);
 
     // None at all: the bidi analysis is untouched by the choice.
-    const none = try ztext.Paragraph.init(text, .{
-        .segmentation = ztext.segmentation(&.{}),
+    const none = try ztypeset.Paragraph.init(text, .{
+        .segmentation = ztypeset.segmentation(&.{}),
     });
     defer none.deinit();
     try std.testing.expectEqual(@as(usize, 0), none.lineBreaks().len);
@@ -4822,8 +4822,8 @@ test "a paragraph runs only the segmentation passes it was asked for" {
 
 test "without the grapheme pass a caret has nowhere to move" {
     const text = "abc";
-    const paragraph = try ztext.Paragraph.init(text, .{
-        .segmentation = ztext.segmentation(&.{.lines}),
+    const paragraph = try ztypeset.Paragraph.init(text, .{
+        .segmentation = ztypeset.segmentation(&.{.lines}),
     });
     defer paragraph.deinit();
 
@@ -4836,9 +4836,9 @@ test "a segmentation bit this build has no name for is refused" {
     // The same contract as an unknown encoding: a consumer compiled against a
     // newer header is refused rather than quietly given less than it asked
     // for. Through the C entry point, because the Zig mask cannot spell it.
-    var handle: *ztext.c.Paragraph = undefined;
+    var handle: *ztypeset.c.Paragraph = undefined;
     try std.testing.expectEqual(
-        ztext.c.Result.invalid_argument,
-        ztext.c.ztextParagraphCreate("abc", 3, .utf8, .auto, 0x8, &handle),
+        ztypeset.c.Result.invalid_argument,
+        ztypeset.c.ztypesetParagraphCreate("abc", 3, .utf8, .auto, 0x8, &handle),
     );
 }

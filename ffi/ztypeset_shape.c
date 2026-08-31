@@ -1,53 +1,53 @@
 //===----------------------------------------------------------------------===//
-// ztext -- shaping one run through HarfBuzz.
+// ztypeset -- shaping one run through HarfBuzz.
 //===----------------------------------------------------------------------===//
 
-#include "ztext_internal.h"
+#include "ztypeset_internal.h"
 
 //===----------------------------------------------------------------------===//
 // Enum translation
 //===----------------------------------------------------------------------===//
 
-static hb_direction_t toHbDirection(ZtextDirection direction) {
+static hb_direction_t toHbDirection(ZtypesetDirection direction) {
   switch (direction) {
-    case ZTEXT_DIRECTION_LTR:
+    case ZTYPESET_DIRECTION_LTR:
       return HB_DIRECTION_LTR;
-    case ZTEXT_DIRECTION_RTL:
+    case ZTYPESET_DIRECTION_RTL:
       return HB_DIRECTION_RTL;
-    case ZTEXT_DIRECTION_TTB:
+    case ZTYPESET_DIRECTION_TTB:
       return HB_DIRECTION_TTB;
-    case ZTEXT_DIRECTION_BTT:
+    case ZTYPESET_DIRECTION_BTT:
       return HB_DIRECTION_BTT;
-    case ZTEXT_DIRECTION_AUTO:
+    case ZTYPESET_DIRECTION_AUTO:
     default:
       return HB_DIRECTION_INVALID;
   }
 }
 
-static ZtextDirection fromHbDirection(hb_direction_t direction) {
+static ZtypesetDirection fromHbDirection(hb_direction_t direction) {
   switch (direction) {
     case HB_DIRECTION_LTR:
-      return ZTEXT_DIRECTION_LTR;
+      return ZTYPESET_DIRECTION_LTR;
     case HB_DIRECTION_RTL:
-      return ZTEXT_DIRECTION_RTL;
+      return ZTYPESET_DIRECTION_RTL;
     case HB_DIRECTION_TTB:
-      return ZTEXT_DIRECTION_TTB;
+      return ZTYPESET_DIRECTION_TTB;
     case HB_DIRECTION_BTT:
-      return ZTEXT_DIRECTION_BTT;
+      return ZTYPESET_DIRECTION_BTT;
     default:
-      return ZTEXT_DIRECTION_AUTO;
+      return ZTYPESET_DIRECTION_AUTO;
   }
 }
 
-static hb_buffer_cluster_level_t toHbClusterLevel(ZtextClusterLevel level) {
+static hb_buffer_cluster_level_t toHbClusterLevel(ZtypesetClusterLevel level) {
   switch (level) {
-    case ZTEXT_CLUSTER_LEVEL_MONOTONE_CHARACTERS:
+    case ZTYPESET_CLUSTER_LEVEL_MONOTONE_CHARACTERS:
       return HB_BUFFER_CLUSTER_LEVEL_MONOTONE_CHARACTERS;
-    case ZTEXT_CLUSTER_LEVEL_CHARACTERS:
+    case ZTYPESET_CLUSTER_LEVEL_CHARACTERS:
       return HB_BUFFER_CLUSTER_LEVEL_CHARACTERS;
-    case ZTEXT_CLUSTER_LEVEL_GRAPHEMES:
+    case ZTYPESET_CLUSTER_LEVEL_GRAPHEMES:
       return HB_BUFFER_CLUSTER_LEVEL_GRAPHEMES;
-    case ZTEXT_CLUSTER_LEVEL_MONOTONE_GRAPHEMES:
+    case ZTYPESET_CLUSTER_LEVEL_MONOTONE_GRAPHEMES:
     default:
       return HB_BUFFER_CLUSTER_LEVEL_MONOTONE_GRAPHEMES;
   }
@@ -59,7 +59,7 @@ static hb_buffer_cluster_level_t toHbClusterLevel(ZtextClusterLevel level) {
 
 /// Builds (once) the hb_font_t that asks FreeType for metrics.
 ///
-/// hb_ft_font_create wraps the face ztext already owns. The alternative,
+/// hb_ft_font_create wraps the face ztypeset already owns. The alternative,
 /// hb_ft_font_set_funcs, opens an FT_Face of its own from an FT_Library of its
 /// own -- which would take metrics from a different face than the one being
 /// rasterised, defeating the only reason to ask FreeType at all.
@@ -67,8 +67,8 @@ static hb_buffer_cluster_level_t toHbClusterLevel(ZtextClusterLevel level) {
 /// Its glyph callbacks load through the font's SHARED FT_Face, so this face's
 /// size has to be active whenever HarfBuzz is handed it -- at creation, where
 /// hb-ft caches the scale, and again before every shape.
-static hb_font_t* freetypeFont(ZtextFace* face) {
-  ztextFaceActivate(face);
+static hb_font_t* freetypeFont(ZtypesetFace* face) {
+  ztypesetFaceActivate(face);
   if (face->hb_ft_font != NULL) return face->hb_ft_font;
 
   hb_font_t* font = hb_ft_font_create(face->font->ft, NULL);
@@ -83,12 +83,12 @@ static hb_font_t* freetypeFont(ZtextFace* face) {
 
   face->hb_ft_font = font;
   // The style may have been set long before this font existed.
-  ztextFaceApplySynthetic(face);
+  ztypesetFaceApplySynthetic(face);
   // Built lazily, so it can come into existence long after the font's axes
   // were moved -- and hb_ft_font_create does not read them off the FT_Face in
   // this build. Assigned first, because that is what tells the helper below
   // there is a second HarfBuzz font to write.
-  ztextFaceApplyVariations(face);
+  ztypesetFaceApplyVariations(face);
   return font;
 }
 
@@ -96,39 +96,41 @@ static hb_font_t* freetypeFont(ZtextFace* face) {
 // Shaper
 //===----------------------------------------------------------------------===//
 
-ZtextResult ztextShaperCreate(ZtextShaper** out) {
-  if (out == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetShaperCreate(ZtypesetShaper** out) {
+  if (out == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   *out = NULL;
 
-  ZtextShaper* shaper = ZTEXT_NEW(ZtextShaper);
-  if (shaper == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
+  ZtypesetShaper* shaper = ZTYPESET_NEW(ZtypesetShaper);
+  if (shaper == NULL) return ZTYPESET_RESULT_OUT_OF_MEMORY;
 
   shaper->buffer = hb_buffer_create();
   if (shaper->buffer == NULL ||
       !hb_buffer_allocation_successful(shaper->buffer)) {
     hb_buffer_destroy(shaper->buffer);
-    ztextFree(shaper);
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+    ztypesetFree(shaper);
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   *out = shaper;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
-void ztextShaperDestroy(ZtextShaper* shaper) {
+void ztypesetShaperDestroy(ZtypesetShaper* shaper) {
   if (shaper == NULL) return;
   hb_buffer_destroy(shaper->buffer);
-  const ZtextAllocatorId owner = ztextAllocatorOf(shaper);
-  ztextArrayFree(owner, &shaper->glyphs, sizeof(ZtextGlyph));
-  ztextArrayFree(owner, &shaper->features, sizeof(hb_feature_t));
-  ztextFree(shaper);
+  const ZtypesetAllocatorId owner = ztypesetAllocatorOf(shaper);
+  ztypesetArrayFree(owner, &shaper->glyphs, sizeof(ZtypesetGlyph));
+  ztypesetArrayFree(owner, &shaper->features, sizeof(hb_feature_t));
+  ztypesetFree(shaper);
 }
 
-static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
+static bool buildFeatures(ZtypesetShaper* shaper,
+                          const ZtypesetFeature* features,
                           size_t count) {
   shaper->features.count = 0u;
   if (count == 0u) return true;
-  if (!ztextArrayReserve(ztextAllocatorOf(shaper), &shaper->features, count,
+  if (!ztypesetArrayReserve(ztypesetAllocatorOf(shaper), &shaper->features,
+      count,
                          sizeof(hb_feature_t))) {
     return false;
   }
@@ -153,7 +155,7 @@ static bool buildFeatures(ZtextShaper* shaper, const ZtextFeature* features,
 // that logs the error and carries on draws last frame's text, while a failure
 // that happened later (out of memory, say) correctly cleared them. Two
 // different behaviours for the same "it failed".
-static void resetResults(ZtextShaper* shaper) {
+static void resetResults(ZtypesetShaper* shaper) {
   shaper->shaped = false;
   shaper->glyphs.count = 0u;
   shaper->used_freetype_metrics = false;
@@ -163,18 +165,18 @@ static void resetResults(ZtextShaper* shaper) {
 // Everything both entry points do once their arguments are their own.
 //
 // Direction and script are parameters rather than being read off `params`,
-// because ztextShaperShapeRun takes them from the run: one fact, one source,
+// because ztypesetShaperShapeRun takes them from the run: one fact, one source,
 // decided by the caller that has it.
-static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
+static ZtypesetResult shapeInto(ZtypesetShaper* shaper, ZtypesetFace* face,
                              const void* text, size_t length,
-                             ZtextEncoding encoding, size_t run_offset,
-                             size_t run_length, ZtextDirection direction,
+                             ZtypesetEncoding encoding, size_t run_offset,
+                             size_t run_length, ZtypesetDirection direction,
                              uint32_t script,
-                             const ZtextShapeParams* params) {
+                             const ZtypesetShapeParams* params) {
   hb_font_t* font = face->hb_font;
   if (params->use_freetype_metrics != 0) {
     font = freetypeFont(face);
-    if (font == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
+    if (font == NULL) return ZTYPESET_RESULT_OUT_OF_MEMORY;
     shaper->used_freetype_metrics = true;
   }
 
@@ -184,22 +186,22 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
   // item range and uses everything around it as context, which is what makes
   // joining correct across a boundary the host chose.
   switch (encoding) {
-    case ZTEXT_ENCODING_UTF16:
+    case ZTYPESET_ENCODING_UTF16:
       hb_buffer_add_utf16(buffer, (const uint16_t*)text, (int)length,
                           (unsigned int)run_offset, (int)run_length);
       break;
-    case ZTEXT_ENCODING_UTF32:
+    case ZTYPESET_ENCODING_UTF32:
       hb_buffer_add_utf32(buffer, (const uint32_t*)text, (int)length,
                           (unsigned int)run_offset, (int)run_length);
       break;
-    case ZTEXT_ENCODING_UTF8:
+    case ZTYPESET_ENCODING_UTF8:
     default:
       hb_buffer_add_utf8(buffer, (const char*)text, (int)length,
                          (unsigned int)run_offset, (int)run_length);
       break;
   }
   if (!hb_buffer_allocation_successful(buffer)) {
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   hb_buffer_set_cluster_level(buffer, toHbClusterLevel(params->cluster_level));
@@ -208,7 +210,7 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
   //
   // HarfBuzz produces UNSAFE_TO_BREAK unconditionally but leaves
   // UNSAFE_TO_CONCAT and SAFE_TO_INSERT_TATWEEL off unless asked, because
-  // they cost something to compute. ztext asks always: a flag a consumer
+  // they cost something to compute. ztypeset asks always: a flag a consumer
   // cannot rely on being computed is a flag it has to assume the worst about,
   // and assuming the worst is exactly the re-shaping the flags exist to
   // avoid. The cost is measured in README.md.
@@ -223,7 +225,7 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
                           HB_BUFFER_FLAG_PRODUCE_UNSAFE_TO_CONCAT |
                           HB_BUFFER_FLAG_PRODUCE_SAFE_TO_INSERT_TATWEEL));
 
-  if (direction != ZTEXT_DIRECTION_AUTO) {
+  if (direction != ZTYPESET_DIRECTION_AUTO) {
     hb_buffer_set_direction(buffer, toHbDirection(direction));
   }
   if (script != 0u) {
@@ -242,8 +244,8 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
   //
   // So the buffer is seeded with "und" (ISO 639-2 for undetermined) before the
   // guess, which stops it reaching for the locale, and cleared afterwards when
-  // the caller asked for no language at all. The result is that ztext applies
-  // language-specific features only when explicitly told to.
+  // the caller asked for no language at all. The result is that ztypeset
+  // applies language-specific features only when explicitly told to.
   if (params->language != NULL) {
     hb_buffer_set_language(
         buffer, hb_language_from_string(params->language, -1));
@@ -260,7 +262,7 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
   }
 
   if (!buildFeatures(shaper, params->features, params->feature_count)) {
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   hb_shape(font, buffer,
@@ -270,7 +272,7 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
            (unsigned int)shaper->features.count);
 
   if (!hb_buffer_allocation_successful(buffer)) {
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   unsigned int glyph_count = 0u;
@@ -279,41 +281,41 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
   const hb_glyph_position_t* positions =
       hb_buffer_get_glyph_positions(buffer, &glyph_count);
   if (glyph_count != 0u && (infos == NULL || positions == NULL)) {
-    return ZTEXT_RESULT_SHAPE_FAILED;
+    return ZTYPESET_RESULT_SHAPE_FAILED;
   }
 
-  if (!ztextArrayReserve(ztextAllocatorOf(shaper), &shaper->glyphs,
-                         glyph_count, sizeof(ZtextGlyph))) {
-    return ZTEXT_RESULT_OUT_OF_MEMORY;
+  if (!ztypesetArrayReserve(ztypesetAllocatorOf(shaper), &shaper->glyphs,
+                         glyph_count, sizeof(ZtypesetGlyph))) {
+    return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
   // HarfBuzz keeps its results in two parallel arrays of its own layout. They
   // are fused here into one array of one small struct, so a consumer walks one
   // cache line per glyph and never sees a HarfBuzz type.
-  ZtextGlyph* glyphs = (ZtextGlyph*)shaper->glyphs.data;
+  ZtypesetGlyph* glyphs = (ZtypesetGlyph*)shaper->glyphs.data;
   for (unsigned int i = 0u; i < glyph_count; i++) {
     glyphs[i].glyph_id = infos[i].codepoint;  // Post-shaping this IS the index.
     glyphs[i].cluster = infos[i].cluster;
-    // Masked to the flags ztext names, by HarfBuzz's own accessor. A newer
+    // Masked to the flags ztypeset names, by HarfBuzz's own accessor. A newer
     // HarfBuzz with a fourth flag would hand it through here otherwise, under
-    // a bit ZtextGlyphFlag has no meaning for.
+    // a bit ZtypesetGlyphFlag has no meaning for.
     glyphs[i].flags = (uint32_t)hb_glyph_info_get_glyph_flags(&infos[i]);
-    glyphs[i].x_advance = ztextFrom266(positions[i].x_advance);
-    glyphs[i].y_advance = ztextFrom266(positions[i].y_advance);
-    glyphs[i].x_offset = ztextFrom266(positions[i].x_offset);
-    glyphs[i].y_offset = ztextFrom266(positions[i].y_offset);
+    glyphs[i].x_advance = ztypesetFrom266(positions[i].x_advance);
+    glyphs[i].y_advance = ztypesetFrom266(positions[i].y_advance);
+    glyphs[i].x_offset = ztypesetFrom266(positions[i].x_offset);
+    glyphs[i].y_offset = ztypesetFrom266(positions[i].y_offset);
   }
   shaper->glyphs.count = glyph_count;
 
   shaper->direction = fromHbDirection(hb_buffer_get_direction(buffer));
   shaper->face_generation = face->generation;
   shaper->shaped = true;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 // What both entry points check about `params` itself. Direction and script
 // are NOT here: each entry point decides where those come from.
-static bool paramsAreUsable(const ZtextShapeParams* params) {
+static bool paramsAreUsable(const ZtypesetShapeParams* params) {
   return params->feature_count == 0u || params->features != NULL;
 }
 
@@ -321,74 +323,76 @@ static bool paramsAreUsable(const ZtextShapeParams* params) {
 // Written as subtractions so no caller's arithmetic can overflow into a range
 // that looks valid.
 static bool rangeIsUsable(const void* text, size_t length,
-                          ZtextEncoding encoding, size_t offset,
+                          ZtypesetEncoding encoding, size_t offset,
                           size_t run_length) {
   if (offset > length) return false;
   if (run_length > length - offset) return false;
   // A run that starts or ends inside a character would hand HarfBuzz half of
   // one. Refused rather than shaped, as everywhere else that takes a range.
-  return !ztextTextSplitsCharacter(text, length, encoding, offset) &&
-         !ztextTextSplitsCharacter(text, length, encoding, offset + run_length);
+  return !ztypesetTextSplitsCharacter(text, length, encoding, offset) &&
+         !ztypesetTextSplitsCharacter(text, length, encoding,
+                                      offset + run_length);
 }
 
-ZtextResult ztextShaperShape(ZtextShaper* shaper, ZtextFace* face,
+ZtypesetResult ztypesetShaperShape(ZtypesetShaper* shaper, ZtypesetFace* face,
                              const void* text, size_t length,
-                             ZtextEncoding encoding, size_t run_offset,
+                             ZtypesetEncoding encoding, size_t run_offset,
                              size_t run_length,
-                             const ZtextShapeParams* params) {
-  if (shaper == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+                             const ZtypesetShapeParams* params) {
+  if (shaper == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   resetResults(shaper);
 
-  if (face == NULL || params == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (text == NULL && length != 0u) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (face == NULL || params == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
+  if (text == NULL && length != 0u) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   // Zero for an encoding this build does not name, which is how a consumer
   // compiled against a newer header is refused rather than misread.
-  if (ztextEncodingUnitSize(encoding) == 0u) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (ztypesetEncodingUnitSize(encoding) == 0u) {
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
   // HarfBuzz counts text in unsigned int, in code units of whichever
   // hb_buffer_add_* it is given.
-  if (length > (size_t)INT_MAX) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  if (!paramsAreUsable(params)) return ZTEXT_RESULT_INVALID_ARGUMENT;
-  // The whole text, not the run: this text is borrowed and ztext has never
+  if (length > (size_t)INT_MAX) return ZTYPESET_RESULT_INVALID_ARGUMENT;
+  if (!paramsAreUsable(params)) return ZTYPESET_RESULT_INVALID_ARGUMENT;
+  // The whole text, not the run: this text is borrowed and ztypeset has never
   // seen it before, so a malformed unit anywhere in it is worth saying so
-  // about. It is also the reason ztextShaperShapeRun exists -- iterating a
+  // about. It is also the reason ztypesetShaperShapeRun exists -- iterating a
   // paragraph's runs through THIS entry point pays the walk once per run.
-  if (!ztextTextIsWellFormed(text, length, encoding)) {
-    return ZTEXT_RESULT_INVALID_TEXT;
+  if (!ztypesetTextIsWellFormed(text, length, encoding)) {
+    return ZTYPESET_RESULT_INVALID_TEXT;
   }
   if (!rangeIsUsable(text, length, encoding, run_offset, run_length)) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
 
   return shapeInto(shaper, face, text, length, encoding, run_offset,
                    run_length, params->direction, params->script, params);
 }
 
-ZtextResult ztextShaperShapeRun(ZtextShaper* shaper, ZtextFace* face,
-                                const ZtextParagraph* paragraph,
-                                const ZtextShapingRun* run,
-                                const ZtextShapeParams* params) {
-  if (shaper == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+ZtypesetResult ztypesetShaperShapeRun(ZtypesetShaper* shaper,
+                                      ZtypesetFace* face,
+                                const ZtypesetParagraph* paragraph,
+                                const ZtypesetShapingRun* run,
+                                const ZtypesetShapeParams* params) {
+  if (shaper == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   resetResults(shaper);
 
   if (face == NULL || paragraph == NULL || run == NULL || params == NULL) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
   // The run carries the direction and the script. Reading them from `params`
   // as well would be two sources for one fact, and the loser would be silent.
-  if (params->direction != ZTEXT_DIRECTION_AUTO || params->script != 0u) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (params->direction != ZTYPESET_DIRECTION_AUTO || params->script != 0u) {
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
-  if (!paramsAreUsable(params)) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (!paramsAreUsable(params)) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   if (paragraph->length > (size_t)INT_MAX) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
   // A run this paragraph produced is inside it and on character boundaries by
   // construction; one a caller built by hand is not.
   if (!rangeIsUsable(paragraph->text, paragraph->length, paragraph->encoding,
                      run->offset, run->length)) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
 
   // Not validated, and that is the point of this entry point: the paragraph
@@ -396,33 +400,34 @@ ZtextResult ztextShaperShapeRun(ZtextShaper* shaper, ZtextFace* face,
   // nothing can have changed it since.
   return shapeInto(shaper, face, paragraph->text, paragraph->length,
                    paragraph->encoding, run->offset, run->length,
-                   (run->level % 2u == 0u) ? ZTEXT_DIRECTION_LTR
-                                           : ZTEXT_DIRECTION_RTL,
+                   (run->level % 2u == 0u) ? ZTYPESET_DIRECTION_LTR
+                                           : ZTYPESET_DIRECTION_RTL,
                    run->script, params);
 }
 
-size_t ztextShaperGlyphCount(const ZtextShaper* shaper) {
+size_t ztypesetShaperGlyphCount(const ZtypesetShaper* shaper) {
   if (shaper == NULL || !shaper->shaped) return 0u;
   return shaper->glyphs.count;
 }
 
-const ZtextGlyph* ztextShaperGlyphs(const ZtextShaper* shaper) {
+const ZtypesetGlyph* ztypesetShaperGlyphs(const ZtypesetShaper* shaper) {
   if (shaper == NULL || !shaper->shaped) return NULL;
-  return (const ZtextGlyph*)shaper->glyphs.data;
+  return (const ZtypesetGlyph*)shaper->glyphs.data;
 }
 
-ZtextDirection ztextShaperDirection(const ZtextShaper* shaper) {
-  if (shaper == NULL || !shaper->shaped) return ZTEXT_DIRECTION_AUTO;
+ZtypesetDirection ztypesetShaperDirection(const ZtypesetShaper* shaper) {
+  if (shaper == NULL || !shaper->shaped) return ZTYPESET_DIRECTION_AUTO;
   return shaper->direction;
 }
 
-ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
-                               ZtextExtents* out) {
+ZtypesetResult ztypesetShaperExtents(const ZtypesetShaper* shaper,
+                                     ZtypesetFace* face,
+                               ZtypesetExtents* out) {
   if (shaper == NULL || face == NULL || out == NULL) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
   memset(out, 0, sizeof(*out));
-  if (!shaper->shaped) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  if (!shaper->shaped) return ZTYPESET_RESULT_INVALID_ARGUMENT;
 
   // The face must be the one the run was shaped against, at the size it was
   // shaped at. Measured against a different face -- or the same face after a
@@ -431,10 +436,10 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
   // compared rather than pointers, because the face that was shaped with may
   // since have been destroyed and its address reused.
   if (face->generation != shaper->face_generation) {
-    ztextSetErrorDetail(
+    ztypesetSetErrorDetail(
         "extents asked for a different face, or the same face resized or "
         "restyled since it was shaped");
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
 
   // The same metrics source the shape used. Taking extents from hb-ot-font
@@ -443,10 +448,10 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
   hb_font_t* font = face->hb_font;
   if (shaper->used_freetype_metrics) {
     font = freetypeFont(face);
-    if (font == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
+    if (font == NULL) return ZTYPESET_RESULT_OUT_OF_MEMORY;
   }
 
-  const ZtextGlyph* glyphs = (const ZtextGlyph*)shaper->glyphs.data;
+  const ZtypesetGlyph* glyphs = (const ZtypesetGlyph*)shaper->glyphs.data;
   const size_t count = shaper->glyphs.count;
 
   float pen_x = 0.0f;
@@ -457,15 +462,15 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
     hb_glyph_extents_t extents;
     if (hb_font_get_glyph_extents(font, glyphs[i].glyph_id, &extents)) {
       const float x =
-          pen_x + glyphs[i].x_offset + ztextFrom266(extents.x_bearing);
+          pen_x + glyphs[i].x_offset + ztypesetFrom266(extents.x_bearing);
       const float y =
-          pen_y + glyphs[i].y_offset + ztextFrom266(extents.y_bearing);
+          pen_y + glyphs[i].y_offset + ztypesetFrom266(extents.y_bearing);
       // HarfBuzz reports height NEGATIVE in a y-up coordinate system, so the
       // bottom edge is y + height. Both corners are min/maxed rather than
       // assumed, so a font that reports them the other way round still gives
       // a well-formed box.
-      const float x2 = x + ztextFrom266(extents.width);
-      const float y2 = y + ztextFrom266(extents.height);
+      const float x2 = x + ztypesetFrom266(extents.width);
+      const float y2 = y + ztypesetFrom266(extents.height);
 
       const float x_min = x < x2 ? x : x2;
       const float x_max = x < x2 ? x2 : x;
@@ -492,14 +497,14 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
 
   out->x_advance = pen_x;
   out->y_advance = pen_y;
-  return ZTEXT_RESULT_OK;
+  return ZTYPESET_RESULT_OK;
 }
 
 //===----------------------------------------------------------------------===//
 // Warm-up
 //===----------------------------------------------------------------------===//
 
-void ztextWarmup(void) {
+void ztypesetWarmup(void) {
   // HarfBuzz builds several singletons on first use and NEVER frees them in
   // this build. Upstream would free them from an atexit handler, but only
   // where HAVE_ATEXIT is defined; build.zig does not define it and passes
@@ -518,7 +523,7 @@ void ztextWarmup(void) {
   // How MANY blocks is deliberately not written here. It was, for a while --
   // "4 blocks and 500 bytes", measured once and then left alone while
   // HarfBuzz was re-vendored underneath it, at which point it read 6 and 550
-  // and the comment was simply wrong. The count is HarfBuzz's, not ztext's:
+  // and the comment was simply wrong. The count is HarfBuzz's, not ztypeset's:
   // it is however many singletons that version of that library happens to
   // allocate, on that platform, and it moves whenever any of the three does.
   // Nothing recomputes it, so nothing may assert it. What is invariant is
@@ -532,8 +537,8 @@ void ztextWarmup(void) {
   // touch: whichever code path gets there first is the one that pays.
   //
   // Touching them here lets a host populate them BEFORE installing a tracking
-  // allocator, so what that allocator then sees is ztext's actual working set.
-  // ztext's own allocator-balance test depends on exactly this.
+  // allocator, so what that allocator then sees is ztypeset's actual working
+  // set. ztypeset's own allocator-balance test depends on exactly this.
   //
   // Each of the five below was found by running that test and reading the
   // stack of what it reported, rather than by guessing from the source.
@@ -545,15 +550,15 @@ void ztextWarmup(void) {
   // unicode functions.
   (void)hb_unicode_funcs_get_default();
 
-  // The language intern table (hb-common.cc). "und" is the tag ztext seeds
+  // The language intern table (hb-common.cc). "und" is the tag ztypeset seeds
   // every unspecified shape with, so this is the entry that would otherwise
   // appear on the first shape.
   (void)hb_language_from_string("und", 3);
 
   // The same table's DEFAULT entry, which is a different tag and reached by a
-  // different path: ztext names a language on every buffer it shapes, so
+  // different path: ztypeset names a language on every buffer it shapes, so
   // nothing here asks for the default -- but the autohinter does. With
-  // FT_CONFIG_OPTION_USE_HARFBUZZ (ffi/ztext_ftoption.h) FreeType builds its
+  // FT_CONFIG_OPTION_USE_HARFBUZZ (ffi/ztypeset_ftoption.h) FreeType builds its
   // own hb_buffer_t for the coverage pass and calls
   // hb_buffer_guess_segment_properties, which asks for the default language
   // and interns it: two allocations, once per process, charged to whichever
@@ -566,7 +571,7 @@ void ztextWarmup(void) {
   (void)hb_language_get_default();
 
   // The OpenType font-functions singleton (hb-ot-font.cc). It is built the
-  // first time any font is pointed at hb-ot-font, which ztext does for every
+  // first time any font is pointed at hb-ot-font, which ztypeset does for every
   // face; an empty font is enough to trigger it and owns nothing.
   hb_font_t* probe = hb_font_create(hb_face_get_empty());
   if (probe != NULL) {
@@ -575,23 +580,23 @@ void ztextWarmup(void) {
   }
 
   // SheenBidi's allocator object is likewise created once and kept for the
-  // life of the process. It is allocated before ztext's seam is live -- by
+  // life of the process. It is allocated before ztypeset's seam is live -- by
   // SheenBidi's own default allocator, i.e. malloc -- so it never reaches a
   // host allocator at all; installing it here simply makes when that happens
   // predictable rather than dependent on the first paragraph.
-  (void)ztextInstallSheenbidiAllocator();
+  (void)ztypesetInstallSheenbidiAllocator();
 
-  // libunibreak's three initialisers, which ztext had never called.
+  // libunibreak's three initialisers, which ztypeset had never called.
   //
   // In 7.0.0 all three are empty -- linebreak.c:353, wordbreak.c:63 and
   // graphemebreak.c:73 are `{ }` -- so calling them allocates nothing, costs
   // nothing and changes no result today. That is exactly why the omission was
   // invisible, and exactly why it is worth fixing rather than documenting: the
   // headers declare them as the entry points to call before set_*breaks_*,
-  // upstream is free to give them a body in any release, and ztext re-vendors.
-  // A version that started interning a table in init_linebreak would have
-  // charged that allocation to whichever host allocator happened to be
-  // installed at the first paragraph -- the same defect the five HarfBuzz
+  // upstream is free to give them a body in any release, and ztypeset
+  // re-vendors. A version that started interning a table in init_linebreak
+  // would have charged that allocation to whichever host allocator happened to
+  // be installed at the first paragraph -- the same defect the five HarfBuzz
   // calls above exist to prevent, arriving silently on a routine re-vendor.
   //
   // Called here rather than at each use site because that is what warm-up is:

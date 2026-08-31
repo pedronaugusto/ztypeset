@@ -28,7 +28,7 @@ pub const Error = error{
     BufferTooSmall,
     /// A result code this build does not know, which means the library is
     /// newer than the declarations compiled against it. Only reachable with a
-    /// shared build; see `ffi/ztext.h` on version skew.
+    /// shared build; see `ffi/ztypeset.h` on version skew.
     UnknownResult,
 };
 
@@ -58,15 +58,15 @@ pub fn check(result: c.Result) Error!void {
 
 /// Borrowed, static description of a result, for logging.
 pub fn name(result: c.Result) [:0]const u8 {
-    return std.mem.span(c.ztextResultName(result));
+    return std.mem.span(c.ztypesetResultName(result));
 }
 
 /// What an upstream said about the most recent failure on this thread, or ""
 /// if it said nothing.
 ///
-/// ztext's error set is flat, so this is where the detail FreeType had and the
+/// ztypeset's error set is flat, so this is where the detail FreeType had and the
 /// enum could not carry ends up. Diagnostics only -- the string is not stable
 /// across versions and nothing should branch on it.
 pub fn lastDetail() [:0]const u8 {
-    return std.mem.span(c.ztextLastErrorDetail());
+    return std.mem.span(c.ztypesetLastErrorDetail());
 }

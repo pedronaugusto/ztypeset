@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- the one place that decides how to compute a SHA-256.
+# ztypeset -- the one place that decides how to compute a SHA-256.
 #
 # Sourced, never executed. Two scripts need digests and the hosts they run on
 # disagree about the tool: coreutils ships `sha256sum`, macOS ships `shasum`.

@@ -53,7 +53,7 @@ pub const VariationSequence = struct {
 ///
 /// None of the four fonts above has a format-14 subtable -- the test that uses
 /// this asserts that of the font it starts from rather than trusting it -- and
-/// without one, two of the three answers `ztextFontVariantGlyphIndex` can give
+/// without one, two of the three answers `ztypesetFontVariantGlyphIndex` can give
 /// are unreachable: a sequence with a glyph of its own, and a sequence the
 /// font records as the default. Only "no such sequence" can be observed, which
 /// would leave the interesting half of the entry point untested.

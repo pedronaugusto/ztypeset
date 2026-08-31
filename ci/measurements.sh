@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- every number the README claims, recomputed, and the ones that can
+# ztypeset -- every number the README claims, recomputed, and the ones that can
 # be checked automatically checked.
 #
 # A README full of measured numbers goes stale silently: nothing fails when a
@@ -36,7 +36,7 @@
 #     llvm-nm) are reported as such rather than skipped.
 #   - Timings are CPU time on a machine under unknown load; only the ratios
 #     between rows are worth comparing across machines.
-#   - Byte counts are what ztext's allocator seam was ASKED for. They exclude
+#   - Byte counts are what ztypeset's allocator seam was ASKED for. They exclude
 #     the host allocator's own per-block overhead, and they cannot attribute a
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
@@ -74,7 +74,7 @@
 #     explanation from an incorrect one -- only that the rule is stated where
 #     a reader of that function will see it.
 #   - The consumer-artifact check proves each name is PASSED to
-#     ztext.artifact(); only running tests/consumer proves it resolves, which
+#     ztypeset.artifact(); only running tests/consumer proves it resolves, which
 #     CI does on all three hosts and both Windows ABIs.
 #   - The guard-table check compares whole rows: the section name, then the
 #     harness's case names in its order. It cannot tell whether a case name
@@ -105,7 +105,7 @@
 #     written on one line, would be invisible to it. build.zig writes all nine
 #     the same way on purpose, and this is the gate that keeps the tenth from
 #     being written differently.
-#   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
+#   - The ffi/ztypeset.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
 #     no list beside it is not checkable, which is the argument for not
@@ -114,12 +114,12 @@
 #     decides. The other rows are settled by whether a file is in build.zig's
 #     source list, which nothing here reads; they are prose with a citation,
 #     not a gated number.
-#   - sizeof(ZtextAbiLayout) is arithmetic over the header's field list, not a
+#   - sizeof(ZtypesetAbiLayout) is arithmetic over the header's field list, not a
 #     compiler's answer. It is right because every field is a uint32_t and the
 #     check refuses to compute anything when that stops holding, but it would
 #     not notice a pragma pack or an attribute that changed the layout without
 #     changing a field type. The null sweep compares the two for real:
-#     ztextAbiLayout's own layout_size against the consumer's sizeof.
+#     ztypesetAbiLayout's own layout_size against the consumer's sizeof.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -181,7 +181,7 @@ claim() {
 #-----------------------------------------------------------------------------
 # Source-derived. No build, no run: portable and cheap enough for every host.
 #-----------------------------------------------------------------------------
-entry_points=$(grep -c '^ZTEXT_API' ffi/ztext.h)
+entry_points=$(grep -c '^ZTYPESET_API' ffi/ztypeset.h)
 externs=$(grep -c '^pub extern fn' src/c.zig)
 guard_cases=$(grep -c '^case_ ' ci/check-guards.sh)
 # Declared tests, as opposed to test EXECUTIONS: `zig build test` runs the
@@ -190,18 +190,18 @@ guard_cases=$(grep -c '^case_ ' ci/check-guards.sh)
 # and both are checked. Blind spot: a `test` block indented inside a struct is
 # not counted, because none is written that way here.
 suite_test_decls=$(grep -rh '^test ' --include='*.zig' src tests | wc -l | tr -d ' ')
-swept=$(grep -oE '\bztext[A-Za-z0-9_]+\(' ffi/ztext.h |
-        grep -oE '^ztext[A-Za-z0-9_]+' | sort -u |
+swept=$(grep -oE '\bztypeset[A-Za-z0-9_]+\(' ffi/ztypeset.h |
+        grep -oE '^ztypeset[A-Za-z0-9_]+' | sort -u |
         while read -r name; do
-          grep -qE "ZTEXT_API[^;]*\b$name\(" ffi/ztext.h || continue
+          grep -qE "ZTYPESET_API[^;]*\b$name\(" ffi/ztypeset.h || continue
           grep -qF "$name" tests/null_sweep.c && printf 'x\n'
         done | wc -l | tr -d ' ')
 
 zon_version=$(grep -oE '\.version = "[0-9]+\.[0-9]+\.[0-9]+"' build.zig.zon |
               grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
-hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
-hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
-hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
+hdr_major=$(grep -oE '#define ZTYPESET_VERSION_MAJOR [0-9]+' ffi/ztypeset.h | grep -oE '[0-9]+$')
+hdr_minor=$(grep -oE '#define ZTYPESET_VERSION_MINOR [0-9]+' ffi/ztypeset.h | grep -oE '[0-9]+$')
+hdr_patch=$(grep -oE '#define ZTYPESET_VERSION_PATCH [0-9]+' ffi/ztypeset.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
 # README.md's own table of contents, against its own headings. A table of
 # contents is a copy of a list that is already in the file, which is the shape
@@ -221,7 +221,7 @@ readme_version=$(sed -n 's/^Status: \*\*v\([0-9]*\.[0-9]*\)\*\*.*/\1/p' README.m
 # The 26.6 conversion, which has exactly one home. `(float)x / 64.0f` was
 # written out at twenty-six sites in three translation units -- four of them
 # per glyph in the shaping loop -- for a conversion this library performs
-# everywhere. ztextFrom266 is that home, and a grep is the gate: an
+# everywhere. ztypesetFrom266 is that home, and a grep is the gate: an
 # open-coded one is visible in the source, so nothing subtler is needed.
 open_coded_266=$(grep -n '/ 64\.0f' ffi/*.c || true)
 
@@ -230,7 +230,7 @@ open_coded_266=$(grep -n '/ 64\.0f' ffi/*.c || true)
 # the moment someone needs one, so the gate is that no test .c calls fopen at
 # all -- the helper header is the only file allowed to.
 test_fopen=$(grep -n 'fopen' tests/*.c || true)
-helper_fopen=$(grep -c 'fopen(' tests/ztext_test_io.h || true)
+helper_fopen=$(grep -c 'fopen(' tests/ztypeset_test_io.h || true)
 
 # Every top-level entry of the repository against build.zig.zon's `paths`.
 # `paths` is what a consumer receives: anything missing from it is absent from
@@ -238,7 +238,7 @@ helper_fopen=$(grep -c 'fopen(' tests/ztext_test_io.h || true)
 # suite cannot see the difference and tests/consumer -- which resolves the
 # dependency by local path -- cannot either. build.zig compiles
 # examples/quickstart.zig, and `examples` was not in `paths`, so a consumer
-# fetching ztext got a build graph naming a file its package did not contain.
+# fetching ztypeset got a build graph naming a file its package did not contain.
 # CONTRIBUTING.md and SECURITY.md were missing the same way.
 zon_paths=$(sed -n '/\.paths = \.{/,/}/p' build.zig.zon |
             sed -n 's/.*"\([^"]*\)".*/\1/p' | sort)
@@ -249,7 +249,7 @@ top_level=$(ls -A . |
             grep -vxE '\.git|\.gitignore|\.zig-cache|zig-out' | sort)
 unshipped=$(comm -23 <(printf '%s\n' "$top_level") <(printf '%s\n' "$zon_paths"))
 
-# Every *Destroy in ffi/ztext.h must state the exactly-once rule in its own
+# Every *Destroy in ffi/ztypeset.h must state the exactly-once rule in its own
 # documentation. Two of the six used to be documented as tolerating a repeat,
 # on the strength of a flag test that reads like a repeat guard and is not one
 # -- by the time a caller could repeat the call the handle is freed, so the
@@ -258,7 +258,7 @@ unshipped=$(comm -23 <(printf '%s\n' "$top_level") <(printf '%s\n' "$zon_paths")
 # runtime check for it can exist, so the gate is on the prose.
 undocumented_destroy=$(awk '
   /^\/\/\// { block = block $0 "\n"; next }
-  /^ZTEXT_API void ztext[A-Za-z]*Destroy\(/ {
+  /^ZTYPESET_API void ztypeset[A-Za-z]*Destroy\(/ {
     name = $0
     sub(/.*void /, "", name)
     sub(/\(.*/, "", name)
@@ -267,10 +267,10 @@ undocumented_destroy=$(awk '
     next
   }
   { block = "" }
-' ffi/ztext.h)
-destroy_count=$(grep -c '^ZTEXT_API void ztext[A-Za-z]*Destroy(' ffi/ztext.h)
+' ffi/ztypeset.h)
+destroy_count=$(grep -c '^ZTYPESET_API void ztypeset[A-Za-z]*Destroy(' ffi/ztypeset.h)
 
-# Every library ztext installs, against the consumer that is supposed to link
+# Every library ztypeset installs, against the consumer that is supposed to link
 # each of them. tests/consumer exists because `dependency.artifact(name)`
 # panics on a name the dependency does not register and nothing in the in-repo
 # suite goes through that path -- and it linked four of the five, having missed
@@ -280,7 +280,7 @@ installed_artifacts=$(grep -A2 'b.addLibrary(.{' build.zig |
                       sed -n 's/.*\.name = "\([^"]*\)".*/\1/p' | sort -u)
 unlinked_artifacts=
 for artifact in $installed_artifacts; do
-  grep -qF "ztext.artifact(\"$artifact\")" tests/consumer/build.zig ||
+  grep -qF "ztypeset.artifact(\"$artifact\")" tests/consumer/build.zig ||
     unlinked_artifacts="$unlinked_artifacts $artifact"
 done
 
@@ -377,10 +377,10 @@ done
 # A test that installs a process-wide allocator has to take it out again on
 # EVERY path, and only `defer` is every path.
 #
-# The allocator ztext installs is process-wide and these tests back it with a
+# The allocator ztypeset installs is process-wide and these tests back it with a
 # DebugAllocator living in the test's own frame. A bare reset at the end of the
 # body is not reached when an assertion above it fails, so a FAILING test used
-# to leave ztext allocating through a frame that had ended -- for every test
+# to leave ztypeset allocating through a frame that had ended -- for every test
 # after it, in the same process. It is the defect the C smoke test was already
 # fixed for, in the language the wrapper is written in, and it does not
 # announce itself: what it did here was hang a mutation sweep with no verdict,
@@ -391,7 +391,7 @@ done
 alloc_tests_total=$(awk '
   /^test "/ { inside = 1; has_set = 0; next }
   inside && /^\}/ { if (has_set) n++; inside = 0; next }
-  inside && index($0, "ztext.setAllocator(") { has_set = 1 }
+  inside && index($0, "ztypeset.setAllocator(") { has_set = 1 }
   END { print n + 0 }
 ' src/integration_test.zig)
 alloc_tests_loose=$(awk '
@@ -407,8 +407,8 @@ alloc_tests_loose=$(awk '
     inside = 0
     next
   }
-  inside && index($0, "ztext.setAllocator(") { has_set = 1 }
-  inside && index($0, "defer ztext.resetAllocator()") { has_defer = 1 }
+  inside && index($0, "ztypeset.setAllocator(") { has_set = 1 }
+  inside && index($0, "defer ztypeset.resetAllocator()") { has_defer = 1 }
 ' src/integration_test.zig)
 guard_run_sites=$(grep -cF '"${GUARD_CMD[@]}"' ci/check-guards.sh)
 guard_run_loose=$(awk '
@@ -417,12 +417,12 @@ guard_run_loose=$(awk '
   !inside && index($0, "\"${GUARD_CMD[@]}\"") { print FNR ": " $0 }
 ' ci/check-guards.sh)
 
-# The upstreams ffi/ztext.h's banner names, against src/pins.zig. Six places
+# The upstreams ffi/ztypeset.h's banner names, against src/pins.zig. Six places
 # said "three" when the package had vendored four for months, and the one that
 # matters is this one: it is the first line a consumer reads and it is a LIST,
 # so it can be checked rather than proof-read. A count in prose elsewhere is
 # still prose; this is the enumeration.
-banner=$(sed -n '2p' ffi/ztext.h)
+banner=$(sed -n '2p' ffi/ztypeset.h)
 missing_upstreams=
 for name in $(pin_names); do
   printf '%s' "$banner" | grep -qi -- "$name" || missing_upstreams="$missing_upstreams $name"
@@ -431,10 +431,10 @@ done
 # LICENSES.md's "Reaches your binary?" cell for the FreeType autofit files
 # that call HarfBuzz, and the macro that decides it. Those five files compile
 # to a dummy typedef without FT_CONFIG_OPTION_USE_HARFBUZZ and to real code
-# with it, so one edit to ffi/ztext_ftoption.h silently makes a licence page
+# with it, so one edit to ffi/ztypeset_ftoption.h silently makes a licence page
 # wrong about what a consumer ships. This is the pair that drifted.
 ft_hb_macro=no
-grep -qE '^#define FT_CONFIG_OPTION_USE_HARFBUZZ$' ffi/ztext_ftoption.h &&
+grep -qE '^#define FT_CONFIG_OPTION_USE_HARFBUZZ$' ffi/ztypeset_ftoption.h &&
   ft_hb_macro=yes
 ft_hb_cell=$(grep -m1 -F 'src/autofit/ft-hb.c' LICENSES.md |
              awk -F'|' '{ print $4 }')
@@ -450,7 +450,7 @@ esac
 changelog_version=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md |
                     grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
 
-# sizeof(ZtextAbiLayout), recomputed from the header rather than believed from
+# sizeof(ZtypesetAbiLayout), recomputed from the header rather than believed from
 # CHANGELOG.md's ABI table. That table tells a consumer how much the runtime
 # handshake grew, which is exactly the number nobody re-derives when a field is
 # appended -- so it is a documented number with a source, and this is the
@@ -463,30 +463,30 @@ changelog_version=$(grep -m1 -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md |
 # invalid, so it produces an empty size, which --check reports as a failure
 # instead of a plausible wrong number. An empty struct body does the same, so
 # a grep that silently stops matching goes red too.
-abi_layout_body=$(awk '/^typedef struct ZtextAbiLayout \{/,/^\} ZtextAbiLayout;/' \
-                    ffi/ztext.h | grep -E '^  [A-Za-z_].*;$')
+abi_layout_body=$(awk '/^typedef struct ZtypesetAbiLayout \{/,/^\} ZtypesetAbiLayout;/' \
+                    ffi/ztypeset.h | grep -E '^  [A-Za-z_].*;$')
 abi_layout_size=
 if [ -n "$abi_layout_body" ] &&
    ! printf '%s\n' "$abi_layout_body" | grep -qv '^  uint32_t '; then
   abi_layout_size=$(($(printf '%s\n' "$abi_layout_body" | wc -l | tr -d ' ') * 4))
 fi
-# The size the newest ABI table says ZtextAbiLayout grew TO -- the third
+# The size the newest ABI table says ZtypesetAbiLayout grew TO -- the third
 # column of its row, the second being what it grew from.
-changelog_layout_size=$(grep -m1 -E '^\| `ZtextAbiLayout` \|' CHANGELOG.md |
+changelog_layout_size=$(grep -m1 -E '^\| `ZtypesetAbiLayout` \|' CHANGELOG.md |
                         awk -F'|' '{ gsub(/[^0-9]/, "", $4); print $4 }')
 
 if [ $CHECK -eq 0 ]; then
   printf '%sSources%s\n' "$BOLD" "$OFF"
-  row 'C entry points in ffi/ztext.h' "$entry_points"
+  row 'C entry points in ffi/ztypeset.h' "$entry_points"
   row 'externs in src/c.zig' "$externs"
   row 'entry points reached by the null sweep' "$swept"
   row 'mutation cases in ci/check-guards.sh' "$guard_cases"
   row 'test declarations in src and tests' "$suite_test_decls"
   row 'build.zig.zon version' "$zon_version"
-  row 'ffi/ztext.h version macros' "$hdr_version"
+  row 'ffi/ztypeset.h version macros' "$hdr_version"
   row 'CHANGELOG.md newest entry' "$changelog_version"
   note 'the three are compared by --check, not merely printed here'
-  row 'sizeof(ZtextAbiLayout) from ffi/ztext.h' "${abi_layout_size:-<not all uint32_t: unrecomputable>}"
+  row 'sizeof(ZtypesetAbiLayout) from ffi/ztypeset.h' "${abi_layout_size:-<not all uint32_t: unrecomputable>}"
   row "CHANGELOG.md's ABI table says" "${changelog_layout_size:-<none>}"
 fi
 
@@ -591,22 +591,22 @@ count_symbols() {
   # shellcheck disable=SC2086
   "$symtool" $symflags "$1" 2>/dev/null | wc -l | tr -d ' '
 }
-count_ztext_symbols() {
+count_ztypeset_symbols() {
   [ -n "$symtool" ] || { printf '?'; return; }
   # shellcheck disable=SC2086
-  "$symtool" $symflags "$1" 2>/dev/null | grep -c ' _\?ztext' || true
+  "$symtool" $symflags "$1" 2>/dev/null | grep -c ' _\?ztypeset' || true
 }
 
 if [ $CHECK -eq 0 ]; then
   printf '\n%sShared build%s %s(-fvisibility=hidden)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
   if zig build -Dshared=true > /dev/null 2>&1; then
     # Every extension a supported host produces, not two of them.
-    # ztext's own artefact, by name: zig-out/lib also holds the upstream
+    # ztypeset's own artefact, by name: zig-out/lib also holds the upstream
     # archives, and picking the first one off a glob measured freetype once.
-    shared=$(ls zig-out/lib/*ztext*.dylib zig-out/lib/*ztext*.so \
-                zig-out/bin/*ztext*.dll zig-out/lib/*ztext*.dll 2>/dev/null |
+    shared=$(ls zig-out/lib/*ztypeset*.dylib zig-out/lib/*ztypeset*.so \
+                zig-out/bin/*ztypeset*.dll zig-out/lib/*ztypeset*.dll 2>/dev/null |
              head -1)
-    static=$(ls zig-out/lib/*ztext*.a zig-out/lib/*ztext*.lib 2>/dev/null |
+    static=$(ls zig-out/lib/*ztypeset*.a zig-out/lib/*ztypeset*.lib 2>/dev/null |
              head -1)
     row 'shared artefact' "${shared:-none produced}"
     row 'static artefact' "${static:-none produced}"
@@ -616,9 +616,9 @@ if [ $CHECK -eq 0 ]; then
     else
       if [ -n "$shared" ]; then
         total=$(count_symbols "$shared")
-        ours=$(count_ztext_symbols "$shared")
+        ours=$(count_ztypeset_symbols "$shared")
         row 'exported from the shared library' "$total"
-        row "  of which ztext's own" "$ours"
+        row "  of which ztypeset's own" "$ours"
         row '  of which upstream (FreeType)' "$((total - ours))"
       fi
       if [ -n "$static" ]; then
@@ -651,7 +651,7 @@ if [ $CHECK -eq 1 ]; then
   claim 'entry points swept'      'every one of the [0-9]+ entry points' "$swept"
   claim 'mutation cases'          'applies \*\*[0-9]+\*\* deliberate bugs' "$guard_cases"
 
-  # The FOUR places ztext's version is written. Four files with four reasons
+  # The FOUR places ztypeset's version is written. Four files with four reasons
   # to be edited, and a package whose header, manifest, changelog and README
   # disagree gives a different answer to each consumer depending on which one
   # they read. CHANGELOG.md states the policy those numbers follow; this is
@@ -673,7 +673,7 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %s%s%s\n' 'version, zon = header = CHANGELOG = README' \
       "$GREEN" "$zon_version" "$OFF"
   else
-    printf '  %-42s %sthe four version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s, README.md v%s%s\n' \
+    printf '  %-42s %sthe four version homes disagree: build.zig.zon %s, ffi/ztypeset.h %s, CHANGELOG.md %s, README.md v%s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "${readme_version:-<none>}" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
@@ -690,7 +690,7 @@ if [ $CHECK -eq 1 ]; then
   fi
 
   if [ -z "$open_coded_266" ]; then
-    printf '  %-42s %sztextFrom266%s\n' '26.6 to pixels has one home' \
+    printf '  %-42s %sztypesetFrom266%s\n' '26.6 to pixels has one home' \
       "$GREEN" "$OFF"
   else
     printf '  %-42s %sopen-coded%s\n' '26.6 to pixels has one home' \
@@ -721,7 +721,7 @@ if [ $CHECK -eq 1 ]; then
   fi
 
   if [ -z "$test_fopen" ] && [ "$helper_fopen" = 1 ]; then
-    printf '  %-42s %sztextTestReadFile%s\n' 'the C tests open a file in one place' \
+    printf '  %-42s %sztypesetTestReadFile%s\n' 'the C tests open a file in one place' \
       "$GREEN" "$OFF"
   else
     printf '  %-42s %sopen-coded%s\n' 'the C tests open a file in one place' \
@@ -797,11 +797,11 @@ if [ $CHECK -eq 1 ]; then
   fi
 
   if [ -z "$missing_upstreams" ]; then
-    printf '  %-42s %s%s%s\n' 'ffi/ztext.h names every pinned upstream' \
+    printf '  %-42s %s%s%s\n' 'ffi/ztypeset.h names every pinned upstream' \
       "$GREEN" "$(pin_names | tr '\n' ' ')" "$OFF"
   else
-    printf '  %-42s %sffi/ztext.h line 2 names no%s%s\n' \
-      'ffi/ztext.h upstreams' "$RED" "$missing_upstreams" "$OFF"
+    printf '  %-42s %sffi/ztypeset.h line 2 names no%s%s\n' \
+      'ffi/ztypeset.h upstreams' "$RED" "$missing_upstreams" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 
@@ -809,7 +809,7 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %s%s%s\n' 'LICENSES.md ft-hb row = ftoption.h' \
       "$GREEN" "$ft_hb_claim" "$OFF"
   else
-    printf '  %-42s %sffi/ztext_ftoption.h defines the macro: %s; LICENSES.md claims: %s%s\n' \
+    printf '  %-42s %sffi/ztypeset_ftoption.h defines the macro: %s; LICENSES.md claims: %s%s\n' \
       'LICENSES.md ft-hb row' "$RED" "$ft_hb_macro" "$ft_hb_claim" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
@@ -820,11 +820,11 @@ if [ $CHECK -eq 1 ]; then
   # is, and an appended field that nobody added four bytes for here makes the
   # entry describe a struct that no longer exists.
   if [ -n "$abi_layout_size" ] && [ "$abi_layout_size" = "$changelog_layout_size" ]; then
-    printf '  %-42s %s%s B%s\n' 'sizeof(ZtextAbiLayout) = CHANGELOG' \
+    printf '  %-42s %s%s B%s\n' 'sizeof(ZtypesetAbiLayout) = CHANGELOG' \
       "$GREEN" "$abi_layout_size" "$OFF"
   else
-    printf '  %-42s %sffi/ztext.h %s, CHANGELOG.md %s%s\n' \
-      'sizeof(ZtextAbiLayout)' "$RED" \
+    printf '  %-42s %sffi/ztypeset.h %s, CHANGELOG.md %s%s\n' \
+      'sizeof(ZtypesetAbiLayout)' "$RED" \
       "${abi_layout_size:-<not all uint32_t: unrecomputable>}" \
       "${changelog_layout_size:-<none>}" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))

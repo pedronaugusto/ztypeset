@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# ztext -- prove the guards would actually fail.
+# ztypeset -- prove the guards would actually fail.
 #
 # A test that passes tells you nothing about whether it CAN fail. Every guard
 # in this package was validated by breaking it on purpose and watching the
@@ -25,7 +25,7 @@
 #                                   #   ci/check-guards.sh 'enum:|struct:'
 #   ci/check-guards.sh --anchors    # every anchor still applies; run nothing
 #
-# Slow by nature: each case is a full rebuild of the ztext library plus the
+# Slow by nature: each case is a full rebuild of the ztypeset library plus the
 # suite. It is a separate step from ci/run.sh for that reason.
 
 set -uo pipefail
@@ -78,7 +78,7 @@ ANCHOR_TREE=.
 # a red case dies with the run that produced it.
 cleanup() {
   if [ "${FAILED:-0}" -gt 0 ] && [ -d "$WORK/failures" ]; then
-    keep="${TMPDIR:-/tmp}/ztext-guard-failures.$$"
+    keep="${TMPDIR:-/tmp}/ztypeset-guard-failures.$$"
     if mkdir -p "$keep" && cp "$WORK/failures/"*.log "$keep/" 2>/dev/null; then
       printf '\nfailure logs kept in %s\n' "$keep" >&2
     fi
@@ -348,14 +348,14 @@ PY
   fi
 }
 
-printf '\n%sABI cross-check%s %s(src/abi_check.zig, against ffi/ztext.h)%s\n' \
+printf '\n%sABI cross-check%s %s(src/abi_check.zig, against ffi/ztypeset.h)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
 case_ "enum: a MIDDLE enumerator renumbered" \
-  ffi/ztext.h \
+  ffi/ztypeset.h \
   "type Result.invalid_text is 3 in src/c.zig" \
-  "  ZTEXT_RESULT_INVALID_TEXT = 3," \
-  "  ZTEXT_RESULT_INVALID_TEXT = 99,"
+  "  ZTYPESET_RESULT_INVALID_TEXT = 3," \
+  "  ZTYPESET_RESULT_INVALID_TEXT = 99,"
 
 case_ "enum: the tag narrowed on the Zig side" \
   src/c.zig \
@@ -372,28 +372,28 @@ case_ "struct: two same-sized fields swapped" \
     ascender: f32,"
 
 case_ "struct: a field added to the header only" \
-  ffi/ztext.h \
+  ffi/ztypeset.h \
   "type Extents is 24 bytes in src/c.zig" \
-  "typedef struct ZtextExtents {" \
-  "typedef struct ZtextExtents {
+  "typedef struct ZtypesetExtents {" \
+  "typedef struct ZtypesetExtents {
   float intruder;"
 
 case_ "function: a by-value parameter widened" \
   src/c.zig \
-  "ztextLibrarySetSdfSpread parameter 1" \
-  "pub extern fn ztextLibrarySetSdfSpread(library: *Library, spread: u32) Result;" \
-  "pub extern fn ztextLibrarySetSdfSpread(library: *Library, spread: u64) Result;"
+  "ztypesetLibrarySetSdfSpread parameter 1" \
+  "pub extern fn ztypesetLibrarySetSdfSpread(library: *Library, spread: u32) Result;" \
+  "pub extern fn ztypesetLibrarySetSdfSpread(library: *Library, spread: u64) Result;"
 
 case_ "function: a parameter dropped" \
   src/c.zig \
-  "ztextFaceCreate takes" \
-  "pub extern fn ztextFaceCreate(
+  "ztypesetFaceCreate takes" \
+  "pub extern fn ztypesetFaceCreate(
     font: *Font,
     width: f32,
     height: f32,
     out: **Face,
 ) Result;" \
-  "pub extern fn ztextFaceCreate(
+  "pub extern fn ztypesetFaceCreate(
     font: *Font,
     width: f32,
     out: **Face,
@@ -402,10 +402,10 @@ case_ "function: a parameter dropped" \
 case_ "function: exported by the header, undeclared in c.zig" \
   src/c.zig \
   "never declares it" \
-  "pub extern fn ztextFontStyleName(font: *const Font) [*:0]const u8;" \
+  "pub extern fn ztypesetFontStyleName(font: *const Font) [*:0]const u8;" \
   ""
 
-printf '\n%sBidi%s %s(ffi/ztext_bidi.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
+printf '\n%sBidi%s %s(ffi/ztypeset_bidi.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 
 # Named for the test that fails FIRST, which is not the test named after the
 # property. zig replaces the tail of its own output once a failure carries a
@@ -413,7 +413,7 @@ printf '\n%sBidi%s %s(ffi/ztext_bidi.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 # string that waits for it reads as TRUNCATED, which says only that the
 # evidence is missing.
 case_ "a line derived from the paragraph, skipping rule L1" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "the documented wrap loop covers a paragraph exactly once" \
   "  SBLineRef line = SBParagraphCreateLine(sb_paragraph, (SBUInteger)offset,
                                          (SBUInteger)length);" \
@@ -423,15 +423,15 @@ case_ "a line derived from the paragraph, skipping rule L1" \
 # The flag is never SET, rather than never consulted: dropping it from the
 # expression left it unused and -Werror failed the build before a test ran.
 case_ "script pieces emitted forwards inside an RTL run" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "shaping runs" \
   "    const bool rtl = (visual[v].level & 1u) != 0u;" \
   "    const bool rtl = false;"
 
 case_ "the end of a paragraph left as no break at all" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "line breaks are offered between words, never inside one" \
-  "  out[length - 1u] = (char)ZTEXT_BREAK_MANDATORY;" \
+  "  out[length - 1u] = (char)ZTYPESET_BREAK_MANDATORY;" \
   "  (void)0;"
 
 printf '\n%sSegmentation%s %s(what a paragraph was asked for)%s\n' \
@@ -441,33 +441,33 @@ printf '\n%sSegmentation%s %s(what a paragraph was asked for)%s\n' \
 # paragraph that runs all three anyway still answers every question correctly
 # -- so nothing but an explicit check on what was NOT built can see this.
 case_ "every segmentation pass run whatever was asked for" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "a paragraph runs only the segmentation passes" \
   "  const uint32_t want = paragraph->segmentation;" \
-  "  const uint32_t want = (uint32_t)ZTEXT_SEGMENTATION_ALL;"
+  "  const uint32_t want = (uint32_t)ZTYPESET_SEGMENTATION_ALL;"
 
 # A bit a newer header defines and this build does not.
 case_ "an unnamed segmentation bit accepted and ignored" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "a segmentation bit this build has no name for is refused" \
-  "  if ((segmentation & ~(uint32_t)ZTEXT_SEGMENTATION_ALL) != 0u) {" \
+  "  if ((segmentation & ~(uint32_t)ZTYPESET_SEGMENTATION_ALL) != 0u) {" \
   "  if ((segmentation & 0u) != 0u) {"
 
 # The three arrays are packed in request order, so a pass that is present but
 # read at the wrong offset answers with another pass's boundaries.
 case_ "the word array laid over the line array" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "line breaks are offered between words, never inside one" \
   "    paragraph->word_breaks = next;" \
   "    paragraph->word_breaks = paragraph->breaks;"
 
-printf '\n%sFaces and fonts%s %s(ffi/ztext_face.c, ffi/ztext_raster.c)%s\n' \
+printf '\n%sFaces and fonts%s %s(ffi/ztypeset_face.c, ffi/ztypeset_raster.c)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
 case_ "a face loads without activating its own FT_Size" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "share the parse but not the size" \
-  "  ztextFaceActivate(face);
+  "  ztypesetFaceActivate(face);
 
   const FT_Error error = FT_Load_Glyph(face->font->ft, (FT_UInt)glyph_id," \
   "  const FT_Error error = FT_Load_Glyph(face->font->ft, (FT_UInt)glyph_id,"
@@ -476,7 +476,7 @@ case_ "a face loads without activating its own FT_Size" \
 # older mutation deleted the call, which left isMark unused and failed the
 # build on -Werror instead of failing a test.
 case_ "a covered prefix that splits a base from its marks" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "never splits a base from its marks" \
   "    case HB_UNICODE_GENERAL_CATEGORY_ENCLOSING_MARK:
       return true;" \
@@ -484,7 +484,7 @@ case_ "a covered prefix that splits a base from its marks" \
       return false;"
 
 case_ "a covered prefix that breaks at a format character" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "format characters never break a run" \
   "  if (cp >= 0xFE00u && cp <= 0xFE0Fu) return true;" \
   "  (void)unicode;
@@ -500,15 +500,15 @@ case_ "a covered prefix that breaks at a format character" \
 # build on the unused function before a test could run: a mutation that does
 # not compile proves nothing about the suite.
 case_ "a bitmap that does not say which format it is" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "says which format its bytes are in" \
-  "    case ZTEXT_RENDER_MODE_SDF:
-      return ZTEXT_BITMAP_FORMAT_SDF;" \
-  "    case ZTEXT_RENDER_MODE_SDF:
-      return ZTEXT_BITMAP_FORMAT_A8;"
+  "    case ZTYPESET_RENDER_MODE_SDF:
+      return ZTYPESET_BITMAP_FORMAT_SDF;" \
+  "    case ZTYPESET_RENDER_MODE_SDF:
+      return ZTYPESET_BITMAP_FORMAT_A8;"
 
 case_ "a pixel size rounded to whole pixels" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "fractional pixel size is honoured" \
   "  return (int32_t)(pixels * 64.0f + 0.5f);" \
   "  return (int32_t)(pixels + 0.5f) * 64;"
@@ -519,7 +519,7 @@ case_ "a pixel size rounded to whole pixels" \
 # report. `leaked` rather than a test name because both of them say it and
 # either is enough.
 case_ "a font released without telling the library that owns it" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "leaked" \
   "  library->live_fonts -= 1u;
   releaseLibrary(library);" \
@@ -530,29 +530,29 @@ case_ "a font released without telling the library that owns it" \
 # whatever is installed at that moment splits one handle across two heaps --
 # with no crash, no leak, and nothing but a host's own accounting to notice.
 case_ "a glyph buffer charged to whatever is installed" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "belongs to its library" \
-  "ztextAllocatorOf(face)" \
-  "ZTEXT_ALLOCATOR_ANY"
+  "ztypesetAllocatorOf(face)" \
+  "ZTYPESET_ALLOCATOR_ANY"
 
-printf '\n%sHinting%s %s(ffi/ztext_ftoption.h, and the warm-up it needs)%s\n' \
+printf '\n%sHinting%s %s(ffi/ztypeset_ftoption.h, and the warm-up it needs)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
-# The autohinter's coverage comes from GSUB only because ztext_ftoption.h says
+# The autohinter's coverage comes from GSUB only because ztypeset_ftoption.h says
 # so. Take the macro away and FreeType falls back to
 # af_shaper_get_coverage_nohb, which can only walk the character map: every
 # glyph shaping produces loses its script and is hinted against no blue zones
 # at all. Nothing fails to compile, nothing errors, and the picture changes --
 # which is why a golden is the only thing that can hold it.
-# Caught at COMPILE time, like the ABI cross-check cases above: ffi/ztext_abi.c
+# Caught at COMPILE time, like the ABI cross-check cases above: ffi/ztypeset_abi.c
 # turns every switch this options file claims into an #error, so a build
 # without FT_CONFIG_OPTION_USE_HARFBUZZ cannot be produced at all. The case
 # used to expect a test name, which is a weaker guard than the one that
 # actually holds -- and the verdict said DID NOT COMPILE, correctly, because
 # not compiling is what this guard does.
 case_ "the autohinter's coverage taken from the cmap alone" \
-  ffi/ztext_ftoption.h \
-  "ztext builds WITH FT_CONFIG_OPTION_USE_HARFBUZZ" \
+  ffi/ztypeset_ftoption.h \
+  "ztypeset builds WITH FT_CONFIG_OPTION_USE_HARFBUZZ" \
   "#ifndef FT_CONFIG_OPTION_USE_HARFBUZZ
 #define FT_CONFIG_OPTION_USE_HARFBUZZ
 #endif
@@ -564,7 +564,7 @@ case_ "the autohinter's coverage taken from the cmap alone" \
 # that keeps it off a host's tracking allocator. The C smoke test hints with
 # the autohinter for exactly this reason, and then counts.
 case_ "the language the autohinter interns, left cold" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "blocks leaked" \
   "  (void)hb_language_get_default();" \
   ""
@@ -572,14 +572,14 @@ case_ "the language the autohinter interns, left cold" \
 printf '\n%sFreeType build switches%s %s(what the options file claims)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
-# ffi/ztext_ftoption.h is a page of prose about macros, and every paragraph of
+# ffi/ztypeset_ftoption.h is a page of prose about macros, and every paragraph of
 # it is a claim about what is in the binary. One was false for the life of the
 # package: the resource-fork guessing heuristics were described as dropped and
-# were compiled into every build. ffi/ztext_abi.c now turns each of the six
+# were compiled into every build. ffi/ztypeset_abi.c now turns each of the six
 # switches into a #error, so the claim and the binary cannot part again --
 # which makes a COMPILE failure the verdict here, not a failing test.
 case_ "a FreeType switch the options file says is off" \
-  ffi/ztext_ftoption.h \
+  ffi/ztypeset_ftoption.h \
   "without FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK" \
   "#undef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK" \
   ""
@@ -592,48 +592,51 @@ printf '\n%sSubpixel rasterisation%s %s(pixels, samples and rows)%s\n' \
 # lays the glyph out three times too wide or too tall, with no error anywhere.
 
 case_ "an LCD bitmap's width reported in samples" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "an LCD bitmap is three samples per pixel" \
-  "  out->width = (mode == ZTEXT_RENDER_MODE_LCD) ? slot->bitmap.width / channels
-                                               : slot->bitmap.width;" \
+  "  out->width = (mode == ZTYPESET_RENDER_MODE_LCD)
+                   ? slot->bitmap.width / channels
+                   : slot->bitmap.width;" \
   "  out->width = slot->bitmap.width;"
 
 case_ "an LCD_V bitmap's height reported in sub-rows" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "an LCD_V bitmap is three sub-rows per pixel row" \
-  "  out->height = (mode == ZTEXT_RENDER_MODE_LCD_V) ? slot->bitmap.rows / channels
-                                                  : slot->bitmap.rows;" \
+  "  out->height = (mode == ZTYPESET_RENDER_MODE_LCD_V)
+                    ? slot->bitmap.rows / channels
+                    : slot->bitmap.rows;" \
   "  out->height = slot->bitmap.rows;"
 
 # pitch is bytes per PIXEL row, which for LCD_V is three of FreeType's rows.
 # Left untripled, pitch * height addresses a third of the buffer.
 case_ "an LCD_V pitch that counts one of its three sub-rows" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "an LCD_V bitmap is three sub-rows per pixel row" \
-  "  out->pitch = (int32_t)(slot->bitmap.width *
-                         ((mode == ZTEXT_RENDER_MODE_LCD_V) ? channels : 1u));" \
+  "  out->pitch = (int32_t)(
+      slot->bitmap.width *
+      ((mode == ZTYPESET_RENDER_MODE_LCD_V) ? channels : 1u));" \
   "  out->pitch = (int32_t)slot->bitmap.width;"
 
 # The mode asked for and the mode rendered are two different values, and the
 # format field describes the first. Rendered greyscale and labelled LCD, the
 # consumer reads one byte per pixel as three.
 case_ "a subpixel mode rendered as plain greyscale" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "an LCD bitmap is three samples per pixel" \
-  "    case ZTEXT_RENDER_MODE_LCD:
+  "    case ZTYPESET_RENDER_MODE_LCD:
       return FT_RENDER_MODE_LCD;" \
-  "    case ZTEXT_RENDER_MODE_LCD:
+  "    case ZTYPESET_RENDER_MODE_LCD:
       return FT_RENDER_MODE_NORMAL;"
 
 # The channel count is what a consumer sizes its upload with.
 case_ "three bytes per pixel counted as one" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "an LCD bitmap is three samples per pixel" \
-  "    case ZTEXT_BITMAP_FORMAT_LCD:
-    case ZTEXT_BITMAP_FORMAT_LCD_V:
+  "    case ZTYPESET_BITMAP_FORMAT_LCD:
+    case ZTYPESET_BITMAP_FORMAT_LCD_V:
       return 3u;" \
-  "    case ZTEXT_BITMAP_FORMAT_LCD:
-    case ZTEXT_BITMAP_FORMAT_LCD_V:
+  "    case ZTYPESET_BITMAP_FORMAT_LCD:
+    case ZTYPESET_BITMAP_FORMAT_LCD_V:
       return 1u;"
 
 printf '\n%sProcess-wide state%s %s(what two threads may touch at once)%s\n' \
@@ -645,13 +648,13 @@ printf '\n%sProcess-wide state%s %s(what two threads may touch at once)%s\n' \
 # a constraint violation rather than a slower program, so removing the
 # qualifier stops the build instead of quietly restoring the bug.
 case_ "the generation counter made non-atomic" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "pointer to _Atomic" \
   "  static _Atomic uint64_t counter = 0u;" \
   "  static uint64_t counter = 0u;"
 
 case_ "the one-time install flag made non-atomic" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "pointer to _Atomic" \
   "static _Atomic int g_sb_install_state = 0;" \
   "static int g_sb_install_state = 0;"
@@ -660,11 +663,11 @@ printf '\n%sThe internal contracts%s %s(what no public call can reach)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
 # The bound covers all three encodings from one place, and no public call can
-# reach it: both of ztextTextDecode's callers are in bounds by construction,
+# reach it: both of ztypesetTextDecode's callers are in bounds by construction,
 # which is exactly why the read past the end survived. tests/c_internal.c is
 # the caller that can.
 case_ "the decoder reading the unit at the end" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "decode at index == length returns 1" \
   "  if (index >= length) {
     *out = 0xFFFDu;
@@ -677,7 +680,7 @@ case_ "the decoder reading the unit at the end" \
 # Written as two negations because a NaN fails every comparison: the range
 # test that reads more naturally lets one through.
 case_ "the 26.6 domain written as a range test" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "a NaN is refused" \
   "  if (!(pixels > 0.0f) || !(pixels <= 16384.0f)) return 0;" \
   "  if (pixels <= 0.0f || pixels > 16384.0f) return 0;"
@@ -685,20 +688,20 @@ case_ "the 26.6 domain written as a range test" \
 printf '\n%sThe ABI handshake%s %s(what proves the two sides agree)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
-# ZtextAbiLayout's fields are checked from their own names, so a field cannot
+# ZtypesetAbiLayout's fields are checked from their own names, so a field cannot
 # be added without a check. Point one at the wrong type and the check fails --
 # which is what proves it is a check and not a transcription.
 case_ "a layout field measuring the wrong type" \
-  ffi/ztext_abi.c \
-  "ZtextAbiLayout.matrix_size" \
-  "  out->matrix_size = (uint32_t)sizeof(ZtextMatrix);" \
-  "  out->matrix_size = (uint32_t)sizeof(ZtextCharmap);"
+  ffi/ztypeset_abi.c \
+  "ZtypesetAbiLayout.matrix_size" \
+  "  out->matrix_size = (uint32_t)sizeof(ZtypesetMatrix);" \
+  "  out->matrix_size = (uint32_t)sizeof(ZtypesetCharmap);"
 
 # The probe's markers are what catch two same-typed fields transposed. A field
 # the C side never writes is a field a transposition could hide in.
 case_ "a probed field the library never writes" \
-  ffi/ztext_abi.c \
-  "ztextAbiProbe never writes it" \
+  ffi/ztypeset_abi.c \
+  "ztypesetAbiProbe never writes it" \
   "  out->matrix.yx = 903.25f;" \
   ""
 
@@ -708,7 +711,7 @@ case_ "a probed field the library never writes" \
 # is a compile error: a check that only a well-formed table can satisfy has to
 # reject a malformed one before anything is measured with it.
 case_ "two probed fields of one type expecting one marker" \
-  src/ztext.zig \
+  src/ztypeset.zig \
   "share the marker" \
   '    .{ "variation.tag", markerOf(@as(u32, 0x808)) },' \
   '    .{ "variation.tag", markerOf(@as(u32, 0x804)) },'
@@ -716,7 +719,7 @@ case_ "two probed fields of one type expecting one marker" \
 # And an expectation of zero, which cannot tell a field the library wrote from
 # one it never touched.
 case_ "a probed field expecting a marker of zero" \
-  src/ztext.zig \
+  src/ztypeset.zig \
   "which is also what an untouched field holds" \
   '    .{ "matrix.yx", markerOf(@as(f32, 903.25)) },' \
   '    .{ "matrix.yx", markerOf(@as(f32, 0.0)) },'
@@ -728,30 +731,30 @@ printf '\n%sThe stroker%s %s(where the pen goes, and what it grows)%s\n' \
 # them; a pen traced after the caller's matrix is a pen in device space. Both
 # still draw an outlined glyph, so only a measurement can tell them apart.
 case_ "the pen traced before the styles it should follow" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "the pen traces the styled glyph" \
   "  const bool synthesised = applySynthetic(face, slot);
   bool stroked = false;
-  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
-  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;" \
+  const ZtypesetResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;" \
   "  bool stroked = false;
-  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
-  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const ZtypesetResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;
   const bool synthesised = applySynthetic(face, slot);"
 
 case_ "the pen traced after the matrix instead of before it" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "the matrix maps what it traced" \
-  "  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  "  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;
   const bool transformed = applyTransform(face, slot);" \
-  "  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  "  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;
   const bool transformed = false;
   applyTransform(face, slot);"
 
 # A stroked glyph is a different SHAPE, so the ink metrics the extents are
 # read from have to be recomputed -- the same reason the other two steps do.
 case_ "a pen that reaches the pixels but not the measurements" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "grows the glyph by 2R" \
   "  if (synthesised || stroked || transformed) refreshInkMetrics(slot);" \
   "  if (synthesised || transformed) refreshInkMetrics(slot);"
@@ -760,50 +763,51 @@ case_ "a pen that reaches the pixels but not the measurements" \
 # Sized for the last one instead, a wide glyph after a narrow one overflows
 # or is truncated -- and FreeType writes as many points as it counted.
 case_ "an export buffer that is never grown after the first glyph" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "grows to the widest of them" \
   "  if (points <= face->stroked_points && contours <= face->stroked_contours) {
-    return ZTEXT_RESULT_OK;
+    return ZTYPESET_RESULT_OK;
   }" \
   "  if (face->stroked_points != 0u) {
-    return ZTEXT_RESULT_OK;
+    return ZTYPESET_RESULT_OK;
   }"
 
 # Which side of a contour is "outside" is the font format's business. Swapped,
 # an inside rule grows the letter and an outline eats into it -- and both
 # still produce a plausible picture.
 case_ "the inside and outside borders swapped" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "the glyph grown, shrunk, and the band between them" \
-  "    border = face->stroke.style == ZTEXT_STROKE_STYLE_SHRUNK
+  "    border = face->stroke.style == ZTYPESET_STROKE_STYLE_SHRUNK
                  ? FT_Outline_GetInsideBorder(&slot->outline)
                  : FT_Outline_GetOutsideBorder(&slot->outline);" \
-  "    border = face->stroke.style == ZTEXT_STROKE_STYLE_SHRUNK
+  "    border = face->stroke.style == ZTYPESET_STROKE_STYLE_SHRUNK
                  ? FT_Outline_GetOutsideBorder(&slot->outline)
                  : FT_Outline_GetInsideBorder(&slot->outline);"
 
 # The BAND keeps both contours; either solid style keeps one. Exporting both
 # for all three collapses the styles into one.
 case_ "every stroke style exporting both of the stroker's contours" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "the glyph grown, shrunk, and the band between them" \
-  "  const bool whole = face->stroke.style == ZTEXT_STROKE_STYLE_BAND;" \
+  "  const bool whole = face->stroke.style == ZTYPESET_STROKE_STYLE_BAND;" \
   "  const bool whole = true;"
 
 # A cap, join or style this build does not name comes from a consumer built
 # against a newer header. Drawing something else instead is the silent
 # failure this package exists to refuse.
 case_ "a pen naming a cap this build does not have, accepted" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "does not name should be refused" \
-  "    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE ||" \
-  "    if (cap < (int)ZTEXT_LINE_CAP_BUTT ||"
+  "    if (cap < (int)ZTYPESET_LINE_CAP_BUTT ||
+        cap > (int)ZTYPESET_LINE_CAP_SQUARE ||" \
+  "    if (cap < (int)ZTYPESET_LINE_CAP_BUTT ||"
 
 # A radius too large for 26.6 converts to zero, which draws no pen at all.
 case_ "a radius too large for the fixed point it is converted to" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "a pen that cannot be drawn is refused" \
-  "    if (stroke->radius > 0.0f && ztextToFixed266(stroke->radius) == 0) {" \
+  "    if (stroke->radius > 0.0f && ztypesetToFixed266(stroke->radius) == 0) {" \
   "    if (0) {"
 
 printf '\n%sThe face transform%s %s(what a matrix reaches)%s\n' \
@@ -814,23 +818,23 @@ printf '\n%sThe face transform%s %s(what a matrix reaches)%s\n' \
 # none of them errors.
 
 case_ "the caller's matrix applied before the font's own styles" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "composes after the synthetic styles" \
   "  const bool synthesised = applySynthetic(face, slot);
   bool stroked = false;
-  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
-  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;
+  const ZtypesetResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;
   const bool transformed = applyTransform(face, slot);" \
   "  const bool transformed = applyTransform(face, slot);
   const bool synthesised = applySynthetic(face, slot);
   bool stroked = false;
-  const ZtextResult stroke_result = applyStroke(face, slot, &stroked);
-  if (stroke_result != ZTEXT_RESULT_OK) return stroke_result;"
+  const ZtypesetResult stroke_result = applyStroke(face, slot, &stroked);
+  if (stroke_result != ZTYPESET_RESULT_OK) return stroke_result;"
 
 # xy and yx are indistinguishable under any diagonal matrix, which is why a
 # shear is in the test.
 case_ "the two off-diagonal terms of the matrix swapped" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "maps the ink and leaves every advance in text space" \
   "  matrix.xy = toFixed16(face->transform.xy);
   matrix.yx = toFixed16(face->transform.yx);" \
@@ -841,7 +845,7 @@ case_ "the two off-diagonal terms of the matrix swapped" \
 # a shaped run's advances come from HarfBuzz, which has no matrix, so one side
 # would move and the other would not.
 case_ "the advance transformed too, the way FT_Set_Transform does" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "leaves every advance in text space" \
   "  FT_Outline_Transform(&slot->outline, &matrix);
   return true;" \
@@ -852,18 +856,18 @@ case_ "the advance transformed too, the way FT_Set_Transform does" \
 
 # The one field of a face whose zero is not its default.
 case_ "a face whose matrix starts at the memset's zero" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "created with the identity" \
   "  face->transform.xx = 1.0f;
   face->transform.yy = 1.0f;" \
   ""
 
 case_ "a matrix that is not made of numbers, taken at face value" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "is not made of numbers is refused" \
   "    if (!isFiniteStrength(matrix->xx) || !isFiniteStrength(matrix->xy) ||
         !isFiniteStrength(matrix->yx) || !isFiniteStrength(matrix->yy)) {
-      return ZTEXT_RESULT_INVALID_ARGUMENT;
+      return ZTYPESET_RESULT_INVALID_ARGUMENT;
     }" \
   ""
 
@@ -875,37 +879,37 @@ printf '\n%sCharacter maps%s %s(which one is selected)%s\n' \
 # place of the right one.
 
 case_ "every map reported as the first one" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "reaches glyphs no Unicode character maps to" \
   "  const FT_CharMap map = font->ft->charmaps[index];" \
   "  const FT_CharMap map = font->ft->charmaps[0];"
 
 case_ "whichever map is selected reported as the first" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "reaches glyphs no Unicode character maps to" \
   "  const FT_Int index = FT_Get_Charmap_Index(font->ft->charmap);
-  return index < 0 ? ZTEXT_CHARMAP_INDEX_NONE : (uint32_t)index;" \
+  return index < 0 ? ZTYPESET_CHARMAP_INDEX_NONE : (uint32_t)index;" \
   "  return 0u;"
 
 # The refusal is the answer to \"does this font have a symbol map\". Accept
 # silently and a caller believes it selected one.
 case_ "an encoding this font has no map for, accepted" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "lists its character maps" \
   "  const FT_Error error =
       FT_Select_Charmap(font->ft, (FT_Encoding)encoding);
-  return ztextFromFtError(error);" \
+  return ztypesetFromFtError(error);" \
   "  (void)FT_Select_Charmap(font->ft, (FT_Encoding)encoding);
-  return ZTEXT_RESULT_OK;"
+  return ZTYPESET_RESULT_OK;"
 
 case_ "a charmap index past the end quietly clamped" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "lists its character maps" \
   "  if (font == NULL || index >= (uint32_t)font->ft->num_charmaps) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }
   const FT_CharMap map = font->ft->charmaps[index];" \
-  "  if (font == NULL) return ZTEXT_RESULT_INVALID_ARGUMENT;
+  "  if (font == NULL) return ZTYPESET_RESULT_INVALID_ARGUMENT;
   if (index >= (uint32_t)font->ft->num_charmaps) {
     index = (uint32_t)font->ft->num_charmaps - 1u;
   }
@@ -923,24 +927,26 @@ printf '\n%sSynthetic styles%s %s(two upstreams, one weight)%s\n' \
 # The setter widens the ink and forgets to tell HarfBuzz. This is the defect
 # the API used to document as a limitation.
 case_ "a style applied to the ink and not to the shaping" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "widens a shaped run's advances" \
-  "  face->generation = ztextNextGeneration();
-  ztextFaceApplySynthetic(face);
-  return ZTEXT_RESULT_OK;
+  "  face->generation = ztypesetNextGeneration();
+  ztypesetFaceApplySynthetic(face);
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {" \
-  "  face->generation = ztextNextGeneration();
-  return ZTEXT_RESULT_OK;
+ZtypesetResult ztypesetFaceSetSyntheticOblique(ZtypesetFace* face,
+                                               float slant) {" \
+  "  face->generation = ztypesetNextGeneration();
+  return ZTYPESET_RESULT_OK;
 }
 
-ZtextResult ztextFaceSetSyntheticOblique(ZtextFace* face, float slant) {"
+ZtypesetResult ztypesetFaceSetSyntheticOblique(ZtypesetFace* face,
+                                               float slant) {"
 
 # HarfBuzz's in-place mode is font GRADING: the ink thickens and the advance
 # does not move. It is a real effect with a real name, and it is not this one.
 case_ "emboldening asked for in place, so the advance never moves" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "widens a shaped run's advances" \
   "  hb_font_set_synthetic_bold(face->hb_font, face->synthetic_bold,
                              face->synthetic_bold, false);" \
@@ -952,30 +958,30 @@ case_ "emboldening asked for in place, so the advance never moves" \
 # the hand-over and one of the two metric sources silently keeps the unstyled
 # widths while the other does not.
 case_ "the lazily built font never told what style it was born into" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "before the FreeType metrics font exists" \
   "  face->hb_ft_font = font;
   // The style may have been set long before this font existed.
-  ztextFaceApplySynthetic(face);" \
+  ztypesetFaceApplySynthetic(face);" \
   "  face->hb_ft_font = font;"
 
 # Shaped advances move with the strength now, so a run shaped before the
 # change is as stale as one shaped before a resize. Without the bump,
-# ztextShaperExtents mixes ink from one weight with advances from another.
+# ztypesetShaperExtents mixes ink from one weight with advances from another.
 case_ "a restyled face that still passes for the one a run was shaped against" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "ages a run shaped before it" \
   "  face->synthetic_bold = strength;
   // Shaped advances move with this now, so a run measured against this face
   // before the change is as stale as one measured before a resize.
-  face->generation = ztextNextGeneration();" \
+  face->generation = ztypesetNextGeneration();" \
   "  face->synthetic_bold = strength;"
 
 # The strength is a number the caller chooses, not a flag with one value.
 # Quantise it back to the reference weight and every call still succeeds --
 # a display face asked for three times the weight simply does not get it.
 case_ "a strength quantised back to the one weight upstream ships" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "is a strength the caller chooses" \
   "  const double scaled = (double)ppem * 64.0 * (double)strength;" \
   "  const double reference = strength == 0.0f ? 0.0 : (strength > 0.0f ? 0.041656494 : -0.041656494);
@@ -984,7 +990,7 @@ case_ "a strength quantised back to the one weight upstream ships" \
 # A NaN reaches FreeType's fixed-point conversion as an undefined cast and
 # HarfBuzz's roundf as a NaN advance; neither reports anything.
 case_ "a strength that is not a number, taken at face value" \
-  ffi/ztext_raster.c \
+  ffi/ztypeset_raster.c \
   "is not a number is refused" \
   "  if (face == NULL || !isFiniteStrength(strength)) {" \
   "  if (face == NULL) {"
@@ -997,16 +1003,16 @@ printf '\n%sEncodings%s %s(three upstreams, three seams)%s\n' \
 # characters: no crash, no error, just the wrong embedding levels -- which is
 # the whole reason the gate is a differential test rather than a golden.
 case_ "SheenBidi told the text is UTF-8 whatever it is" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "one text, three encodings" \
   "  sequence.stringEncoding = (SBStringEncoding)encoding;" \
   "  sequence.stringEncoding = SBStringEncodingUTF8;"
 
-# libunibreak has three entry points per algorithm and ztext pairs them up in
+# libunibreak has three entry points per algorithm and ztypeset pairs them up in
 # one switch. Cross one pair and the line breaks of a UTF-16 paragraph are
 # computed over its bytes.
 case_ "libunibreak given UTF-16 through its UTF-8 entry point" \
-  ffi/ztext_bidi.c \
+  ffi/ztypeset_bidi.c \
   "one text, three encodings" \
   "      if (lines != NULL) set_linebreaks_utf16(text, length, NULL, lines);" \
   "      if (lines != NULL) set_linebreaks_utf8((const utf8_t*)text, length, NULL, lines);"
@@ -1014,7 +1020,7 @@ case_ "libunibreak given UTF-16 through its UTF-8 entry point" \
 # The same seam again, in HarfBuzz. Shaping UTF-16 through hb_buffer_add_utf8
 # produces glyphs -- for a text nobody wrote.
 case_ "HarfBuzz handed UTF-16 as UTF-8" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "one text, three encodings" \
   "      hb_buffer_add_utf16(buffer, (const uint16_t*)text, (int)length,
                           (unsigned int)run_offset, (int)run_length);" \
@@ -1025,15 +1031,15 @@ case_ "HarfBuzz handed UTF-16 as UTF-8" \
 # indices are inside a character. Say none are, and a line may start on the
 # second half of a surrogate pair.
 case_ "a UTF-16 surrogate pair treated as two characters" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "a range that would split a character is refused" \
   "      return unit >= 0xDC00u && unit <= 0xDFFFu;" \
   "      return unit >= 0xDC00u && unit <= 0xDC7Fu;"
 
-printf '\n%sShaping%s %s(ffi/ztext_shape.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
+printf '\n%sShaping%s %s(ffi/ztypeset_shape.c)%s\n' "$BOLD" "$OFF" "$DIM" "$OFF"
 
 case_ "a run shaped without the text around it" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "shaping a run with context matches" \
   "      hb_buffer_add_utf8(buffer, (const char*)text, (int)length,
                          (unsigned int)run_offset, (int)run_length);" \
@@ -1045,7 +1051,7 @@ case_ "a run shaped without the text around it" \
 # quietly become "not computed" -- which is indistinguishable from "not set"
 # at the call site, and reads as "safe" to anyone who does not know.
 case_ "the optional glyph flags never asked for" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "reports where a line may be broken" \
   "  hb_buffer_set_flags(buffer,
                       (hb_buffer_flags_t)(
@@ -1054,13 +1060,13 @@ case_ "the optional glyph flags never asked for" \
   "  (void)0;"
 
 case_ "extents taken from a face the run was not shaped against" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "extents refuse a face" \
   "  if (face->generation != shaper->face_generation) {" \
   "  if (false) {"
 
 case_ "a rejected shape leaves the previous run queryable" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "does not leave the previous run queryable" \
   "  shaper->shaped = false;
   shaper->glyphs.count = 0u;" \
@@ -1068,28 +1074,28 @@ case_ "a rejected shape leaves the previous run queryable" \
   // shaper->glyphs.count = 0u;"
 
 case_ "a paragraph run shaped left to right whatever its level" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "a paragraph run is shaped from the paragraph" \
-  "                   (run->level % 2u == 0u) ? ZTEXT_DIRECTION_LTR
-                                           : ZTEXT_DIRECTION_RTL," \
-  "                   ZTEXT_DIRECTION_LTR,"
+  "                   (run->level % 2u == 0u) ? ZTYPESET_DIRECTION_LTR
+                                           : ZTYPESET_DIRECTION_RTL," \
+  "                   ZTYPESET_DIRECTION_LTR,"
 
 case_ "a run's direction and the caller's, both accepted" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "a paragraph run refuses a direction or script" \
-  "  if (params->direction != ZTEXT_DIRECTION_AUTO || params->script != 0u) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  "  if (params->direction != ZTYPESET_DIRECTION_AUTO || params->script != 0u) {
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }" \
-  "  if (params->direction != ZTEXT_DIRECTION_AUTO && params->script != 0u) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+  "  if (params->direction != ZTYPESET_DIRECTION_AUTO && params->script != 0u) {
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }"
 
 case_ "a hand-built run trusted about its own bounds" \
-  ffi/ztext_shape.c \
+  ffi/ztypeset_shape.c \
   "a run built by hand cannot reach outside its paragraph" \
   "  if (!rangeIsUsable(paragraph->text, paragraph->length, paragraph->encoding,
                      run->offset, run->length)) {
-    return ZTEXT_RESULT_INVALID_ARGUMENT;
+    return ZTYPESET_RESULT_INVALID_ARGUMENT;
   }" \
   "  (void)0;"
 
@@ -1100,45 +1106,45 @@ printf '\n%sAllocator%s %s(the seam, both sides of it)%s\n' \
 # which any build failure satisfies — including one caused by a typo in the
 # mutation itself, which would have been counted as the guard working.
 case_ "a declined reallocate reported as out of memory" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "a rendered bitmap survives anything but the next render on its own face" \
-  "  void* fresh = ztextAllocFrom(owner, new_size, backing);" \
+  "  void* fresh = ztypesetAllocFrom(owner, new_size, backing);" \
   "  if (allocator->reallocate != NULL) return NULL;
-  void* fresh = ztextAllocFrom(owner, new_size, backing);"
+  void* fresh = ztypesetAllocFrom(owner, new_size, backing);"
 
 # The block header records WHICH allocator issued a block, and every free is
 # routed back to that entry. Route it to whatever is installed instead -- the
 # behaviour before the registry existed -- and a handle created under one
 # allocator and destroyed under another goes to the wrong heap.
 case_ "a block freed through whatever is installed now" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "never returned to the creating allocator" \
-  "  const ZtextAllocator* allocator = g_registry[header->allocator];
+  "  const ZtypesetAllocator* allocator = g_registry[header->allocator];
   const size_t total = header->total_size;" \
-  "  const ZtextAllocator* allocator = g_registry[g_installed];
+  "  const ZtypesetAllocator* allocator = g_registry[g_installed];
   const size_t total = header->total_size;"
 
 # The other half: the check that says a library-owned block really is the
 # library's. Free a font through the default allocator by name and the
 # mismatch has to stop the process rather than corrupt a heap.
 case_ "a library-owned block released by the wrong allocator" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "released through the wrong allocator" \
   "  if (font->ft != NULL) FT_Done_Face(font->ft);
-  ztextFreeFrom(library->allocator, font);" \
+  ztypesetFreeFrom(library->allocator, font);" \
   "  if (font->ft != NULL) FT_Done_Face(font->ft);
-  ztextFreeFrom(ZTEXT_ALLOCATOR_DEFAULT, font);"
+  ztypesetFreeFrom(ZTYPESET_ALLOCATOR_DEFAULT, font);"
 
 # HarfBuzz's process-lifetime singletons are never freed in this build --
 # hb_atexit expands to nothing without HAVE_ATEXIT -- so a host that audits its
 # heap only balances if they were populated before its allocator went in.
-# ztextSetAllocator is the one place that does that, and no test warms up by
+# ztypesetSetAllocator is the one place that does that, and no test warms up by
 # hand any more, so deleting it there deletes it everywhere: the C boundary's
 # own accounting says so.
 case_ "the process-lifetime caches left unwarmed" \
-  ffi/ztext_core.c \
+  ffi/ztypeset_core.c \
   "blocks leaked" \
-  "  ztextWarmup();" \
+  "  ztypesetWarmup();" \
   ""
 
 # A slot outlives every block its allocator issued, so slots are never
@@ -1154,11 +1160,11 @@ case_ "an allocator slot per install rather than per allocator" \
   ""
 
 # SheenBidi 3.0.0 reads a field it has not written on its own
-# allocation-failure path, and ztext's seam zeroes every block it hands over
+# allocation-failure path, and ztypeset's seam zeroes every block it hands over
 # so that read finds NULL. Remove the memset and the poisoned injection arm
 # dies -- every run, at the same injection point, rather than one run in fifty.
-case_ "SheenBidi handed memory ztext did not write" \
-  ffi/ztext_core.c \
+case_ "SheenBidi handed memory ztypeset did not write" \
+  ffi/ztypeset_core.c \
   "during phase: injection-poisoned" \
   "  if (block != NULL) memset(block, 0, (size_t)size);" \
   "  (void)0;"
@@ -1166,7 +1172,7 @@ case_ "SheenBidi handed memory ztext did not write" \
 printf '\n%sDocumentation%s %s(the examples are one text)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
-# README.md and src/ztext.zig quote examples/quickstart.zig, which the build
+# README.md and src/ztypeset.zig quote examples/quickstart.zig, which the build
 # compiles and runs. Put the old bug back into the README copy -- shaping a
 # SLICE of the text instead of the run in place -- and a named test has to say
 # the document no longer quotes the program. It went the other way once: the
@@ -1194,57 +1200,57 @@ case_ "the environment allowed to reach HarfBuzz" \
 ' \
   ''
 
-printf '\n%sOpenType metrics%s %s(ffi/ztext_face.c)%s\n' \
+printf '\n%sOpenType metrics%s %s(ffi/ztypeset_face.c)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
-# ZtextMetric's enumerators are OpenType tags, not an ordinal range, so there is
+# ZtypesetMetric's enumerators are OpenType tags, not an ordinal range, so there is
 # no bounds check that a caller casting an integer in would trip. Drop the
-# lookup against ZTEXT_METRIC_LIST and an unnamed tag reaches HarfBuzz, which
+# lookup against ZTYPESET_METRIC_LIST and an unnamed tag reaches HarfBuzz, which
 # answers "this font does not have it" -- a plausible-looking UNSUPPORTED for a
 # metric that does not exist.
 case_ "a metric tag nobody vetted, forwarded to HarfBuzz" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "should be refused, not forwarded" \
-  "#undef ZTEXT_METRIC_CASE
+  "#undef ZTYPESET_METRIC_CASE
     return true;
   default:
     return false;
   }" \
-  "#undef ZTEXT_METRIC_CASE
+  "#undef ZTYPESET_METRIC_CASE
     return true;
   default:
     return true;
   }"
 
-printf '\n%sVariable fonts%s %s(ffi/ztext_face.c)%s\n' \
+printf '\n%sVariable fonts%s %s(ffi/ztypeset_face.c)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
 # A named instance is a point in the axis space that nothing else can derive.
 # Hand back zeros instead and a picker offers "Condensed Light" and applies the
 # default instance, with every axis reading as its minimum.
 case_ "named instance coordinates that are not the font's" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "named instances are the points" \
   "    values[i] = fixedToDesign(style->coords[i]);" \
   "    values[i] = 0.0f;"
 
-# HarfBuzz returns the name's length excluding its NUL and ztext passes that
+# HarfBuzz returns the name's length excluding its NUL and ztypeset passes that
 # on. Count the NUL and every caller that slices by the returned length carries
 # a trailing zero byte into whatever it draws.
 case_ "an instance name reported one byte longer than it is" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "named instances are the points" \
   "  *size = (size_t)room;" \
   "  *size = (size_t)room + 1u;"
 
-printf '\n%sVariation sequences%s %s(ffi/ztext_face.c, and the fixture that reaches it)%s\n' \
+printf '\n%sVariation sequences%s %s(ffi/ztypeset_face.c, and the fixture that reaches it)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
 # The whole point of the entry point is the selector. Answer with the base
 # character alone and a coverage check reports coverage for a sequence the font
 # has never heard of -- which is exactly the bug this exists to prevent.
 case_ "a variation selector ignored, the base answered" \
-  ffi/ztext_face.c \
+  ffi/ztypeset_face.c \
   "a variation sequence names its own glyph" \
   "  return (uint32_t)FT_Face_GetCharVariantIndex(
       font->ft, (FT_ULong)codepoint, (FT_ULong)variation_selector);" \
@@ -1265,7 +1271,7 @@ case_ "the fixture's cmap records left unsorted" \
 printf '\n%sVersioning and licences%s %s(ci/measurements.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
-# ztext's version is written in three files, and CHANGELOG.md states what a
+# ztypeset's version is written in three files, and CHANGELOG.md states what a
 # bump of each position promises. The suite cannot see any of that: a build
 # whose manifest says 0.2.0 and whose header says 0.3.0 compiles, links, and
 # passes every test.
@@ -1298,7 +1304,7 @@ case_ "a gated number restated in another document" \
 
 # What a consumer receives, as opposed to what the checkout contains. Nothing
 # in the repository can notice a missing `paths` entry: every file is present
-# locally, and tests/consumer resolves ztext by path rather than by fetch.
+# locally, and tests/consumer resolves ztypeset by path rather than by fetch.
 case_ "a directory build.zig compiles, dropped from the package" \
   build.zig.zon \
   "not in paths" \
@@ -1326,7 +1332,7 @@ case_ "a licence row deleted rather than rechecked" \
   ''
 
 # LICENSES.md's "Reaches your binary?" answer for FreeType's autofit-HarfBuzz
-# files is decided by one macro in ffi/ztext_ftoption.h. Flip the cell and the
+# files is decided by one macro in ffi/ztypeset_ftoption.h. Flip the cell and the
 # page tells a consumer they ship one licence fewer than they do; nothing in
 # the suite, and nothing in the digest check above, can see it.
 case_ "a licence row that no longer matches the build" \
@@ -1358,14 +1364,14 @@ case_ "a build option README cannot name"   build.zig   "README.md names no such
 case_ "a test allocator taken out only on the happy path" \
   src/integration_test.zig \
   "without deferring the reset" \
-  "        try ztext.setAllocator(first);
-        defer ztext.resetAllocator();
+  "        try ztypeset.setAllocator(first);
+        defer ztypeset.resetAllocator();
 
-        const library = try ztext.Library.init();
+        const library = try ztypeset.Library.init();
         const font = try library.createFont(fonts.hebrew, 0);" \
-  "        try ztext.setAllocator(first);
+  "        try ztypeset.setAllocator(first);
 
-        const library = try ztext.Library.init();
+        const library = try ztypeset.Library.init();
         const font = try library.createFont(fonts.hebrew, 0);"
 
 # The call site put back the way it was: straight into a command

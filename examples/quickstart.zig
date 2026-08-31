@@ -1,4 +1,4 @@
-//! The example in README.md and in `src/ztext.zig`'s module doc, as a program
+//! The example in README.md and in `src/ztypeset.zig`'s module doc, as a program
 //! that runs.
 //!
 //! It exists because the two copies of it disagreed. The README's loop was
@@ -29,15 +29,15 @@ pub fn main() !void {
     const text = "Hello \u{395}\u{3bb}\u{3bb}\u{3b7}\u{3bd}\u{3b9}\u{3ba}\u{3ac} \u{43c}\u{438}\u{440}";
 
     //<<<usage
-    const ztext = @import("ztext");
+    const ztypeset = @import("ztypeset");
 
-    // Copied, not borrowed: ztext keeps its own copy for as long as any handle
+    // Copied, not borrowed: ztypeset keeps its own copy for as long as any handle
     // can reach it. Installing also warms the caches the upstreams keep for the
-    // life of the process, so this allocator only ever sees ztext's working set.
-    try ztext.setAllocator(gpa_state.allocator());
-    defer ztext.resetAllocator();
+    // life of the process, so this allocator only ever sees ztypeset's working set.
+    try ztypeset.setAllocator(gpa_state.allocator());
+    defer ztypeset.resetAllocator();
 
-    const library = try ztext.Library.init();
+    const library = try ztypeset.Library.init();
     defer library.deinit();
 
     // The bytes are BORROWED and must outlive the font. Handles have no
@@ -50,10 +50,10 @@ pub fn main() !void {
     const face = try font.face(0, 16);
     defer face.deinit();
 
-    const shaper = try ztext.Shaper.init();
+    const shaper = try ztypeset.Shaper.init();
     defer shaper.deinit();
 
-    const paragraph = try ztext.Paragraph.init(text, .{});
+    const paragraph = try ztypeset.Paragraph.init(text, .{});
     defer paragraph.deinit();
 
     // shapingRuns, not visualRuns: one visual run can span several scripts, and
@@ -76,7 +76,7 @@ pub fn main() !void {
     const breaks = paragraph.lineBreaks(); // one entry per code unit
     var start: usize = 0;
     while (start < text.len) {
-        // Furthest permitted break that still fits. ztext says where a break is
+        // Furthest permitted break that still fits. ztypeset says where a break is
         // ALLOWED; only you know how wide the box is.
         const end = chooseBreak(breaks, start, box_width);
 
@@ -92,14 +92,14 @@ pub fn main() !void {
     //>>>wrapping
 }
 
-/// The host's decision, which is why it is not in the example: ztext reports
+/// The host's decision, which is why it is not in the example: ztypeset reports
 /// where a break is permitted and has no opinion about how wide a line is.
 ///
 /// This one takes the furthest allowed break at or before `start + width`, and
 /// falls back to the end of the text when there is none -- a real host would
 /// measure the shaped advance instead of counting bytes.
 fn chooseBreak(
-    breaks: []const @import("ztext").Break,
+    breaks: []const @import("ztypeset").Break,
     start: usize,
     width: usize,
 ) usize {
