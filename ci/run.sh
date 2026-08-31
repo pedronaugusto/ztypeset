@@ -94,6 +94,12 @@ run 'null sweep covers every entry point' ci/api-surface.sh --sweep
 # column" and nothing acted on it for as long as that was true.
 run 'every entry point has every home' ci/api-surface.sh --gaps
 
+# Every mutation the harness plants still quotes the tree, exactly once. The
+# full harness below answers this too, but only after minutes of rebuilds and
+# only behind --full, so a refactor that stranded a case would sit unnoticed
+# through however many pushes came before someone ran the slow one.
+run 'every mutation still applies' ci/check-guards.sh --anchors
+
 # Every number README.md states that a script can recompute, recomputed and
 # compared. A count in prose goes stale the moment a test is added, and prose
 # has never once been what noticed.
@@ -168,12 +174,24 @@ run 'shared library' zig build -Dshared=true
 run 'sanitizer on in ReleaseSafe' \
   zig build -Doptimize=ReleaseSafe -Dsanitize_c=true
 
-# The header gate again, on the other Windows ABI. It sits here rather than
-# in the cross-compilation block because it LINKS and RUNS a probe, which
-# needs a host that can execute the result -- the same reason the msvc
-# target is absent above.
+# The other Windows ABI, executed rather than only compiled. It sits here
+# rather than in the cross-compilation block because these LINK and RUN, which
+# needs a host that can execute the result -- the same reason the msvc target
+# is absent above.
+#
+# Zig defaults the Windows ABI to gnu, so without this block every MSVC branch
+# in build.zig is unbuilt and every difference between the two ABIs -- struct
+# packing, the C runtime, how a DLL declares its exports -- is untested on the
+# only machine that could test it. CI's Windows runner does all of this; a
+# Windows developer's local run used to do one quarter of it, and the header
+# gate was the quarter it did.
 case "$(uname -s 2> /dev/null)" in
   MINGW* | MSYS* | CYGWIN* | Windows*)
+    run 'test (msvc ABI)' zig build test -Dtarget=native-native-msvc
+    run 'crash loop 200 x test-c (msvc ABI)' \
+      ci/crash-loop.sh 200 -Dtarget=native-native-msvc
+    run 'consumer (msvc ABI)' \
+      env -C tests/consumer zig build run -Dtarget=native-native-msvc
     run 'installed headers link (msvc ABI)' \
       ci/header-link.sh --target=native-native-msvc
     ;;

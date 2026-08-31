@@ -160,6 +160,15 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **`ci/run.sh` runs what CI runs.** The local roster and the hosted one were
+  two lists of the same thing, and they had diverged in two places. On a
+  Windows host `ci/run.sh` executed exactly one of the four MSVC arms CI does
+  -- the header gate -- so every other difference between the two Windows ABIs
+  was untested on the only machine that could test it, Zig defaulting the
+  Windows ABI to gnu. It now runs the suite, the 200-run crash loop and the
+  downstream consumer on `native-native-msvc` as well. It also runs
+  `ci/check-guards.sh --anchors`, which CI gained at the same time.
+
 - **The version has a fourth home, and it had been wrong for a release.**
   `ci/measurements.sh --check` compared `ffi/ztext.h`, `build.zig.zon` and this
   file. README.md's status line said **v0.1** through the whole of 0.2's
