@@ -41,6 +41,13 @@ pub const Library = struct {
     /// still registered with it -- and it is why `ZtextLibrary` counts its
     /// live fonts. A struct holding a library and a face can release them in
     /// field order without a comment explaining which comes first.
+    /// Releases this library. Its memory goes when the last `Font` made from
+    /// it does, so the order against them does not matter. Call it exactly
+    /// once.
+    ///
+    /// A handle is a copyable value, so nothing in the type system stops a
+    /// second `deinit` on a copy, and nothing at runtime catches one either.
+    /// See `ffi/ztext.h`'s ownership rules for why no check is possible.
     pub fn deinit(self: Library) void {
         c.ztextLibraryDestroy(self.handle);
     }
@@ -99,6 +106,8 @@ pub const Font = struct {
     /// May be called before or after its faces' `deinit` with the same result:
     /// the font's memory goes when the last of them does. Faces already made
     /// stay usable; only `face` stops working.
+    /// Releases this font. Its memory goes when the last `Face` made from it
+    /// does. Call it exactly once.
     pub fn deinit(self: Font) void {
         c.ztextFontDestroy(self.handle);
     }
@@ -336,6 +345,8 @@ pub const Face = struct {
     /// carries its library.
     font: Font,
 
+    /// Destroys this face, whose memory is released here rather than
+    /// deferred. Call it exactly once.
     pub fn deinit(self: Face) void {
         c.ztextFaceDestroy(self.handle);
     }

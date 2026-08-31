@@ -17,7 +17,9 @@
 // Ownership, uniformly:
 //   *Create    allocates through the installed allocator; caller owns the
 //              handle and must pass it to the matching *Destroy.
-//   *Destroy   accepts NULL.
+//   *Destroy   accepts NULL, and takes each non-NULL handle EXACTLY ONCE.
+//              All six, without exception; see below, because the exception
+//              looks like it is there and is not.
 //   accessors  return pointers that borrow from the handle and die with it,
 //              or sooner where noted.
 //
@@ -31,6 +33,38 @@
 // passed to *Destroy -- an error rather than undefined behaviour. The
 // accessors on the fonts and faces that outlive it keep working, because those
 // handles are still alive.
+//
+// DESTROYING TWICE is a different question from destroying in the wrong
+// order, and the paragraph above answers only the second. Passing one handle
+// to its *Destroy twice is undefined behaviour for every one of the six.
+//
+// ztextLibraryDestroy and ztextFontDestroy open with a flag test that reads
+// like a repeat guard -- `if (library == NULL || library->destroy_requested)
+// return;` -- and it is not one. The flag exists so that whichever of a
+// library and its fonts is released SECOND performs the teardown; by the time
+// a caller could repeat the call, the handle it names has already been freed
+// by that teardown, so the flag test is itself the use-after-free. Measured,
+// not reasoned: a second ztextLibraryDestroy on a released library segfaults
+// on that line, at ffi/ztext_face.c:69. It reads like a guarantee, which is
+// the only reason it is written out here.
+//
+// There is no runtime check, and that is a decision rather than an omission. A
+// poison word written into the handle before the free could be read back on
+// the second call to diagnose it -- but reading it IS the use-after-free, so
+// the check would be undefined behaviour reporting undefined behaviour, and
+// ztext's own sanitiser build (CI runs Debug with -Dsanitize_c=true) would be
+// right to flag the diagnostic itself. A registry of live handles would avoid
+// the freed read at the price of process-wide mutable state on the drawing
+// path, which is the one thing the thread-safety rules above exist to keep
+// out. FreeType leaves this to the caller for the same reason; HarfBuzz
+// escapes it only by reference-counting every object, which is a different
+// ownership model rather than a check bolted onto this one.
+//
+// What IS checked: every *Destroy accepts NULL, swept by tests/null_sweep.c
+// over every entry point, and ci/measurements.sh --check requires each
+// *Destroy in this header to carry the "exactly once" rule in its own
+// documentation -- because the version of this comment that claimed two
+// handles were exempt was written from reading the source, and was wrong.
 //
 // This is deliberately NOT what FreeType does. FT_Done_Library destroys every
 // face still registered with it, so a library freed while its fonts are alive
@@ -440,6 +474,12 @@ typedef struct ZtextFont ZtextFont;
 typedef struct ZtextFace ZtextFace;
 
 ZTEXT_API ZtextResult ztextLibraryCreate(ZtextLibrary** out);
+
+/// Releases the caller's claim on the library. Its memory goes when the last
+/// font made from it does, so this may be called in any order against them.
+///
+/// Call it exactly once. The flag this sets is read by the release path, not
+/// by a second call to this function -- by then the handle is freed.
 ZTEXT_API void ztextLibraryDestroy(ZtextLibrary* library);
 
 /// Creates a font from an image already in memory.
@@ -468,6 +508,8 @@ ZTEXT_API ZtextResult ztextFontCreateFromMemory(ZtextLibrary* library,
 /// The font's memory goes when its last face does, so this may be called
 /// before or after ztextFaceDestroy with the same result. Faces created from
 /// it stay fully usable; only ztextFaceCreate stops working.
+///
+/// Call it exactly once, for the same reason ztextLibraryDestroy must be.
 ZTEXT_API void ztextFontDestroy(ZtextFont* font);
 
 /// Borrowed family and style names, "" when the font does not name itself.
@@ -771,6 +813,8 @@ ZTEXT_API ZtextResult ztextFontSetNamedInstance(ZtextFont* font,
 ZTEXT_API ZtextResult ztextFaceCreate(ZtextFont* font, float width,
                                       float height, ZtextFace** out);
 
+/// Destroys the face, which nothing else is waiting on: its memory is
+/// released here rather than deferred. Call it exactly once.
 ZTEXT_API void ztextFaceDestroy(ZtextFace* face);
 
 /// The font this face was made from, borrowed. Never NULL for a live face.
@@ -1082,6 +1126,8 @@ typedef struct ZtextGlyph {
 } ZtextGlyph;
 
 ZTEXT_API ZtextResult ztextShaperCreate(ZtextShaper** out);
+
+/// Destroys the shaper and the buffers it grew. Call it exactly once.
 ZTEXT_API void ztextShaperDestroy(ZtextShaper* shaper);
 
 /// Shapes one run of text with one face, one direction and one script.
@@ -1282,6 +1328,9 @@ ZTEXT_API ZtextResult ztextParagraphCreate(const void* text, size_t length,
                                            uint32_t segmentation,
                                            ZtextParagraph** out);
 
+/// Destroys the paragraph, the copy of the text it took and the arrays it
+/// built. Call it exactly once. Lines made from it may outlive it and are
+/// destroyed separately.
 ZTEXT_API void ztextParagraphDestroy(ZtextParagraph* paragraph);
 
 /// Length actually analysed, in the paragraph's own code units, which is at
@@ -1500,6 +1549,7 @@ ZTEXT_API ZtextResult ztextLineCreate(const ZtextParagraph* paragraph,
                                       size_t offset, size_t length,
                                       ZtextLine** out);
 
+/// Destroys the line. Call it exactly once.
 ZTEXT_API void ztextLineDestroy(ZtextLine* line);
 
 ZTEXT_API size_t ztextLineOffset(const ZtextLine* line);
