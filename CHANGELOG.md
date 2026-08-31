@@ -160,6 +160,26 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The version has a fourth home, and it had been wrong for a release.**
+  `ci/measurements.sh --check` compared `ffi/ztext.h`, `build.zig.zon` and this
+  file. README.md's status line said **v0.1** through the whole of 0.2's
+  development and nothing looked at it -- three homes gated and a fourth in
+  prose beside them, which is worse than gating none: a green row reading
+  "the version homes agree" is taken to mean all of them. It is compared as a
+  `major.minor` prefix now, because a patch release is not a status change.
+
+- **README has a table of contents, and it cannot drift.** At 1200 lines it
+  had none. A table of contents is a copy of a list already in the file, so
+  `ci/measurements.sh --check` diffs it against the file's own `##` headings.
+  Beside it, pointers to the four documents that sit next to this one.
+
+- **CONTRIBUTING.md and SECURITY.md exist.** CONTRIBUTING.md is a map rather
+  than a second copy of the rules -- they stay in README, and it says where
+  each one is. SECURITY.md is new content: how to report privately, the
+  threat model, and the OSS-Fuzz asymmetry stated plainly (FreeType and
+  HarfBuzz are continuously fuzzed; SheenBidi and libunibreak are not, and
+  both parse the same untrusted text).
+
 - **libunibreak's three initialisers are called.** `init_linebreak`,
   `init_wordbreak` and `init_graphemebreak` are what its headers ask a caller
   to run before `set_*breaks_*`, and ztext had never run them. In 7.0.0 all

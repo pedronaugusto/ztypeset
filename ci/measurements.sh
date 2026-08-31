@@ -41,6 +41,10 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The contents check compares the section names in README's own table of
+#     contents with its "## " headings. It does not check that a link
+#     RESOLVES: an anchor GitHub would generate differently from the heading
+#     -- one holding punctuation, say -- passes this and still 404s.
 #   - The 26.6 check greps for the divisor. It cannot see a conversion
 #     spelled some other way -- `* 0.015625f`, or a shift on the fixed value
 #     before the cast -- and it deliberately does not look outside ffi/*.c,
@@ -154,6 +158,21 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# README.md's own table of contents, against its own headings. A table of
+# contents is a copy of a list that is already in the file, which is the shape
+# every other check here exists for.
+readme_headings=$(grep '^## ' README.md | sed 's/^## //' | grep -v '^Contents$')
+readme_toc=$(sed -n '/^## Contents$/,/^## Usage$/p' README.md |
+             grep -oE '^\[[^]]+\]|·[[:space:]]*\[[^]]+\]|^\[[^]]+\]' |
+             sed 's/.*\[//; s/\]//')
+toc_diff=$(diff <(printf '%s\n' "$readme_headings") \
+                <(printf '%s\n' "$readme_toc") 2>&1 || true)
+
+# The version has a fourth home nobody was checking: README.md's status line,
+# which said v0.1 while the header, the manifest and the changelog all said
+# 0.2.0. Three homes were gated and the fourth was prose beside them.
+readme_version=$(sed -n 's/^Status: \*\*v\([0-9]*\.[0-9]*\)\*\*.*/\1/p' README.md)
+
 # The 26.6 conversion, which has exactly one home. `(float)x / 64.0f` was
 # written out at twenty-six sites in three translation units -- four of them
 # per glyph in the shaping loop -- for a conversion this library performs
@@ -410,23 +429,41 @@ if [ $CHECK -eq 1 ]; then
   claim 'entry points swept'      'every one of the [0-9]+ entry points' "$swept"
   claim 'mutation cases'          'applies \*\*[0-9]+\*\* deliberate bugs' "$guard_cases"
 
-  # Not a README claim: the THREE places ztext's version is written. Three
-  # files with three reasons to be edited, and a package whose header,
-  # manifest and changelog disagree gives a different answer to each consumer
-  # depending on which one it read. CHANGELOG.md states the policy those
-  # numbers follow; this is what stops the policy from being prose.
+  # The FOUR places ztext's version is written. Four files with four reasons
+  # to be edited, and a package whose header, manifest, changelog and README
+  # disagree gives a different answer to each consumer depending on which one
+  # they read. CHANGELOG.md states the policy those numbers follow; this is
+  # what stops the policy from being prose.
   #
-  # An empty value fails here too: if any of the three greps stops matching --
+  # README.md was the fourth and was not checked, so it sat at "Status: v0.1"
+  # through the whole of 0.2's development -- three homes gated and a fourth
+  # in prose beside them, which is worse than not gating any, because the
+  # green row reads as though it covered them all. It carries only major.minor
+  # (a patch release is not a status change), so it is compared as a prefix.
+  #
+  # An empty value fails here too: if any of the four greps stops matching --
   # a heading reworded, a macro renamed -- the comparison must go red rather
   # than compare two blanks and pass.
-  if [ -n "$zon_version" ] && [ "$zon_version" = "$hdr_version" ] &&
-     [ "$hdr_version" = "$changelog_version" ]; then
-    printf '  %-42s %s%s%s\n' 'version, zon = header = CHANGELOG' \
+  if [ -n "$zon_version" ] && [ -n "$readme_version" ] &&
+     [ "$zon_version" = "$hdr_version" ] &&
+     [ "$hdr_version" = "$changelog_version" ] &&
+     [ "${hdr_version%.*}" = "$readme_version" ]; then
+    printf '  %-42s %s%s%s\n' 'version, zon = header = CHANGELOG = README' \
       "$GREEN" "$zon_version" "$OFF"
   else
-    printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
+    printf '  %-42s %sthe four version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s, README.md v%s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
-      "${changelog_version:-<none>}" "$OFF"
+      "${changelog_version:-<none>}" "${readme_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$toc_diff" ]; then
+    printf '  %-42s %s%s sections%s\n' 'README contents = README headings' \
+      "$GREEN" "$(printf '%s\n' "$readme_headings" | wc -l | tr -d ' ')" "$OFF"
+  else
+    printf '  %-42s %sthe two lists differ%s\n' \
+      'README contents = README headings' "$RED" "$OFF"
+    printf '%s\n' "$toc_diff" | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

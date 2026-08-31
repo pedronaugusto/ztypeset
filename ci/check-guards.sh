@@ -1127,7 +1127,7 @@ printf '\n%sVersioning and licences%s %s(ci/measurements.sh, not the suite)%s\n'
 # passes every test.
 GUARD_CMD=(ci/measurements.sh --check)
 
-case_ "a version bump that reached two of its three homes" \
+case_ "a version bump that reached three of its four homes" \
   build.zig.zon \
   "the three version homes disagree" \
   '.version = "0.2.0",' \
