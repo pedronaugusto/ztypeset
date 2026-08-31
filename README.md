@@ -213,7 +213,7 @@ learn here than during an integration:
 
 ### Why there is a C layer at all
 
-Not because Zig cannot call the upstreams. All three expose C APIs and Zig
+Not because Zig cannot call the upstreams. All four expose C APIs and Zig
 calls C natively; `build.zig` installs their headers precisely so you can.
 
 It exists because FreeType's `FT_FaceRec` and `FT_GlyphSlotRec` are large,
@@ -423,9 +423,19 @@ use-after-free rather than an error code.
 ### Validation at the boundary
 
 Unlike a binding over an unmaintained parser, ztext is **not** compensating for
-upstreams that check nothing. FreeType, HarfBuzz and SheenBidi are all
-continuously fuzzed by OSS-Fuzz and are among the most attacked parsers in
-software. ztext's job is narrower and it should be said plainly:
+upstreams that check nothing -- but that is not equally true of all four, and
+the difference is worth stating rather than smoothing over.
+
+FreeType and HarfBuzz are continuously fuzzed by OSS-Fuzz: both have projects
+in `google/oss-fuzz` -- `projects/freetype2` and `projects/harfbuzz`, the
+latter carrying five separate fuzzers -- checked 2026-08-31. **SheenBidi and
+libunibreak have no OSS-Fuzz project**: a code search of that repository for
+either name returns nothing on the same date. Both of them parse the same
+untrusted text. ztext validates every buffer before it reaches either (see
+[Validation at the boundary](#validation-at-the-boundary)), which is a
+boundary check and not a substitute for fuzzing them.
+
+ztext's job is narrower and it should be said plainly:
 
 - **Not adding holes of its own** — null and size checks at every entry point,
   overflow-checked arithmetic in the allocator and the array helper, and
@@ -994,21 +1004,21 @@ because of that, not despite it.
 | Windows | x86_64, both gnu and MSVC ABI | + aarch64 (gnu only) |
 
 Compiling proves the sources and build graph are portable; only an executed
-configuration proves behaviour, which is why the two are separate jobs. Two of
-the eight cross targets duplicate configurations the executed jobs already
-cover, so six are genuinely additional.
+configuration proves behaviour, which is why the two are separate jobs. The
+cross list repeats three of the configurations the executed jobs already run --
+`x86_64-linux-gnu`, `x86_64-windows-gnu` and `aarch64-macos`, per the table
+above -- and every other entry on it is a configuration nothing else reaches.
 
 That table describes the matrix, not a promise: **the badge at the top of this
-file is the authority on whether those runs have actually happened and passed.**
+file is the authority on whether those runs have actually happened and
+passed.** While the repository is private GitHub Actions does not run at all,
+so the badge does not render -- an absent badge means "not run", not "failed".
 
-At the time of writing that badge is not green, and not red either — while the
-repository is private, GitHub Actions does not run, so the badge will not
-render. What has actually happened is this: the suite has been executed by hand
-on **macOS/aarch64 only** — the whole suite across four optimize modes with the
-C sanitiser on, the standalone C test, the null sweep, the downstream-consumer
-build, all eight cross targets compiled, the mutation harness at eighteen for
-eighteen, and the vendor check green. **The Windows MSVC configuration has
-never been executed at all**, and neither has anything on Linux.
+Which is the reason the badge and not this paragraph is where the answer
+lives. A list of what had been run by hand, on which machine, stood here
+instead; it was accurate the day it was written and became a claim about the
+present that nothing could refresh. A run either has a badge or it has a log,
+and prose is neither.
 
 ## Scope
 
@@ -1152,6 +1162,49 @@ host decides
 where one **happens**, because that needs a width and a width is not a property
 of text. Same for the caret: ztext says where the grapheme boundaries are, the
 host owns the caret.
+
+### The rest of the surface, by name
+
+The sections above describe capabilities. These are the calls that carry
+them, gathered here so that the list of what ztext exposes and the list of
+what it names are the same list. Thirty public functions of the Zig wrapper
+appeared nowhere in this file -- not unexplained, but unfindable by anyone
+reading the documentation rather than the source. `ci/api-surface.sh` now
+fails when a public function is named nowhere in README.md.
+
+- **Which library, and which version of it.** `freetypeVersion`,
+  `harfbuzzVersion`, `sheenbidiVersion` and `unibreakVersion` report what was
+  LINKED, not what was pinned -- the distinction the consumer test exists to
+  hold.
+- **What a font says about itself**: `familyName`, `styleName`, `glyphCount`,
+  `unitsPerEm`, and `countFaces` for the number of faces in a collection,
+  answered before any of them is opened.
+- **Variable fonts, in full**: `axisCount` and `axis` for what the font
+  declares, `setVariations` to move every axis at once, and
+  `namedInstanceCount`, `namedInstanceCoords`, `namedInstanceNameLen` and
+  `namedInstanceName` for the instances the designer named. The two-call name
+  pattern is upstream's -- ask the length, then fill a buffer -- and it is
+  kept rather than hidden so a caller allocates once and exactly.
+- **What a face is set to**: `setPixelSize` (fractional, quantised to 1/64 px),
+  `setSyntheticBold` and `setSyntheticOblique` for the two synthetic styles,
+  and `setSdfSpread` for the SDF range.
+- **Reading a rendered glyph**: `bitmapRows` hands back one slice per row,
+  honouring the sign of the pitch, so a caller never does that arithmetic; and
+  `bitmapChannels` says how many components a pixel format has.
+- **A paragraph, beyond its runs**: `baseLevel` and `baseDirection` for what
+  the bidi algorithm resolved, `graphemeBreaks` and `wordBreaks` beside the
+  line breaks, and `runDirection` for which way one run goes.
+- **The flag sets, without bit arithmetic**: `glyphHas` tests one `GlyphFlag`
+  against a glyph, and `segmentationHas` tests which boundary algorithms a
+  paragraph was asked for.
+- **Text of any of the three widths**: `view` takes a slice or a pointer to an
+  array of `u8`, `u16` or `u32` and produces the `View` the ABI wants, with
+  the length in code units rather than bytes. String literals are pointers to
+  arrays, which is why it accepts both.
+- **Why the last call failed, in words**: `lastDetail` returns this thread's
+  most recent error detail, which is where FreeType's own error name survives
+  ztext's flat `Result`.
+
 
 ## Licence
 

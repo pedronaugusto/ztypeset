@@ -107,7 +107,20 @@ for name in $names; do
   tst=$(grep -rl "\b$name\b" tests/*.c src/integration_test.zig 2>/dev/null |
         wc -l | tr -d ' ')
 
-  mark() { [ "$1" -gt 0 ] && printf '%-4s' 'yes' || printf '%s%-4s%s' "$RED" '--' "$OFF"; }
+  # A declared gap and an undeclared one are different facts and must not
+  # look alike. Red is the colour of "nobody decided", and printing a decision
+  # in it is how a passing run comes to be read as a failing one -- which is
+  # what happened: the single declared gap here was reported as an unfilled
+  # column by a reader doing exactly what the colour told them to.
+  mark() { # <count> <column>
+    if [ "$1" -gt 0 ]; then
+      printf '%-4s' 'yes'
+    elif declared_gap "$name" "$2"; then
+      printf '%s%-4s%s' "$DIM" '--' "$OFF"
+    else
+      printf '%s%-4s%s' "$RED" '--' "$OFF"
+    fi
+  }
 
   undeclared=0
   declared=0
@@ -128,19 +141,79 @@ for name in $names; do
   [ $GAPS_ONLY -eq 1 ] && [ $undeclared -eq 0 ] && continue
 
   printf '%-34s %-4s ' "$name" 'yes'
-  mark "$impl"; printf ' '; mark "$ext"; printf ' '
-  mark "$wrap"; printf ' '; mark "$tst"; printf '\n'
+  mark "$impl" impl; printf ' '; mark "$ext" ext; printf ' '
+  mark "$wrap" wrap; printf ' '; mark "$tst" tst; printf '\n'
+done
+
+#===----------------------------------------------------------------------===#
+# The Zig surface against the README
+#
+# The table above answers "does every C entry point have a wrapper and a
+# test". It says nothing about whether a reader can FIND the wrapper, and
+# thirty public functions were named nowhere in the README -- not unexplained,
+# but absent from the one file a reader opens first.
+#
+# The check is deliberately literal: the name must appear as a word in
+# README.md. It cannot tell documentation from a passing mention and does not
+# try to. What it holds is that the list of what ztext exposes and the list of
+# what it names are the same list, so adding a public function forces a
+# decision about the README instead of allowing silence.
+#===----------------------------------------------------------------------===#
+
+# Public functions the README deliberately does not name. Same rule as
+# declared_gap above: a line here is a decision, and its absence is a failure.
+# It is empty, and that is the finding -- every name below turned out to be
+# worth writing down.
+declared_undocumented() {
+  case "$1" in
+    ZTEXT_NO_SUCH_NAME) return 0 ;;
+  esac
+  return 1
+}
+
+undocumented=0
+undocumented_names=
+zig_fns=0
+for file in src/*.zig; do
+  case "$file" in
+    # c.zig and pins.zig are generated-shaped surfaces the README describes as
+    # a whole; abi_check.zig and the *_test.zig files are not API at all.
+    */c.zig | */pins.zig | *_test.zig | */abi_check.zig) continue ;;
+  esac
+  for fn in $(grep -oE '^[[:space:]]*pub fn [a-zA-Z_][A-Za-z0-9_]*' "$file" |
+              awk '{ print $NF }' | sort -u); do
+    zig_fns=$((zig_fns + 1))
+    grep -qE "\b$fn\b" README.md && continue
+    declared_undocumented "$fn" && continue
+    undocumented=$((undocumented + 1))
+    undocumented_names="$undocumented_names $fn"
+  done
 done
 
 printf '\n%s%d entry points, %d declared empty columns, %d undeclared%s\n' \
   "$DIM" "$total" "$declared_gaps" "$gaps" "$OFF"
 
+printf '%s%d public Zig functions, %d named nowhere in README.md%s\n' \
+  "$DIM" "$zig_fns" "$undocumented" "$OFF"
+
+status=0
+
 if [ $gaps -ne 0 ]; then
-  printf '%san entry point has a home nobody filled and nobody decided to leave%s\n' \
+  printf '\n%san entry point has a home nobody filled and nobody decided to leave%s\n' \
     "$RED" "$OFF" >&2
   printf '  %s\n' $undeclared_names >&2
   printf 'Either write the missing home, or add the pair to declared_gap() in\n' >&2
   printf 'this script with the reason it is deliberate.\n' >&2
-  exit 1
+  status=1
 fi
-exit 0
+
+if [ "$undocumented" -gt 0 ]; then
+  printf '\n%sa public Zig function is named nowhere in README.md%s\n' \
+    "$RED" "$OFF" >&2
+  printf '  %s\n' $undocumented_names >&2
+  printf 'Either name it in README.md, or add it to declared_undocumented() in\n' >&2
+  printf 'this script with the reason it is deliberate.\n' >&2
+  status=1
+fi
+
+exit $status

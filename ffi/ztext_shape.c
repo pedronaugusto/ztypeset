@@ -512,8 +512,18 @@ void ztextWarmup(void) {
   // So this function is not a convenience. It is the only way a host that
   // audits its heap gets a balanced one, and tests/c_smoke.c is where that is
   // proved: it calls this first and then counts every byte in and out through
-  // a plain-C allocator. Delete the call and it reports 4 blocks and 500 bytes
-  // leaked, which ci/check-guards.sh plants to keep the claim honest.
+  // a plain-C allocator. Delete the call and it reports blocks leaked, which
+  // ci/check-guards.sh plants to keep the claim honest.
+  //
+  // How MANY blocks is deliberately not written here. It was, for a while --
+  // "4 blocks and 500 bytes", measured once and then left alone while
+  // HarfBuzz was re-vendored underneath it, at which point it read 6 and 550
+  // and the comment was simply wrong. The count is HarfBuzz's, not ztext's:
+  // it is however many singletons that version of that library happens to
+  // allocate, on that platform, and it moves whenever any of the three does.
+  // Nothing recomputes it, so nothing may assert it. What is invariant is
+  // that the blocks are still live at shutdown, and that is exactly what the
+  // guard case matches on.
   //
   // The Zig suite does NOT prove it, and used to be cited as if it did. Its
   // fixture shapes a throwaway run to reach the two singletons warm-up cannot
