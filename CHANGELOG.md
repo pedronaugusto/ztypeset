@@ -160,6 +160,16 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The downstream consumer links every artifact ztext installs.** It linked
+  four of five and had never linked libunibreak. `dependency.artifact(name)`
+  panics on a name the dependency does not register, and no in-repo test goes
+  through that path -- which is the entire reason `tests/consumer` exists, so
+  the one hole in it was the one thing it could not see. `ci/measurements.sh
+  --check` now compares build.zig's installed artifacts against the names the
+  consumer passes. The artifact is `unibreak` rather than `libunibreak`
+  because Zig adds the `lib` prefix itself; the pin is the project name, and
+  the two namespaces are documented where they meet.
+
 - **The mutation harness can be asked the cheap question, and it stopped
   keeping its own section list in two places.** `ci/check-guards.sh --anchors`
   checks that all 90 cases still quote the tree exactly once, mutating nothing

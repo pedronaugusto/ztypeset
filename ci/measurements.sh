@@ -41,6 +41,9 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The consumer-artifact check proves each name is PASSED to
+#     ztext.artifact(); only running tests/consumer proves it resolves, which
+#     CI does on all three hosts and both Windows ABIs.
 #   - The guard-section check compares two lists of NAMES. It cannot tell
 #     whether the sentence beside a name describes the cases in that section,
 #     and it does not count the cases per section -- only that neither list
@@ -143,6 +146,20 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# Every library ztext installs, against the consumer that is supposed to link
+# each of them. tests/consumer exists because `dependency.artifact(name)`
+# panics on a name the dependency does not register and nothing in the in-repo
+# suite goes through that path -- and it linked four of the five, having missed
+# libunibreak for as long as it has been vendored. A list checked against a
+# list, since that is what it is.
+installed_artifacts=$(grep -A2 'b.addLibrary(.{' build.zig |
+                      sed -n 's/.*\.name = "\([^"]*\)".*/\1/p' | sort -u)
+unlinked_artifacts=
+for artifact in $installed_artifacts; do
+  grep -qF "ztext.artifact(\"$artifact\")" tests/consumer/build.zig ||
+    unlinked_artifacts="$unlinked_artifacts $artifact"
+done
+
 # ci/check-guards.sh's sections against the table in README.md that lists
 # them. The table was a hand-kept mirror, which is the defect this file exists
 # to catch everywhere else: four sections were added to the harness and none
@@ -374,6 +391,15 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$unlinked_artifacts" ]; then
+    printf '  %-42s %s%s%s\n' 'the consumer links every artifact' \
+      "$GREEN" "$(printf '%s ' $installed_artifacts)" "$OFF"
+  else
+    printf '  %-42s %stests/consumer/build.zig links no%s%s\n' \
+      'the consumer links every artifact' "$RED" "$unlinked_artifacts" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 
