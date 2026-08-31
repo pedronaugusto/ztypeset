@@ -217,6 +217,23 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **The mutation applier read source with the locale's codec.** `open(path)`
+  decodes using whatever the platform's locale says, so on a Windows console --
+  cp1252 -- reading a file that holds any non-ASCII text raised
+  `UnicodeDecodeError` and the case was reported **NO ANCHOR**. That verdict
+  means "the code this case names has moved, update the case", so the harness
+  was telling a maintainer to edit a case that was correct. Measured on
+  `src/integration_test.zig`, whose fixtures carry Hebrew and Arabic.
+
+  The same two calls wrote in text mode, which translates every newline to the
+  platform's: applying a one-line mutation on Windows rewrote all 724 lines of
+  `ffi/ztext_raster.c` as CRLF. The build did not care, and anyone diffing the
+  kept working copy to see what a case actually changed did.
+
+  Both now pass `encoding="utf-8", newline=""` on the read and the write, which
+  is the only pair that makes the harness behave the same on every host it
+  runs on -- and it runs on four.
+
 - **Six guard cases proved nothing, and now say so when they do.** Four
   applied a mutation that could not compile: each deleted the last use of a
   variable or the last call to a function, and `-Werror` stopped the build on
