@@ -36,13 +36,13 @@ jobs:
       # Only ztext's own sources: libs/ is vendored verbatim and reformatting
       # it would make the next re-vendor an unreadable diff.
       - name: Formatting
-        run: zig fmt --check src tests/fonts.zig build.zig
+        run: zig fmt --check src tests/fonts.zig build.zig tests/consumer
 
       # These three ran only in ci/run.sh, which is to say on whichever machine
       # a person happened to run it on. Running them on every host also proves
       # the scripts themselves are portable, which is not free: a shell script
       # that has only ever run on one OS is an untested program.
-      - name: Source — C within 80 columns
+      - name: Source — ztext's C is ASCII, within 80 columns
         shell: bash
         run: ci/check-columns.sh
 

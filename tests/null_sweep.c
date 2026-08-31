@@ -153,7 +153,8 @@ int main(int argc, char** argv) {
   REFUSES_OUT(ztextFontVariation(NULL, 0, NULL));
   REFUSES(ztextFontSetVariations(NULL, NULL, 0));
 
-  CHECK(ztextFontNamedInstanceCount(NULL) == 0u, "named instance count of NULL");
+  CHECK(ztextFontNamedInstanceCount(NULL) == 0u,
+        "named instance count of NULL");
   float instance_coords[4];
   memset(instance_coords, 0, sizeof(instance_coords));
   size_t instance_count = 4u;

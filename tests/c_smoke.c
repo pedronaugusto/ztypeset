@@ -18,7 +18,8 @@
 #ifdef _WIN32
 #include <io.h>
 #include <windows.h>
-#define ZTEXT_SMOKE_WRITE(fd, buf, len) (void)_write((fd), (buf), (unsigned)(len))
+#define ZTEXT_SMOKE_WRITE(fd, buf, len) \
+  (void)_write((fd), (buf), (unsigned)(len))
 #else
 #include <unistd.h>
 #define ZTEXT_SMOKE_WRITE(fd, buf, len) (void)write((fd), (buf), (len))
@@ -578,8 +579,8 @@ static ZtextResult countLineTo(void* user, int32_t x, int32_t y) {
   ((OutlineCounts*)user)->line_to++;
   return ZTEXT_RESULT_OK;
 }
-static ZtextResult countConicTo(void* user, int32_t control_x, int32_t control_y,
-                                int32_t x, int32_t y) {
+static ZtextResult countConicTo(void* user, int32_t control_x,
+                                int32_t control_y, int32_t x, int32_t y) {
   (void)control_x;
   (void)control_y;
   (void)x;
@@ -587,9 +588,9 @@ static ZtextResult countConicTo(void* user, int32_t control_x, int32_t control_y
   ((OutlineCounts*)user)->conic_to++;
   return ZTEXT_RESULT_OK;
 }
-static ZtextResult countCubicTo(void* user, int32_t control1_x, int32_t control1_y,
-                                int32_t control2_x, int32_t control2_y, int32_t x,
-                                int32_t y) {
+static ZtextResult countCubicTo(void* user, int32_t control1_x,
+                                int32_t control1_y, int32_t control2_x,
+                                int32_t control2_y, int32_t x, int32_t y) {
   (void)control1_x;
   (void)control1_y;
   (void)control2_x;
@@ -713,7 +714,8 @@ int main(int argc, char** argv) {
                                      &instance_count) ==
             ZTEXT_RESULT_INVALID_ARGUMENT,
         "asking a static font for instance 0 should be refused");
-  CHECK(instance_count == 0u, "a refused instance query should clear its count");
+  CHECK(instance_count == 0u,
+        "a refused instance query should clear its count");
   CHECK(ztextFontNamedInstanceName(the_font, 0, instance_name,
                                    &instance_size) ==
             ZTEXT_RESULT_INVALID_ARGUMENT,

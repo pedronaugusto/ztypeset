@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
   if (ztextFaceCreate(the_font, 0, 32, &face) != ZTEXT_RESULT_OK) return 1;
   if (ztextShaperCreate(&shaper) != ZTEXT_RESULT_OK) return 1;
 
-  printf("ztext bench — %s at 32 px\n", argv[1]);
+  printf("ztext bench -- %s at 32 px\n", argv[1]);
   printf("%-28s %12s  %s\n", "", "per op", "notes");
 
   //--------------------------------------------------------------------------
