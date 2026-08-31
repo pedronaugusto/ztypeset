@@ -1327,6 +1327,12 @@ case_ "a licence row that no longer matches the build" \
   '| "Old MIT", taken from HarfBuzz | **Yes.**' \
   '| "Old MIT", taken from HarfBuzz | No.'
 
+# A build option renamed on the command line and not in the documentation.
+# The suite cannot see this at all: -Dsanitize_c is passed by ci/run.sh, so a
+# renamed option makes the flag inert rather than an error, and every test
+# still passes -- with the sanitizer silently off.
+case_ "a build option README cannot name"   build.zig   "README.md names no such flag"   '            "sanitize_c",'   '            "sanitize_the_c",'
+
 # A process-wide allocator installed for a test and taken out only on the
 # happy path. Nothing the suite runs can see this either -- the failure it
 # creates is in the FAILING run of some other test, which is not a state the
