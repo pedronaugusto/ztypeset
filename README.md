@@ -1042,9 +1042,10 @@ stranded in the first place.
 A third verdict exists and is worth knowing about: **TRUNCATED**. When a test
 fails with a long trace -- one is enough, measured; two make it certain --
 `zig build` replaces the tail of its own output with `unable to read results
-of configure phase`, and a later failure's diagnostics never appear — so a *caught* mutation can read as a hole. The
-script names that state rather than calling it a wrong failure, and the fix for
-a case that lands there is to make the mutation fail one test, not two.
+of configure phase`, and a later failure's diagnostics never appear, so a
+*caught* mutation can read as a hole. The script names that state rather than
+calling it a wrong failure, and the fix for a case that lands there is to
+expect the test that fails **first**.
 
 A fourth, **DID NOT COMPILE**, says the mutation broke the build rather than a
 test -- it deleted the last use of a variable or the last call to a function,
@@ -1066,11 +1067,15 @@ verdict would be judged on a tree nothing else is writing to. The working copy
 is kept and named for the same reason. Before this, a case that hung took the
 whole sweep with it for as long as anyone let it, and said nothing at all.
 
-Each case is a rebuild, and the last two are a rebuild plus an install, a
-translate and a link — minutes rather than seconds for the set, which is why
-it is a step of its own rather than part of every push. HarfBuzz is a large,
-template-heavy C++ library and dominates a cold build; `--quick` exists
-because of that, not despite it.
+Most cases are a rebuild of the library and the suite; the last two are a
+rebuild plus an install, a translate and a link. The ones under *Versioning
+and licences* are neither -- their guard is `ci/measurements.sh --check`,
+which reads sources and runs in seconds, because what they break is a
+statement in a document rather than a behaviour in the library. The set is
+minutes rather than seconds either way, which is why it is a step of its own
+rather than part of every push. HarfBuzz is a large, template-heavy C++
+library and dominates a cold build; `--quick` exists because of that, not
+despite it.
 
 ### Platform coverage
 
