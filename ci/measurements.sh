@@ -99,6 +99,12 @@
 #     not that what README says about it is true. A row that names -Dshared
 #     and then describes the wrong effect passes. It also cannot see an option
 #     declared anywhere but build.zig, and there is nowhere else.
+#   - The sanitizer check matches the identifier a C file is added to against
+#     the identifier the setting is assigned to, both at the start of a line.
+#     A module built through a helper function, or one whose two statements are
+#     written on one line, would be invisible to it. build.zig writes all nine
+#     the same way on purpose, and this is the gate that keeps the tenth from
+#     being written differently.
 #   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
@@ -322,6 +328,29 @@ guard_section_diff=$(diff <(printf '%s\n' "$guard_rows") \
 # only worth as much as the guarantee that nothing runs the command anywhere
 # else, because a second call site would be unbounded again and would read
 # exactly like the first.
+# Every module in build.zig that compiles C is compiled with the sanitizer
+# setting the build was asked for.
+#
+# The three C test executables once were not, while every library was: an
+# unsanitized library linked against a default-sanitized test translation unit,
+# so a trap raised in tests/c_smoke.c read as a crash in the library. That is
+# not a hypothetical -- it was one of the four candidate causes on the table
+# while the intermittent segfault was being chased, and it cost time to
+# eliminate. The property that matters is not "the sanitizer is on"; it is
+# that every object in one link agrees about it.
+#
+# Matched on the identifier: a module that is handed a C source file must also
+# be handed the build's `sanitize` value. A new artifact added without that
+# line is the whole failure mode, and it is invisible in a green build.
+c_modules=$(grep -oE '^ *[a-z_]+[.]root_module[.]addCSourceFiles?[(]' build.zig |
+  tr -d ' (' | cut -d. -f1 | sort -u)
+c_modules_total=$(printf '%s\n' "$c_modules" | grep -c .)
+sanitized_modules=$(grep -oE '^ *[a-z_]+[.]root_module[.]sanitize_c = sanitize;' build.zig |
+  tr -d ' ' | cut -d. -f1 | sort -u)
+unsanitized_modules=$(comm -23 <(printf '%s\n' "$c_modules") \
+                               <(printf '%s\n' "$sanitized_modules") | tr '\n' ' ')
+unsanitized_modules=${unsanitized_modules% }
+
 # Every build option `build.zig` declares is named in README.md.
 #
 # An option nobody can find is an option that does not exist: `-Dshared` was
@@ -746,6 +775,15 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe guard command is run outside the bounded runner%s\n' \
       'check-guards.sh runs a case in one place' "$RED" "$OFF"
     printf '%s\n' "$guard_run_loose" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$unsanitized_modules" ]; then
+    printf '  %-42s %s%s, each sanitized with the build%s\n' \
+      'build.zig modules that compile C' "$GREEN" "$c_modules_total" "$OFF"
+  else
+    printf '  %-42s %scompiles C without sanitize_c: %s%s\n' \
+      'build.zig modules that compile C' "$RED" "$unsanitized_modules" "$OFF"
     MISMATCHES=$((MISMATCHES + 1))
   fi
 
