@@ -50,8 +50,9 @@ instead of claiming that.
   see it: an ill-formed UTF-8, UTF-16 or UTF-32 buffer is refused with
   `ZTEXT_RESULT_INVALID_TEXT` rather than passed down. That is a boundary check
   and not a substitute for fuzzing those two.
-- **Every entry point is called with nothing**, by `tests/null_sweep.c`, across
-  all 88 of them, on every host CI runs.
+- **Every entry point is called with nothing**, by `tests/null_sweep.c` --
+  every one of them, checked against the header by `ci/api-surface.sh
+  --sweep`, on every host CI runs.
 - **Every allocation is failure-injected.** The C smoke test drives the library
   with each allocation in turn made to fail, and asserts no leak and no crash at
   any of them.

@@ -1142,6 +1142,16 @@ case_ "the changelog heading the gate reads by shape" \
   '## 0.2.0' \
   '## v0.2.0'
 
+# A number README states and a script recomputes, written a second time in
+# another document. Both copies read as current until one of them is not, and
+# the reader has no way to tell which. This is the same defect the version
+# homes above have, in the documents rather than in the manifest.
+case_ "a gated number restated in another document" \
+  SECURITY.md \
+  "stated a second time" \
+  '  every one of them, checked against the header by' \
+  '  all 88 of them, checked against the header by'
+
 # What a consumer receives, as opposed to what the checkout contains. Nothing
 # in the repository can notice a missing `paths` entry: every file is present
 # locally, and tests/consumer resolves ztext by path rather than by fetch.

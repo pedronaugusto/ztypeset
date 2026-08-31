@@ -49,6 +49,11 @@
 #     spelled some other way -- `* 0.015625f`, or a shift on the fixed value
 #     before the cast -- and it deliberately does not look outside ffi/*.c,
 #     since the Zig side never sees fixed point.
+#   - The restated-number check searches two documents for the VALUES the
+#     claims above recompute. It cannot see a number written as a word, it
+#     cannot see one in a document nobody added to its list, and a value that
+#     happens to be right for two unrelated things reads as a restatement --
+#     which is a false positive an author resolves by rewording, not a hole.
 #   - The `paths` check compares TOP-LEVEL names only. It proves nothing
 #     about what is inside a listed directory, and it cannot tell a file that
 #     should ship from one that should not -- only that every entry the
@@ -211,9 +216,7 @@ zon_paths=$(sed -n '/\.paths = \.{/,/}/p' build.zig.zon |
 # does not read it.
 top_level=$(ls -A . |
             grep -vxE '\.git|\.gitignore|\.zig-cache|zig-out' | sort)
-unshipped=$(comm -23 <(printf '%s
-' "$top_level") <(printf '%s
-' "$zon_paths"))
+unshipped=$(comm -23 <(printf '%s\n' "$top_level") <(printf '%s\n' "$zon_paths"))
 
 # Every *Destroy in ffi/ztext.h must state the exactly-once rule in its own
 # documentation. Two of the six used to be documented as tolerating a repeat,
@@ -376,6 +379,32 @@ if [ $CHECK -eq 0 ]; then
   fi
 fi
 
+# The numbers README.md states are recomputed above, one at a time, against
+# the source each comes from. The other prose documents must not restate any
+# of them. A number written twice goes stale in one place while the other
+# still reads as current -- the defect this whole file exists to prevent --
+# and it had already happened twice by the time this check was written:
+# SECURITY.md carried the entry-point count, and CONTRIBUTING.md, in the very
+# paragraph telling a contributor to add the line that recomputes a number,
+# carried an approximate count of the mutation cases that was no longer true.
+#
+# CHANGELOG.md is not searched, and must not be: a released entry states what
+# was true at that release, and correcting it later would make the history a
+# second, lying copy of the present.
+gated_numbers="$entry_points $swept $guard_cases $suite_test_decls"
+# The build-derived four are empty without --with-build, and an empty token
+# would be searched for as the empty string -- matching every line.
+if [ -n "$suite_tests" ]; then
+  gated_numbers="$gated_numbers $suite_tests $c_injection $c_warm"
+fi
+restated=
+for gated in $gated_numbers; do
+  hit=$(grep -nE "(^|[^0-9.])${gated}([^0-9.]|\$)" \
+          SECURITY.md CONTRIBUTING.md 2> /dev/null || true)
+  [ -n "$hit" ] && restated="${restated}${hit}
+"
+done
+
 #-----------------------------------------------------------------------------
 # The shared build, and the symbols it does and does not export.
 #
@@ -509,6 +538,17 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sopen-coded%s\n' '26.6 to pixels has one home' \
       "$RED" "$OFF"
     printf '%s\n' "$open_coded_266" | sed 's/^/    /'
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$restated" ]; then
+    printf '  %-42s %s%s numbers, one home each%s\n' \
+      'no other document restates a gated number' \
+      "$GREEN" "$(printf '%s' "$gated_numbers" | wc -w | tr -d ' ')" "$OFF"
+  else
+    printf '  %-42s %sstated a second time%s\n' \
+      'no other document restates a gated number' "$RED" "$OFF"
+    printf '%s' "$restated" | sort -u | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

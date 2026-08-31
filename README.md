@@ -439,14 +439,15 @@ Unlike a binding over an unmaintained parser, ztext is **not** compensating for
 upstreams that check nothing -- but that is not equally true of all four, and
 the difference is worth stating rather than smoothing over.
 
-FreeType and HarfBuzz are continuously fuzzed by OSS-Fuzz: both have projects
-in `google/oss-fuzz` -- `projects/freetype2` and `projects/harfbuzz`, the
-latter carrying five separate fuzzers -- checked 2026-08-31. **SheenBidi and
-libunibreak have no OSS-Fuzz project**: a code search of that repository for
-either name returns nothing on the same date. Both of them parse the same
-untrusted text. ztext validates every buffer before it reaches either (see
-[Validation at the boundary](#validation-at-the-boundary)), which is a
-boundary check and not a substitute for fuzzing them.
+Two of the four are continuously fuzzed upstream and two are not, and the
+two that are not parse the text rather than the font. [SECURITY.md](SECURITY.md)
+carries that table, with what was checked and when; it is not repeated here,
+because a fact written in two documents is a fact that can go stale in one of
+them while the other still reads as current.
+
+What ztext does about it is the part that belongs in this section: every
+buffer is validated here, before SheenBidi or libunibreak see a byte of it.
+That is a boundary check and not a substitute for fuzzing them.
 
 ztext's job is narrower and it should be said plainly:
 
@@ -974,7 +975,7 @@ ci/install-hooks.sh    # run ci/run.sh automatically before every push
 ### Do the guards actually fail?
 
 A passing test says nothing about whether it *can* fail. `ci/check-guards.sh`
-applies **91** deliberate bugs, one at a time, to a copy of the tree, and
+applies **92** deliberate bugs, one at a time, to a copy of the tree, and
 asserts a **named** test catches each:
 
 | section | what is broken, one at a time |
