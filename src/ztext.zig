@@ -233,266 +233,352 @@ test {
     _ = @import("example_test.zig");
 }
 
+/// `glyph_bitmap` -> `GlyphBitmap`, `result` -> `Result`.
+fn pascal(comptime snake: []const u8) []const u8 {
+    comptime {
+        var out: []const u8 = "";
+        var upper = true;
+        for (snake) |ch| {
+            if (ch == '_') {
+                upper = true;
+                continue;
+            }
+            out = out ++ [_]u8{if (upper) std.ascii.toUpper(ch) else ch};
+            upper = false;
+        }
+        return out;
+    }
+}
+
+/// The `c.zig` type a `ZtextAbiLayout` field prefix names.
+fn layoutType(comptime prefix: []const u8) type {
+    if (!@hasDecl(c, pascal(prefix))) {
+        @compileError("ZtextAbiLayout has a field named for `" ++ prefix ++
+            "`, so src/c.zig must declare the type `" ++ pascal(prefix) ++
+            "`, and it does not");
+    }
+    return @field(c, pascal(prefix));
+}
+
+/// What `ZtextAbiLayout.<name>` must hold, derived from the field's own name.
+///
+/// There is no list of checks here, and that is the point: the NAME is the
+/// rule, so a field added to `ZtextAbiLayout` is checked the moment it exists
+/// and a field whose name fits no rule is a compile error. Four fields --
+/// `charmap_size`, `charmap_align`, `matrix_size`, `matrix_align` -- were
+/// added to that struct and checked by nothing at all, which is what a
+/// hand-written list of expectations does eventually.
+///
+///   * `layout_size`             -> `@sizeOf(AbiLayout)`
+///   * `<type>_size` / `_align`  -> `@sizeOf` / `@alignOf` of `c.<Type>`
+///   * `<type>_offset_<field>`   -> `@offsetOf(c.<Type>, "<field>")`
+///   * `<enum>_last`             -> its last enumerator's value
+///   * `<enum>_count`            -> how many enumerators it has
+fn layoutExpectation(comptime name: []const u8) usize {
+    @setEvalBranchQuota(100_000);
+    if (comptime std.mem.eql(u8, name, "layout_size")) return @sizeOf(c.AbiLayout);
+
+    if (comptime std.mem.indexOf(u8, name, "_offset_")) |at| {
+        const Owner = layoutType(name[0..at]);
+        const member = name[at + "_offset_".len ..];
+        if (!@hasField(Owner, member)) {
+            @compileError("ZtextAbiLayout." ++ name ++ " names a field `" ++ member ++
+                "` that " ++ @typeName(Owner) ++ " does not have");
+        }
+        return @offsetOf(Owner, member);
+    }
+    if (comptime std.mem.endsWith(u8, name, "_size")) {
+        return @sizeOf(layoutType(name[0 .. name.len - "_size".len]));
+    }
+    if (comptime std.mem.endsWith(u8, name, "_align")) {
+        return @alignOf(layoutType(name[0 .. name.len - "_align".len]));
+    }
+    if (comptime std.mem.endsWith(u8, name, "_last")) {
+        const fields = @typeInfo(layoutType(name[0 .. name.len - "_last".len])).@"enum".fields;
+        return @intCast(fields[fields.len - 1].value);
+    }
+    if (comptime std.mem.endsWith(u8, name, "_count")) {
+        return @typeInfo(layoutType(name[0 .. name.len - "_count".len])).@"enum".fields.len;
+    }
+    @compileError("ZtextAbiLayout." ++ name ++
+        " ends in none of _size, _align, _offset_<field>, _last or _count, so " ++
+        "src/ztext.zig has no rule for what it should hold");
+}
+
 test "the C library agrees with the extern declarations in c.zig" {
     // This is the guard that makes hand-written externs safe. Every field the
     // Zig side believes in is checked against what the C translation unit
     // compiled to. A reordered field fails here rather than in production.
+    //
+    // Every field, by construction: the sweep is over `ZtextAbiLayout`'s own
+    // fields and each one's expectation comes from its name, so there is no
+    // way to add a field the check does not cover.
     var layout: c.AbiLayout = undefined;
     c.ztextAbiLayout(&layout);
 
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.AbiLayout)), layout.layout_size);
-
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Allocator)), layout.allocator_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.Allocator)), layout.allocator_align);
+    comptime var checked: usize = 0;
+    inline for (@typeInfo(c.AbiLayout).@"struct".fields) |field| {
+        const got: usize = @field(layout, field.name);
+        const want = comptime layoutExpectation(field.name);
+        if (got != want) {
+            std.debug.print(
+                "ZtextAbiLayout.{s}: the library says {d}, src/c.zig computes {d}\n",
+                .{ field.name, got, want },
+            );
+            return error.AbiLayoutDisagrees;
+        }
+        comptime checked += 1;
+    }
+    // A sweep that silently matched nothing would be indistinguishable from
+    // one that matched everything.
     try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Allocator, "allocate")),
-        layout.allocator_offset_allocate,
+        @typeInfo(c.AbiLayout).@"struct".fields.len,
+        checked,
     );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Allocator, "reallocate")),
-        layout.allocator_offset_reallocate,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Allocator, "deallocate")),
-        layout.allocator_offset_deallocate,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Allocator, "user")),
-        layout.allocator_offset_user,
-    );
-
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Glyph)), layout.glyph_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.Glyph)), layout.glyph_align);
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "glyph_id")),
-        layout.glyph_offset_glyph_id,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "cluster")),
-        layout.glyph_offset_cluster,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "x_advance")),
-        layout.glyph_offset_x_advance,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "y_advance")),
-        layout.glyph_offset_y_advance,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "x_offset")),
-        layout.glyph_offset_x_offset,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "y_offset")),
-        layout.glyph_offset_y_offset,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.Glyph, "flags")),
-        layout.glyph_offset_flags,
-    );
-
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Feature)), layout.feature_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.Feature)), layout.feature_align);
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.ShapeParams)), layout.shape_params_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.ShapeParams)), layout.shape_params_align);
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.ShapeParams, "language")),
-        layout.shape_params_offset_language,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.ShapeParams, "features")),
-        layout.shape_params_offset_features,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.ShapeParams, "feature_count")),
-        layout.shape_params_offset_feature_count,
-    );
-
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.FaceMetrics)), layout.face_metrics_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.FaceMetrics)), layout.face_metrics_align);
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Extents)), layout.extents_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.Extents)), layout.extents_align);
-
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.VisualRun)), layout.visual_run_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.VisualRun)), layout.visual_run_align);
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.ScriptRun)), layout.script_run_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.ScriptRun)), layout.script_run_align);
-
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.GlyphBitmap)), layout.glyph_bitmap_size);
-    try std.testing.expectEqual(@as(u32, @alignOf(c.GlyphBitmap)), layout.glyph_bitmap_align);
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.GlyphBitmap, "pixels")),
-        layout.glyph_bitmap_offset_pixels,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.GlyphBitmap, "format")),
-        layout.glyph_bitmap_offset_format,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.GlyphBitmap, "pitch")),
-        layout.glyph_bitmap_offset_pitch,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @offsetOf(c.GlyphBitmap, "x_advance")),
-        layout.glyph_bitmap_offset_x_advance,
-    );
-
-    // Enum tag sizes. Not fixed by the C standard: a compiler may choose any
-    // type that fits, and `enum(c_int)` declared against an enum the compiler
-    // made narrower writes past its parameter slot -- silent stack corruption
-    // at the call boundary. Nothing else here would catch it, because sizes
-    // and offsets of the STRUCTS stay correct while the enums inside them do
-    // not.
-    //
-    // The last enumerator of each goes with it: a value renumbered in the
-    // header without this file following turns every switch into a wrong
-    // branch, and no layout check would notice.
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Result)), layout.result_size);
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.Result.buffer_too_small))),
-        layout.result_last,
-    );
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Direction)), layout.direction_size);
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.Direction.btt))),
-        layout.direction_last,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @sizeOf(c.ClusterLevel)),
-        layout.cluster_level_size,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.ClusterLevel.graphemes))),
-        layout.cluster_level_last,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @sizeOf(c.BaseDirection)),
-        layout.base_direction_size,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.BaseDirection.rtl))),
-        layout.base_direction_last,
-    );
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.RenderMode)), layout.render_mode_size);
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.RenderMode.lcd_v))),
-        layout.render_mode_last,
-    );
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Hinting)), layout.hinting_size);
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.Hinting.none))),
-        layout.hinting_last,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @sizeOf(c.BitmapFormat)),
-        layout.bitmap_format_size,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.BitmapFormat.lcd_v))),
-        layout.bitmap_format_last,
-    );
-    try std.testing.expectEqual(
-        @as(u32, @sizeOf(c.GlyphFlag)),
-        layout.glyph_flag_size,
-    );
-    // The OR of every flag, so a consumer masking with it keeps exactly the
-    // bits this build can produce -- not the highest single flag.
-    try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(c.GlyphFlag.defined))),
-        layout.glyph_flag_last,
-    );
-    try std.testing.expectEqual(@as(u32, @sizeOf(c.Metric)), layout.metric_size);
-    // A COUNT, not a last value: these enumerators are OpenType tags, so the
-    // highest of them is an accident of spelling. What a consumer needs to
-    // know is whether the library names as many metrics as it does.
-    try std.testing.expectEqual(
-        @as(u32, @typeInfo(c.Metric).@"enum".fields.len),
-        layout.metric_count,
-    );
-
-    // The Zig error mapping must cover every C result. `c.Result` is
-    // non-exhaustive so it can survive a newer shared library, but its NAMED
-    // fields must still be exactly the C enumerators -- which is what keeps
-    // `error.UnknownResult` a genuine "this build is older" signal rather than
-    // a hole someone forgot to fill.
-    const result_fields = @typeInfo(c.Result).@"enum".fields;
-    try std.testing.expectEqual(@as(u32, result_fields.len), layout.result_count);
 }
 
-test "every field of every shared struct lands where Zig expects it" {
+/// The bytes of one probe field, as an integer, whatever its type.
+///
+/// One representation for every field, so a pointer, a float, an enum and an
+/// integer can be compared to each other -- which is what makes "no two
+/// fields of one type share a marker" a question that can be asked at all.
+fn markerOf(value: anytype) u64 {
+    var out: u64 = 0;
+    for (std.mem.asBytes(&value), 0..) |byte, i| {
+        if (i >= 8) break;
+        out |= @as(u64, byte) << @intCast(i * 8);
+    }
+    return out;
+}
+
+/// What `ztextAbiProbe` writes into each field of each probed struct.
+///
+/// The one home for the whole expectation. It is keyed by name and the sweep
+/// below requires an entry for EVERY field of every probed struct, so a field
+/// added to any of them is a compile error here rather than a value nothing
+/// checks -- which is what five of ZtextFaceMetrics' fields were: vertical
+/// ascender, descender, line height, max advance and the has-vertical flag
+/// were in the probe, in the header and in src/c.zig, and in no expectation.
+///
+/// The markers are written on the Zig side against src/c.zig's own idea of
+/// where each field sits. That is the whole point: the C compiler laid the
+/// struct out from ffi/ztext.h and this reads it back through a layout
+/// declared independently, so two same-typed fields that swapped places --
+/// which no size, alignment or offset can see -- come back holding each
+/// other's marker.
+const probe_markers = [_]struct { []const u8, u64 }{
+    .{ "allocator.allocate", markerOf(@as(usize, 0x111)) },
+    .{ "allocator.reallocate", markerOf(@as(usize, 0x222)) },
+    .{ "allocator.deallocate", markerOf(@as(usize, 0x333)) },
+    .{ "allocator.user", markerOf(@as(usize, 0x444)) },
+    .{ "feature.tag", markerOf(@as(u32, 0x101)) },
+    .{ "feature.value", markerOf(@as(u32, 0x102)) },
+    .{ "feature.start", markerOf(@as(u32, 0x103)) },
+    .{ "feature.end", markerOf(@as(u32, 0x104)) },
+    .{ "shape_params.direction", markerOf(c.Direction.ttb) },
+    .{ "shape_params.script", markerOf(@as(u32, 0x105)) },
+    .{ "shape_params.language", markerOf(@as(usize, 0x555)) },
+    .{ "shape_params.features", markerOf(@as(usize, 0x666)) },
+    .{ "shape_params.feature_count", markerOf(@as(usize, 0x107)) },
+    .{ "shape_params.cluster_level", markerOf(c.ClusterLevel.characters) },
+    .{ "shape_params.use_freetype_metrics", markerOf(@as(c_int, 0x108)) },
+    .{ "glyph.glyph_id", markerOf(@as(u32, 0x201)) },
+    .{ "glyph.cluster", markerOf(@as(u32, 0x202)) },
+    .{ "glyph.flags", markerOf(@as(u32, 0x207)) },
+    .{ "glyph.x_advance", markerOf(@as(f32, 203.25)) },
+    .{ "glyph.y_advance", markerOf(@as(f32, 204.25)) },
+    .{ "glyph.x_offset", markerOf(@as(f32, 205.25)) },
+    .{ "glyph.y_offset", markerOf(@as(f32, 206.25)) },
+    .{ "face_metrics.ascender", markerOf(@as(f32, 301.25)) },
+    .{ "face_metrics.descender", markerOf(@as(f32, 302.25)) },
+    .{ "face_metrics.line_height", markerOf(@as(f32, 303.25)) },
+    .{ "face_metrics.max_advance", markerOf(@as(f32, 304.25)) },
+    .{ "face_metrics.underline_position", markerOf(@as(f32, 305.25)) },
+    .{ "face_metrics.underline_thickness", markerOf(@as(f32, 306.25)) },
+    .{ "face_metrics.units_per_em", markerOf(@as(u32, 0x307)) },
+    .{ "face_metrics.num_glyphs", markerOf(@as(u32, 0x308)) },
+    .{ "face_metrics.pixel_size", markerOf(@as(f32, 309.25)) },
+    .{ "face_metrics.vert_ascender", markerOf(@as(f32, 310.25)) },
+    .{ "face_metrics.vert_descender", markerOf(@as(f32, 311.25)) },
+    .{ "face_metrics.vert_line_height", markerOf(@as(f32, 312.25)) },
+    .{ "face_metrics.vert_max_advance", markerOf(@as(f32, 313.25)) },
+    .{ "face_metrics.has_vertical_metrics", markerOf(@as(u32, 0x30A)) },
+    .{ "extents.x_min", markerOf(@as(f32, 401.25)) },
+    .{ "extents.y_min", markerOf(@as(f32, 402.25)) },
+    .{ "extents.x_max", markerOf(@as(f32, 403.25)) },
+    .{ "extents.y_max", markerOf(@as(f32, 404.25)) },
+    .{ "extents.x_advance", markerOf(@as(f32, 405.25)) },
+    .{ "extents.y_advance", markerOf(@as(f32, 406.25)) },
+    .{ "visual_run.offset", markerOf(@as(u32, 0x501)) },
+    .{ "visual_run.length", markerOf(@as(u32, 0x502)) },
+    .{ "visual_run.level", markerOf(@as(u8, 0x53)) },
+    .{ "shaping_run.offset", markerOf(@as(u32, 0x611)) },
+    .{ "shaping_run.length", markerOf(@as(u32, 0x612)) },
+    .{ "shaping_run.script", markerOf(@as(u32, 0x613)) },
+    .{ "shaping_run.level", markerOf(@as(u8, 0x64)) },
+    .{ "script_run.offset", markerOf(@as(u32, 0x601)) },
+    .{ "script_run.length", markerOf(@as(u32, 0x602)) },
+    .{ "script_run.script", markerOf(@as(u32, 0x603)) },
+    .{ "glyph_bitmap.pixels", markerOf(@as(usize, 0x777)) },
+    .{ "glyph_bitmap.format", markerOf(c.BitmapFormat.sdf) },
+    .{ "glyph_bitmap.width", markerOf(@as(u32, 0x701)) },
+    .{ "glyph_bitmap.height", markerOf(@as(u32, 0x702)) },
+    .{ "glyph_bitmap.pitch", markerOf(@as(i32, -0x703)) },
+    .{ "glyph_bitmap.left", markerOf(@as(i32, -0x704)) },
+    .{ "glyph_bitmap.top", markerOf(@as(i32, 0x705)) },
+    .{ "glyph_bitmap.x_advance", markerOf(@as(f32, 706.25)) },
+    .{ "charmap.platform_id", markerOf(@as(u16, 0x801)) },
+    .{ "charmap.encoding_id", markerOf(@as(u16, 0x802)) },
+    .{ "charmap.encoding", markerOf(@as(u32, 0x803)) },
+    .{ "variation_axis.tag", markerOf(@as(u32, 0x804)) },
+    .{ "variation_axis.min_value", markerOf(@as(f32, 805.25)) },
+    .{ "variation_axis.default_value", markerOf(@as(f32, 806.25)) },
+    .{ "variation_axis.max_value", markerOf(@as(f32, 807.25)) },
+    .{ "variation.tag", markerOf(@as(u32, 0x808)) },
+    .{ "variation.value", markerOf(@as(f32, 809.25)) },
+    .{ "matrix.xx", markerOf(@as(f32, 901.25)) },
+    .{ "matrix.xy", markerOf(@as(f32, 902.25)) },
+    .{ "matrix.yx", markerOf(@as(f32, 903.25)) },
+    .{ "matrix.yy", markerOf(@as(f32, 904.25)) },
+    .{ "stroke.radius", markerOf(@as(f32, 905.25)) },
+    .{ "stroke.miter_limit", markerOf(@as(f32, 906.25)) },
+    .{ "stroke.cap", markerOf(c.LineCap.square) },
+    .{ "stroke.join", markerOf(c.LineJoin.miter_fixed) },
+    .{ "stroke.style", markerOf(c.StrokeStyle.shrunk) },
+    .{ "outline_funcs.move_to", markerOf(@as(usize, 0x888)) },
+    .{ "outline_funcs.line_to", markerOf(@as(usize, 0x999)) },
+    .{ "outline_funcs.conic_to", markerOf(@as(usize, 0xAAA)) },
+    .{ "outline_funcs.cubic_to", markerOf(@as(usize, 0xBBB)) },
+    .{ "outline_funcs.close", markerOf(@as(usize, 0xCCC)) },
+    .{ "outline_funcs.user", markerOf(@as(usize, 0xDDD)) },
+};
+
+fn probeMarker(comptime name: []const u8) u64 {
+    comptime {
+        @setEvalBranchQuota(100_000);
+        for (probe_markers) |entry| {
+            if (std.mem.eql(u8, entry[0], name)) return entry[1];
+        }
+        @compileError("ZtextAbiProbe has a field `" ++ name ++
+            "` that src/ztext.zig's probe_markers has no entry for, so nothing " ++
+            "says what ztextAbiProbe should have written into it");
+    }
+}
+
+/// Every probed field, with the type it has and the marker meant for it.
+///
+/// Built from `ZtextAbiProbe` itself rather than from the table, so the table
+/// is what has to keep up with the struct and not the other way round.
+const ProbeField = struct { name: []const u8, type_name: []const u8, marker: u64 };
+
+const probe_fields = blk: {
+    @setEvalBranchQuota(1_000_000);
+    var list: [probe_markers.len]ProbeField = undefined;
+    var n = 0;
+    for (@typeInfo(c.AbiProbe).@"struct".fields) |member| {
+        for (@typeInfo(member.type).@"struct".fields) |field| {
+            if (n == list.len) {
+                @compileError("ZtextAbiProbe has more fields than src/ztext.zig's " ++
+                    "probe_markers has entries, so at least one field's marker is " ++
+                    "named by nothing");
+            }
+            const name = member.name ++ "." ++ field.name;
+            list[n] = .{
+                .name = name,
+                .type_name = @typeName(field.type),
+                .marker = probeMarker(name),
+            };
+            n += 1;
+        }
+    }
+    if (n != list.len) {
+        @compileError("src/ztext.zig's probe_markers has entries for fields " ++
+            "ZtextAbiProbe does not have");
+    }
+    break :blk list;
+};
+
+// No two fields of one type may expect the same marker.
+//
+// This is a property of the TABLE, not of a run, which is why it is checked
+// here and not in the test below: if two same-typed fields expected equal
+// markers, a real transposition between them would read back correct and the
+// test would pass. A check that can only be satisfied by a well-formed table
+// has to reject a malformed one before anything is measured with it.
+//
+// A marker of zero is rejected for the same reason: zero is what an
+// untouched field holds, so an expectation of zero cannot tell "the library
+// wrote this" from "the library never touched it".
+comptime {
+    @setEvalBranchQuota(1_000_000);
+    for (probe_fields, 0..) |field, i| {
+        if (field.marker == 0) {
+            @compileError("ZtextAbiProbe." ++ field.name ++ " expects a marker of " ++
+                "zero, which is also what an untouched field holds");
+        }
+        for (probe_fields[0..i]) |prev| {
+            if (prev.marker == field.marker and
+                std.mem.eql(u8, prev.type_name, field.type_name))
+            {
+                @compileError("ZtextAbiProbe." ++ field.name ++ " and " ++ prev.name ++
+                    " share the marker, so a swap between them would pass");
+            }
+        }
+    }
+}
+
+test "every probed field carries the distinct marker the library wrote" {
     // Sizes and alignments cannot catch two same-typed fields swapping places:
     // `ascender` and `descender` are both floats, and transposing them changes
     // no size, no alignment and no offset the layout test looks at, while
     // turning every line of text upside down. The C side writes a distinct
     // marker into each field; this reads them back.
+    //
+    // The sweep is over the fields themselves rather than over a list someone
+    // maintains, so a field added to any probed struct is a compile error in
+    // probe_fields above rather than a value nothing checks. Five of
+    // ZtextFaceMetrics' fields were exactly that: the vertical ascender,
+    // descender, line height, max advance and the has-vertical flag were in
+    // the probe, in the header and in src/c.zig, and in no expectation.
+    //
+    // Blind spot, stated: the markers say what ztextAbiProbe was WRITTEN to
+    // put in each field. If ffi/ztext_abi.c assigned the wrong marker to the
+    // right field and the table were updated to match, both would agree and
+    // nothing here would notice. What it catches is the two sides disagreeing
+    // about WHERE a field is -- which is the failure that ships.
     var probe: c.AbiProbe = undefined;
     c.ztextAbiProbe(&probe);
 
-    try std.testing.expectEqual(@as(usize, 0x111), @intFromPtr(probe.allocator.allocate.?));
-    try std.testing.expectEqual(@as(usize, 0x222), @intFromPtr(probe.allocator.reallocate.?));
-    try std.testing.expectEqual(@as(usize, 0x333), @intFromPtr(probe.allocator.deallocate.?));
-    try std.testing.expectEqual(@as(usize, 0x444), @intFromPtr(probe.allocator.user.?));
+    var holes: usize = 0;
+    var checked: usize = 0;
 
-    try std.testing.expectEqual(@as(u32, 0x101), probe.feature.tag);
-    try std.testing.expectEqual(@as(u32, 0x102), probe.feature.value);
-    try std.testing.expectEqual(@as(u32, 0x103), probe.feature.start);
-    try std.testing.expectEqual(@as(u32, 0x104), probe.feature.end);
+    inline for (@typeInfo(c.AbiProbe).@"struct".fields) |member| {
+        inline for (@typeInfo(member.type).@"struct".fields) |field| {
+            const name = member.name ++ "." ++ field.name;
+            const want = comptime probeMarker(name);
+            const got = markerOf(@field(@field(probe, member.name), field.name));
 
-    try std.testing.expectEqual(c.Direction.ttb, probe.shape_params.direction);
-    try std.testing.expectEqual(@as(u32, 0x105), probe.shape_params.script);
-    try std.testing.expectEqual(@as(usize, 0x555), @intFromPtr(probe.shape_params.language.?));
-    try std.testing.expectEqual(@as(usize, 0x666), @intFromPtr(probe.shape_params.features.?));
-    try std.testing.expectEqual(@as(usize, 0x107), probe.shape_params.feature_count);
-    try std.testing.expectEqual(c.ClusterLevel.characters, probe.shape_params.cluster_level);
-    try std.testing.expectEqual(@as(c_int, 0x108), probe.shape_params.use_freetype_metrics);
+            if (got == 0) {
+                std.debug.print(
+                    "ZtextAbiProbe.{s} is zero: ztextAbiProbe never writes it\n",
+                    .{name},
+                );
+                holes += 1;
+            } else if (got != want) {
+                std.debug.print(
+                    "ZtextAbiProbe.{s}: the library wrote {x}, src/ztext.zig expects {x}\n",
+                    .{ name, got, want },
+                );
+                holes += 1;
+            }
+            checked += 1;
+        }
+    }
 
-    try std.testing.expectEqual(@as(u32, 0x201), probe.glyph.glyph_id);
-    try std.testing.expectEqual(@as(u32, 0x202), probe.glyph.cluster);
-    try std.testing.expectEqual(@as(u32, 0x207), probe.glyph.flags);
-    try std.testing.expectEqual(@as(f32, 203.25), probe.glyph.x_advance);
-    try std.testing.expectEqual(@as(f32, 204.25), probe.glyph.y_advance);
-    try std.testing.expectEqual(@as(f32, 205.25), probe.glyph.x_offset);
-    try std.testing.expectEqual(@as(f32, 206.25), probe.glyph.y_offset);
-
-    try std.testing.expectEqual(@as(f32, 301.25), probe.face_metrics.ascender);
-    try std.testing.expectEqual(@as(f32, 302.25), probe.face_metrics.descender);
-    try std.testing.expectEqual(@as(f32, 303.25), probe.face_metrics.line_height);
-    try std.testing.expectEqual(@as(f32, 304.25), probe.face_metrics.max_advance);
-    try std.testing.expectEqual(@as(f32, 305.25), probe.face_metrics.underline_position);
-    try std.testing.expectEqual(@as(f32, 306.25), probe.face_metrics.underline_thickness);
-    try std.testing.expectEqual(@as(u32, 0x307), probe.face_metrics.units_per_em);
-    try std.testing.expectEqual(@as(u32, 0x308), probe.face_metrics.num_glyphs);
-    try std.testing.expectEqual(@as(f32, 309.25), probe.face_metrics.pixel_size);
-
-    try std.testing.expectEqual(@as(f32, 401.25), probe.extents.x_min);
-    try std.testing.expectEqual(@as(f32, 402.25), probe.extents.y_min);
-    try std.testing.expectEqual(@as(f32, 403.25), probe.extents.x_max);
-    try std.testing.expectEqual(@as(f32, 404.25), probe.extents.y_max);
-    try std.testing.expectEqual(@as(f32, 405.25), probe.extents.x_advance);
-    try std.testing.expectEqual(@as(f32, 406.25), probe.extents.y_advance);
-
-    try std.testing.expectEqual(@as(u32, 0x501), probe.visual_run.offset);
-    try std.testing.expectEqual(@as(u32, 0x502), probe.visual_run.length);
-    try std.testing.expectEqual(@as(u8, 0x53), probe.visual_run.level);
-
-    try std.testing.expectEqual(@as(u32, 0x611), probe.shaping_run.offset);
-    try std.testing.expectEqual(@as(u32, 0x612), probe.shaping_run.length);
-    try std.testing.expectEqual(@as(u32, 0x613), probe.shaping_run.script);
-    try std.testing.expectEqual(@as(u8, 0x64), probe.shaping_run.level);
-
-    try std.testing.expectEqual(@as(u32, 0x601), probe.script_run.offset);
-    try std.testing.expectEqual(@as(u32, 0x602), probe.script_run.length);
-    try std.testing.expectEqual(@as(u32, 0x603), probe.script_run.script);
-
-    try std.testing.expectEqual(@as(usize, 0x777), @intFromPtr(probe.glyph_bitmap.pixels.?));
-    try std.testing.expectEqual(c.BitmapFormat.sdf, probe.glyph_bitmap.format);
-    try std.testing.expectEqual(@as(u32, 0x701), probe.glyph_bitmap.width);
-    try std.testing.expectEqual(@as(u32, 0x702), probe.glyph_bitmap.height);
-    try std.testing.expectEqual(@as(i32, -0x703), probe.glyph_bitmap.pitch);
-    try std.testing.expectEqual(@as(i32, -0x704), probe.glyph_bitmap.left);
-    try std.testing.expectEqual(@as(i32, 0x705), probe.glyph_bitmap.top);
-    try std.testing.expectEqual(@as(f32, 706.25), probe.glyph_bitmap.x_advance);
+    try std.testing.expectEqual(@as(usize, 0), holes);
+    try std.testing.expectEqual(probe_markers.len, checked);
+    // A floor, so a sweep that matched nothing is a failure, not a pass.
+    try std.testing.expect(checked >= 70);
 }
 
 test "the linked upstreams are the pinned ones, to the patch" {

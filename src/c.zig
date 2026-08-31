@@ -461,6 +461,12 @@ pub const AbiProbe = extern struct {
     script_run: ScriptRun,
     shaping_run: ShapingRun,
     glyph_bitmap: GlyphBitmap,
+    charmap: Charmap,
+    variation_axis: VariationAxis,
+    variation: Variation,
+    matrix: Matrix,
+    stroke: Stroke,
+    outline_funcs: OutlineFuncs,
 };
 
 //=============================================================================

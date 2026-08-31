@@ -423,6 +423,45 @@ case_ "three bytes per pixel counted as one" \
     case ZTEXT_BITMAP_FORMAT_LCD_V:
       return 1u;"
 
+printf '\n%sThe ABI handshake%s %s(what proves the two sides agree)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# ZtextAbiLayout's fields are checked from their own names, so a field cannot
+# be added without a check. Point one at the wrong type and the check fails --
+# which is what proves it is a check and not a transcription.
+case_ "a layout field measuring the wrong type" \
+  ffi/ztext_abi.c \
+  "ZtextAbiLayout.matrix_size" \
+  "  out->matrix_size = (uint32_t)sizeof(ZtextMatrix);" \
+  "  out->matrix_size = (uint32_t)sizeof(ZtextCharmap);"
+
+# The probe's markers are what catch two same-typed fields transposed. A field
+# the C side never writes is a field a transposition could hide in.
+case_ "a probed field the library never writes" \
+  ffi/ztext_abi.c \
+  "ztextAbiProbe never writes it" \
+  "  out->matrix.yx = 903.25f;" \
+  ""
+
+# Two fields of one type expecting the same marker makes them
+# indistinguishable, so a real transposition between them would read back
+# correct. It is a property of the TABLE rather than of a run, which is why it
+# is a compile error: a check that only a well-formed table can satisfy has to
+# reject a malformed one before anything is measured with it.
+case_ "two probed fields of one type expecting one marker" \
+  src/ztext.zig \
+  "share the marker" \
+  '    .{ "variation.tag", markerOf(@as(u32, 0x808)) },' \
+  '    .{ "variation.tag", markerOf(@as(u32, 0x804)) },'
+
+# And an expectation of zero, which cannot tell a field the library wrote from
+# one it never touched.
+case_ "a probed field expecting a marker of zero" \
+  src/ztext.zig \
+  "which is also what an untouched field holds" \
+  '    .{ "matrix.yx", markerOf(@as(f32, 903.25)) },' \
+  '    .{ "matrix.yx", markerOf(@as(f32, 0.0)) },'
+
 printf '\n%sThe stroker%s %s(where the pen goes, and what it grows)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

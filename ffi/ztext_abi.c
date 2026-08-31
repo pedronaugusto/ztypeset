@@ -290,6 +290,11 @@ void ztextAbiProbe(ZtextAbiProbe* out) {
   out->face_metrics.units_per_em = 0x307u;
   out->face_metrics.num_glyphs = 0x308u;
   out->face_metrics.pixel_size = 309.25f;
+  out->face_metrics.vert_ascender = 310.25f;
+  out->face_metrics.vert_descender = 311.25f;
+  out->face_metrics.vert_line_height = 312.25f;
+  out->face_metrics.vert_max_advance = 313.25f;
+  out->face_metrics.has_vertical_metrics = 0x30Au;
 
   out->extents.x_min = 401.25f;
   out->extents.y_min = 402.25f;
@@ -323,4 +328,39 @@ void ztextAbiProbe(ZtextAbiProbe* out) {
   out->glyph_bitmap.left = -0x704;
   out->glyph_bitmap.top = 0x705;
   out->glyph_bitmap.x_advance = 706.25f;
+
+  out->charmap.platform_id = (uint16_t)0x801;
+  out->charmap.encoding_id = (uint16_t)0x802;
+  out->charmap.encoding = 0x803u;
+
+  out->variation_axis.tag = 0x804u;
+  out->variation_axis.min_value = 805.25f;
+  out->variation_axis.default_value = 806.25f;
+  out->variation_axis.max_value = 807.25f;
+
+  out->variation.tag = 0x808u;
+  out->variation.value = 809.25f;
+
+  out->matrix.xx = 901.25f;
+  out->matrix.xy = 902.25f;
+  out->matrix.yx = 903.25f;
+  out->matrix.yy = 904.25f;
+
+  out->stroke.radius = 905.25f;
+  out->stroke.miter_limit = 906.25f;
+  out->stroke.cap = ZTEXT_LINE_CAP_SQUARE;
+  out->stroke.join = ZTEXT_LINE_JOIN_MITER_FIXED;
+  out->stroke.style = ZTEXT_STROKE_STYLE_SHRUNK;
+
+  out->outline_funcs.move_to =
+      (ZtextResult(*)(void*, int32_t, int32_t))(uintptr_t)0x888;
+  out->outline_funcs.line_to =
+      (ZtextResult(*)(void*, int32_t, int32_t))(uintptr_t)0x999;
+  out->outline_funcs.conic_to =
+      (ZtextResult(*)(void*, int32_t, int32_t, int32_t, int32_t))(uintptr_t)0xAAA;
+  out->outline_funcs.cubic_to =
+      (ZtextResult(*)(void*, int32_t, int32_t, int32_t, int32_t, int32_t,
+                      int32_t))(uintptr_t)0xBBB;
+  out->outline_funcs.close = (ZtextResult(*)(void*))(uintptr_t)0xCCC;
+  out->outline_funcs.user = (void*)(uintptr_t)0xDDD;
 }
