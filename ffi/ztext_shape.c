@@ -298,10 +298,10 @@ static ZtextResult shapeInto(ZtextShaper* shaper, ZtextFace* face,
     // HarfBuzz with a fourth flag would hand it through here otherwise, under
     // a bit ZtextGlyphFlag has no meaning for.
     glyphs[i].flags = (uint32_t)hb_glyph_info_get_glyph_flags(&infos[i]);
-    glyphs[i].x_advance = (float)positions[i].x_advance / 64.0f;
-    glyphs[i].y_advance = (float)positions[i].y_advance / 64.0f;
-    glyphs[i].x_offset = (float)positions[i].x_offset / 64.0f;
-    glyphs[i].y_offset = (float)positions[i].y_offset / 64.0f;
+    glyphs[i].x_advance = ztextFrom266(positions[i].x_advance);
+    glyphs[i].y_advance = ztextFrom266(positions[i].y_advance);
+    glyphs[i].x_offset = ztextFrom266(positions[i].x_offset);
+    glyphs[i].y_offset = ztextFrom266(positions[i].y_offset);
   }
   shaper->glyphs.count = glyph_count;
 
@@ -457,15 +457,15 @@ ZtextResult ztextShaperExtents(const ZtextShaper* shaper, ZtextFace* face,
     hb_glyph_extents_t extents;
     if (hb_font_get_glyph_extents(font, glyphs[i].glyph_id, &extents)) {
       const float x =
-          pen_x + glyphs[i].x_offset + (float)extents.x_bearing / 64.0f;
+          pen_x + glyphs[i].x_offset + ztextFrom266(extents.x_bearing);
       const float y =
-          pen_y + glyphs[i].y_offset + (float)extents.y_bearing / 64.0f;
+          pen_y + glyphs[i].y_offset + ztextFrom266(extents.y_bearing);
       // HarfBuzz reports height NEGATIVE in a y-up coordinate system, so the
       // bottom edge is y + height. Both corners are min/maxed rather than
       // assumed, so a font that reports them the other way round still gives
       // a well-formed box.
-      const float x2 = x + (float)extents.width / 64.0f;
-      const float y2 = y + (float)extents.height / 64.0f;
+      const float x2 = x + ztextFrom266(extents.width);
+      const float y2 = y + ztextFrom266(extents.height);
 
       const float x_min = x < x2 ? x : x2;
       const float x_max = x < x2 ? x2 : x;
@@ -580,4 +580,23 @@ void ztextWarmup(void) {
   // host allocator at all; installing it here simply makes when that happens
   // predictable rather than dependent on the first paragraph.
   (void)ztextInstallSheenbidiAllocator();
+
+  // libunibreak's three initialisers, which ztext had never called.
+  //
+  // In 7.0.0 all three are empty -- linebreak.c:353, wordbreak.c:63 and
+  // graphemebreak.c:73 are `{ }` -- so calling them allocates nothing, costs
+  // nothing and changes no result today. That is exactly why the omission was
+  // invisible, and exactly why it is worth fixing rather than documenting: the
+  // headers declare them as the entry points to call before set_*breaks_*,
+  // upstream is free to give them a body in any release, and ztext re-vendors.
+  // A version that started interning a table in init_linebreak would have
+  // charged that allocation to whichever host allocator happened to be
+  // installed at the first paragraph -- the same defect the five HarfBuzz
+  // calls above exist to prevent, arriving silently on a routine re-vendor.
+  //
+  // Called here rather than at each use site because that is what warm-up is:
+  // the one place a process pays its one-time costs on purpose.
+  init_linebreak();
+  init_wordbreak();
+  init_graphemebreak();
 }

@@ -41,6 +41,10 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The 26.6 check greps for the divisor. It cannot see a conversion
+#     spelled some other way -- `* 0.015625f`, or a shift on the fixed value
+#     before the cast -- and it deliberately does not look outside ffi/*.c,
+#     since the Zig side never sees fixed point.
 #   - The *Destroy check looks for the words "exactly once" in the doc
 #     comment attached to each declaration. It cannot tell a correct
 #     explanation from an incorrect one -- only that the rule is stated where
@@ -150,6 +154,13 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# The 26.6 conversion, which has exactly one home. `(float)x / 64.0f` was
+# written out at twenty-six sites in three translation units -- four of them
+# per glyph in the shaping loop -- for a conversion this library performs
+# everywhere. ztextFrom266 is that home, and a grep is the gate: an
+# open-coded one is visible in the source, so nothing subtler is needed.
+open_coded_266=$(grep -n '/ 64\.0f' ffi/*.c || true)
+
 # Every *Destroy in ffi/ztext.h must state the exactly-once rule in its own
 # documentation. Two of the six used to be documented as tolerating a repeat,
 # on the strength of a flag test that reads like a repeat guard and is not one
@@ -416,6 +427,16 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$open_coded_266" ]; then
+    printf '  %-42s %sztextFrom266%s\n' '26.6 to pixels has one home' \
+      "$GREEN" "$OFF"
+  else
+    printf '  %-42s %sopen-coded%s\n' '26.6 to pixels has one home' \
+      "$RED" "$OFF"
+    printf '%s\n' "$open_coded_266" | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 

@@ -704,7 +704,7 @@ ZtextResult ztextFaceMetrics(const ZtextFace* face, ZtextFaceMetrics* out) {
   const FT_Face ft = face->font->ft;
   out->units_per_em = ft->units_per_EM;
   out->num_glyphs = (uint32_t)ft->num_glyphs;
-  out->pixel_size = (float)face->pixel_height / 64.0f;
+  out->pixel_size = ztextFrom266(face->pixel_height);
 
   // The metrics below live on the FT_Size, and a sibling face may have been
   // the last to use this FT_Face.
@@ -712,16 +712,16 @@ ZtextResult ztextFaceMetrics(const ZtextFace* face, ZtextFaceMetrics* out) {
 
   // 26.6 fixed point throughout.
   const FT_Size_Metrics* metrics = &ft->size->metrics;
-  out->ascender = (float)metrics->ascender / 64.0f;
-  out->descender = (float)metrics->descender / 64.0f;
-  out->line_height = (float)metrics->height / 64.0f;
-  out->max_advance = (float)metrics->max_advance / 64.0f;
+  out->ascender = ztextFrom266(metrics->ascender);
+  out->descender = ztextFrom266(metrics->descender);
+  out->line_height = ztextFrom266(metrics->height);
+  out->max_advance = ztextFrom266(metrics->max_advance);
 
   // Underline is a design-unit value in the face and has to be scaled by hand;
   // FreeType does not do it for you.
   if (out->units_per_em != 0u) {
     const float scale =
-        ((float)face->pixel_height / 64.0f) / (float)out->units_per_em;
+        ztextFrom266(face->pixel_height) / (float)out->units_per_em;
     out->underline_position = (float)ft->underline_position * scale;
     out->underline_thickness = (float)ft->underline_thickness * scale;
   }
@@ -739,14 +739,14 @@ ZtextResult ztextFaceMetrics(const ZtextFace* face, ZtextFaceMetrics* out) {
   }
   if (vert != NULL) {
     out->vert_ascender =
-        (float)FT_MulFix(vert->Ascender, metrics->x_scale) / 64.0f;
+        ztextFrom266(FT_MulFix(vert->Ascender, metrics->x_scale));
     out->vert_descender =
-        (float)FT_MulFix(vert->Descender, metrics->x_scale) / 64.0f;
+        ztextFrom266(FT_MulFix(vert->Descender, metrics->x_scale));
     const float line_gap =
-        (float)FT_MulFix(vert->Line_Gap, metrics->x_scale) / 64.0f;
+        ztextFrom266(FT_MulFix(vert->Line_Gap, metrics->x_scale));
     out->vert_line_height = out->vert_ascender - out->vert_descender + line_gap;
     out->vert_max_advance =
-        (float)FT_MulFix(vert->advance_Height_Max, metrics->y_scale) / 64.0f;
+        ztextFrom266(FT_MulFix(vert->advance_Height_Max, metrics->y_scale));
     out->has_vertical_metrics = 1u;
   } else {
     // Synthesised from ascender and descender: the same span HarfBuzz's own
@@ -813,7 +813,7 @@ ZtextResult ztextFaceMetric(const ZtextFace* face, ZtextMetric metric,
   }
 
   // The scale is 26.6 pixels; see setPixelSizeFixed.
-  *out = (float)position / 64.0f;
+  *out = ztextFrom266(position);
   return ZTEXT_RESULT_OK;
 }
 
@@ -832,7 +832,7 @@ ZtextResult ztextFaceMetricWithFallback(const ZtextFace* face,
   // between this and the call above.
   hb_ot_metrics_get_position_with_fallback(
       face->hb_font, (hb_ot_metrics_tag_t)metric, &position);
-  *out = (float)position / 64.0f;
+  *out = ztextFrom266(position);
   return ZTEXT_RESULT_OK;
 }
 

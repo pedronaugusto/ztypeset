@@ -36,23 +36,23 @@
 //===----------------------------------------------------------------------===//
 
 #ifdef FT_CONFIG_OPTION_USE_ZLIB
-#error "ztext builds without FT_CONFIG_OPTION_USE_ZLIB; see ffi/ztext_ftoption.h"
+#error "ztext builds without FT_CONFIG_OPTION_USE_ZLIB"
 #endif
 #ifdef FT_CONFIG_OPTION_SVG
-#error "ztext builds without FT_CONFIG_OPTION_SVG; see ffi/ztext_ftoption.h"
+#error "ztext builds without FT_CONFIG_OPTION_SVG"
 #endif
 #ifdef FT_CONFIG_OPTION_MAC_FONTS
-#error "ztext builds without FT_CONFIG_OPTION_MAC_FONTS; see ffi/ztext_ftoption.h"
+#error "ztext builds without FT_CONFIG_OPTION_MAC_FONTS"
 #endif
 #ifdef FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK
 #error \
-    "ztext builds without FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK; see ffi/ztext_ftoption.h"
+    "ztext builds without FT_CONFIG_OPTION_GUESSING_EMBEDDED_RFORK"
 #endif
 #ifndef FT_CONFIG_OPTION_ERROR_STRINGS
-#error "ztext builds WITH FT_CONFIG_OPTION_ERROR_STRINGS; see ffi/ztext_ftoption.h"
+#error "ztext builds WITH FT_CONFIG_OPTION_ERROR_STRINGS"
 #endif
 #ifndef FT_CONFIG_OPTION_USE_HARFBUZZ
-#error "ztext builds WITH FT_CONFIG_OPTION_USE_HARFBUZZ; see ffi/ztext_ftoption.h"
+#error "ztext builds WITH FT_CONFIG_OPTION_USE_HARFBUZZ"
 #endif
 
 _Static_assert(sizeof(hb_position_t) == 4,
@@ -391,7 +391,8 @@ void ztextAbiProbe(ZtextAbiProbe* out) {
   out->outline_funcs.line_to =
       (ZtextResult(*)(void*, int32_t, int32_t))(uintptr_t)0x999;
   out->outline_funcs.conic_to =
-      (ZtextResult(*)(void*, int32_t, int32_t, int32_t, int32_t))(uintptr_t)0xAAA;
+      (ZtextResult(*)(void*, int32_t, int32_t, int32_t,
+                      int32_t))(uintptr_t)0xAAA;
   out->outline_funcs.cubic_to =
       (ZtextResult(*)(void*, int32_t, int32_t, int32_t, int32_t, int32_t,
                       int32_t))(uintptr_t)0xBBB;
