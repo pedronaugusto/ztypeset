@@ -160,6 +160,34 @@ says.
   hinting now targets the grid the glyph will be sampled on
   (`FT_LOAD_TARGET_LCD`/`_LCD_V`); light hinting is its own target and is
   unchanged.
+- **The two pieces of process-wide state written after start-up are atomic.**
+  The face generation counter was a plain `++` on a shared `static`, and
+  SheenBidi's one-time allocator install was a plain check-then-set. `ztext.h`
+  asks callers to use one `ZtextLibrary` per THREAD, which makes both of them
+  concurrent by the header's own design.
+
+  The generation counter's old comment argued that a torn increment "only ever
+  produces a value that fails to match, which is the safe direction", and the
+  arithmetic in it holds -- a lost update leaves the counter at old+1 twice,
+  so a newly issued generation still exceeds every generation already issued
+  and a stale shaper still refuses. It is an argument about the wrong thing. A
+  plain read-modify-write on an object two threads reach is a data race, and a
+  data race is undefined behaviour in C11 whatever the machine would have
+  done. It is now a relaxed `atomic_fetch_add`: nothing is published through
+  the counter, so it needs to be unique, not ordered.
+
+  The install is now a three-state handshake. The hazard there is not the
+  duplicate allocator object but `SBAllocatorSetDefault` -- a process-wide
+  store SheenBidi reads without synchronisation, from calls already in flight
+  -- so a loser waits for the winner rather than installing a second one, and
+  a failed allocation returns the state to "nobody has tried" so a later call
+  may succeed.
+
+  `ztext.h`'s "Thread safety" section now states, once, that
+  `ztextSetAllocator` and `ztextRegisterAllocator` are start-up operations:
+  that restriction is theirs alone, and it is the only one left outside the
+  per-library rule.
+
 - **The internal contracts have a test that can reach them.**
   `ztextTextDecode` read the code unit at `index` before comparing `index` to
   `length`, so an index at the end read one past the buffer -- and in the

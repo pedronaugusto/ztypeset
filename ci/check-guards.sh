@@ -423,6 +423,26 @@ case_ "three bytes per pixel counted as one" \
     case ZTEXT_BITMAP_FORMAT_LCD_V:
       return 1u;"
 
+printf '\n%sProcess-wide state%s %s(what two threads may touch at once)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# The compiler is the gate here, and it is the only kind a data race admits:
+# no run proves the absence of one, and a run that happens to survive is the
+# most misleading evidence there is. An atomic operation on a plain object is
+# a constraint violation rather than a slower program, so removing the
+# qualifier stops the build instead of quietly restoring the bug.
+case_ "the generation counter made non-atomic" \
+  ffi/ztext_core.c \
+  "pointer to _Atomic" \
+  "  static _Atomic uint64_t counter = 0u;" \
+  "  static uint64_t counter = 0u;"
+
+case_ "the one-time install flag made non-atomic" \
+  ffi/ztext_core.c \
+  "pointer to _Atomic" \
+  "static _Atomic int g_sb_install_state = 0;" \
+  "static int g_sb_install_state = 0;"
+
 printf '\n%sThe internal contracts%s %s(what no public call can reach)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 

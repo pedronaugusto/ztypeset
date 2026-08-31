@@ -7,6 +7,8 @@
 
 #include <SheenBidi/SBAllocator.h>
 
+#include <stdatomic.h>
+
 #include "ztext_internal.h"
 
 //===----------------------------------------------------------------------===//
@@ -539,8 +541,44 @@ static void sbDeallocateBlock(void* pointer, void* info) {
 /// whichever allocator is installed at the time rather than capturing one.
 static SBAllocatorRef g_sb_allocator = NULL;
 
+/// What makes "once" true when several threads ask at the same instant.
+///
+///   0 -- nobody has tried, or a try ran out of memory
+///   1 -- one thread is inside SBAllocatorCreate
+///   2 -- installed; g_sb_allocator is safe to read
+///
+/// g_sb_allocator is written before the state moves to 2 and never again, so
+/// the release/acquire pair on the state is what publishes it. A plain
+/// check-then-set stood here, and the paragraph and shaping paths both reach
+/// it -- on threads the header explicitly invites, since a ZtextLibrary per
+/// thread is what it asks for.
+static _Atomic int g_sb_install_state = 0;
+
 ZtextResult ztextInstallSheenbidiAllocator(void) {
-  if (g_sb_allocator != NULL) return ZTEXT_RESULT_OK;
+  if (atomic_load_explicit(&g_sb_install_state, memory_order_acquire) == 2) {
+    return ZTEXT_RESULT_OK;
+  }
+
+  int idle = 0;
+  if (!atomic_compare_exchange_strong_explicit(&g_sb_install_state, &idle, 1,
+                                               memory_order_acq_rel,
+                                               memory_order_acquire)) {
+    // Another thread got there first. Wait for it rather than installing a
+    // second allocator: the hazard is not the duplicate object, it is
+    // SBAllocatorSetDefault -- a process-wide store SheenBidi reads without
+    // synchronisation, from calls already in flight. Two of those racing is
+    // what a check-then-set allows.
+    //
+    // The wait is bounded by one SBAllocatorCreate, which is one small
+    // allocation, and every caller here is about to do far more work than
+    // that. It happens at most once per process.
+    while (atomic_load_explicit(&g_sb_install_state, memory_order_acquire) ==
+           1) {
+    }
+    return atomic_load_explicit(&g_sb_install_state, memory_order_acquire) == 2
+               ? ZTEXT_RESULT_OK
+               : ZTEXT_RESULT_OUT_OF_MEMORY;
+  }
 
   SBAllocatorProtocol protocol;
   memset(&protocol, 0, sizeof(protocol));
@@ -552,9 +590,19 @@ ZtextResult ztextInstallSheenbidiAllocator(void) {
   // accounting. A host wanting a thread-local scratch pool can still have one
   // by making its own allocator do that.
 
-  g_sb_allocator = SBAllocatorCreate(&protocol, NULL);
-  if (g_sb_allocator == NULL) return ZTEXT_RESULT_OUT_OF_MEMORY;
-  SBAllocatorSetDefault(g_sb_allocator);
+  SBAllocatorRef made = SBAllocatorCreate(&protocol, NULL);
+  if (made == NULL) {
+    // Back to 0, so a later call may try again: an allocation that failed
+    // once under pressure is not a permanent property of the process, and a
+    // state machine that latched on failure would turn one bad moment into a
+    // library that can never lay out bidirectional text again.
+    atomic_store_explicit(&g_sb_install_state, 0, memory_order_release);
+    return ZTEXT_RESULT_OUT_OF_MEMORY;
+  }
+
+  g_sb_allocator = made;
+  SBAllocatorSetDefault(made);
+  atomic_store_explicit(&g_sb_install_state, 2, memory_order_release);
   return ZTEXT_RESULT_OK;
 }
 
@@ -633,12 +681,25 @@ int32_t ztextToFixed266(float pixels) {
 }
 
 uint64_t ztextNextGeneration(void) {
-  // Not atomic, and does not need to be: a ZtextLibrary and its faces belong
-  // to one thread, so two threads creating faces are creating them in
-  // different libraries. Even a torn increment only ever produces a value that
-  // fails to match, which is the safe direction.
-  static uint64_t counter = 0u;
-  return ++counter;
+  // Process-wide, and ztext.h tells callers to use one ZtextLibrary PER
+  // THREAD -- so two threads bumping this at the same instant is the usage
+  // the header asks for, not an abuse of it.
+  //
+  // What stood here argued that a torn increment "only ever produces a value
+  // that fails to match, which is the safe direction". The arithmetic is
+  // right: a lost update leaves the counter at old+1 twice, so a newly issued
+  // generation still exceeds every generation already issued and a stale
+  // shaper still refuses. The argument is about the wrong thing. A plain
+  // read-modify-write on an object two threads reach is a DATA RACE, and a
+  // data race is undefined behaviour in C11 whatever the machine would have
+  // done -- the compiler may assume it cannot happen, and may keep the
+  // counter in a register across a call whose whole body it can see.
+  //
+  // Relaxed is the entire requirement. Nothing is published through this
+  // counter; a reader only ever asks "is this the value I recorded?", so it
+  // has to be unique, not ordered against anything else.
+  static _Atomic uint64_t counter = 0u;
+  return atomic_fetch_add_explicit(&counter, 1u, memory_order_relaxed) + 1u;
 }
 
 //===----------------------------------------------------------------------===//

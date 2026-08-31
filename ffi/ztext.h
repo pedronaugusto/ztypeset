@@ -102,6 +102,14 @@ extern "C" {
 // The allocator installed by ztextSetAllocator is process-wide (HarfBuzz's
 // seam is compile-time, so it cannot be otherwise) and must therefore be
 // thread-safe if ztext is used from more than one thread.
+//
+// ztextSetAllocator and ztextRegisterAllocator are SETUP, not operations.
+// They mutate a process-wide registry without synchronisation and must be
+// called before any other thread is using ztext -- once, at start-up, the way
+// a host installs its allocator. That restriction is theirs alone: everything
+// ztext keeps process-wide and writes AFTER start-up -- the face generation
+// counter and SheenBidi's one-time allocator install -- is atomic, so the
+// per-library rule above is the only one the drawing path imposes.
 //===----------------------------------------------------------------------===//
 
 //===----------------------------------------------------------------------===//

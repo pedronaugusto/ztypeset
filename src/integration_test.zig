@@ -2735,6 +2735,95 @@ test "a pen that cannot be drawn is refused, and a glyph with no ink is left alo
     try std.testing.expectEqual(@as(u32, 0), bitmap.height);
 }
 
+test "several threads may each drive their own library at once" {
+    // ztext.h's rule is one ZtextLibrary PER THREAD, which makes concurrent
+    // use supported usage rather than abuse -- and two pieces of process-wide
+    // state sit squarely on that path: the face generation counter, bumped by
+    // every size, variation, synthetic and stroke change, and SheenBidi's
+    // one-time allocator install, reached the first time any thread lays out
+    // a paragraph.
+    //
+    // Blind spot, stated plainly: a green run does not prove the absence of a
+    // data race. Nothing short of a thread sanitiser does, and neither
+    // Windows arm has one. What holds the atomicity is the COMPILER --
+    // ci/check-guards.sh strips the _Atomic qualifier off each of the two and
+    // the build stops, because an atomic operation on a plain object is a
+    // constraint violation rather than a slower program. This test holds the
+    // other half, which no compile-time check can: that the path RUNS from
+    // several threads at once, and in particular that the install handshake
+    // hands over instead of deadlocking. A spin that never ends is a hang,
+    // and a hang is what a wrong one-time-init looks like.
+    //
+    // The default allocator, deliberately: ztextSetAllocator is documented as
+    // start-up-only and mutates a registry no lock protects, so a test that
+    // installed one from four threads would be testing the thing the header
+    // forbids.
+    const Worker = struct {
+        fn body(bytes: []const u8, rounds: usize) !void {
+            var round: usize = 0;
+            while (round < rounds) : (round += 1) {
+                const library = try ztext.Library.init();
+                defer library.deinit();
+                const font = try library.createFont(bytes, 0);
+                defer font.deinit();
+                const face = try font.face(32.0, 32.0);
+                defer face.deinit();
+
+                // Four writes that each move the face's generation.
+                const size: f32 = @floatFromInt(16 + (round % 24));
+                try face.setPixelSize(size, size);
+                try face.setSyntheticBold(@as(f32, @floatFromInt(round % 3)) / 64.0);
+                try face.setStroke(if (round % 2 == 0) null else ztext.outline(1.0));
+                try face.setTransform(null);
+
+                _ = try face.renderGlyph(font.glyphIndex('A'), .a8, .none, 0, 0);
+
+                // And the one-time SheenBidi install, from every thread.
+                const paragraph = try ztext.Paragraph.init("abc \u{5D0}\u{5D1}\u{5D2}", .{});
+                defer paragraph.deinit();
+                _ = paragraph.baseLevel();
+                _ = paragraph.lineBreaks();
+            }
+        }
+
+        fn run(bytes: []const u8, rounds: usize, ok: *bool) void {
+            body(bytes, rounds) catch |e| {
+                std.debug.print("worker failed: {s}\n", .{@errorName(e)});
+                ok.* = false;
+                return;
+            };
+            ok.* = true;
+        }
+    };
+
+    const thread_count = 4;
+    const rounds = 24;
+    var ok = [_]bool{false} ** thread_count;
+    var threads: [thread_count]std.Thread = undefined;
+
+    var started: usize = 0;
+    while (started < thread_count) : (started += 1) {
+        threads[started] = std.Thread.spawn(
+            .{},
+            Worker.run,
+            .{ fonts.hebrew, rounds, &ok[started] },
+        ) catch |e| {
+            // A machine that cannot spawn is not a failing library. Join what
+            // did start, then say so rather than passing quietly.
+            for (threads[0..started]) |t| t.join();
+            std.debug.print("could not spawn thread {d}: {s}\n", .{ started, @errorName(e) });
+            return error.SkipZigTest;
+        };
+    }
+    for (threads[0..]) |t| t.join();
+    for (ok, 0..) |good, i| {
+        if (!good) {
+            std.debug.print("thread {d} did not finish its rounds\n", .{i});
+            return error.ConcurrentUseFailed;
+        }
+    }
+}
+
 test "a pen outlives the glyphs it drew, and grows to the widest of them" {
     const fixture = try Fixture.init();
     defer fixture.deinit();
