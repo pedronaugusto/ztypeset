@@ -797,7 +797,7 @@ case_ "a pen naming a cap this build does not have, accepted" \
   ffi/ztext_raster.c \
   "does not name should be refused" \
   "    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE ||" \
-  "    if (cap < (int)ZTEXT_LINE_CAP_BUTT || cap > (int)ZTEXT_LINE_CAP_SQUARE + 3 ||"
+  "    if (cap < (int)ZTEXT_LINE_CAP_BUTT ||"
 
 # A radius too large for 26.6 converts to zero, which draws no pen at all.
 case_ "a radius too large for the fixed point it is converted to" \

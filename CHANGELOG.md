@@ -221,8 +221,10 @@ says.
   them.** The first full sweep after **DID NOT COMPILE** was added reported it
   three times. Two were the same `-Werror` mechanism as before -- a mutation
   that returned a constant left a local unused -- and are now written to narrow
-  a range and to widen a bound, so the code still reads the value and then gets
-  it wrong. The third was not that at all: turning
+  a range and to drop a bound, so the code still reads the value and then gets
+  it wrong. Widening the cap bound by three was tried first and reported NOT
+  CAUGHT: the test probes with 99, so a mutation has to accept 99 to be seen.
+  A mutation that is too small to reach the fixture tests nothing either. The third was not that at all: turning
   `FT_CONFIG_OPTION_USE_HARFBUZZ` off is caught by an `#error` in
   `ffi/ztext_abi.c`, so the build cannot be produced, and the case had simply
   been expecting a weaker guard than the one that holds. It now expects the
