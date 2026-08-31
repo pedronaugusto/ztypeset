@@ -54,6 +54,15 @@ jobs:
         shell: bash
         run: ci/api-surface.sh --gaps
 
+      # The mutation harness quotes ~90 pieces of the tree, and a refactor
+      # strands one silently: the slow job below would say so, but it is a
+      # separate job and minutes long, so a stranded case can sit through
+      # several pushes. This asks the same question in seconds and builds
+      # nothing.
+      - name: Source — every mutation still applies to the tree
+        shell: bash
+        run: ci/check-guards.sh --anchors
+
       # The counts README.md states, recomputed and compared. --with-build
       # covers the ones that need the suite and the C boundary to have run.
       - name: Source — README numbers still hold
@@ -183,6 +192,9 @@ jobs:
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
+      # --anchors already ran in the static job above, so a stranded case has
+      # been reported by then; this is the expensive half, which actually
+      # applies each mutation and requires a NAMED test to fail.
       - run: ci/check-guards.sh
 
   # Proves libs/ is still a pristine copy of the four pinned upstream commits,

@@ -19,12 +19,28 @@
 #   ci/check-guards.sh              # every case
 #   ci/check-guards.sh <regex>      # only cases whose name matches, e.g.
 #                                   #   ci/check-guards.sh 'enum:|struct:'
+#   ci/check-guards.sh --anchors    # every anchor still applies; run nothing
 #
 # Slow by nature: each case is a full rebuild of the ztext library plus the
 # suite. It is a separate step from ci/run.sh for that reason.
 
 set -uo pipefail
 cd "$(dirname "$0")/.."
+
+# --anchors asks the one question that does not need a build: does every
+# mutation below still apply to the tree exactly once?
+#
+# A case whose anchor has moved reports NO ANCHOR, which is the right verdict
+# and costs a full sweep to reach -- minutes per case, and the anchor breaks
+# the moment anyone refactors the line it quotes. Asked this way it is a
+# second, so a refactor that stranded a case is caught by the fast gate rather
+# than by the slow one. It runs against the real tree, not a copy: there is
+# nothing to mutate, so there is nothing to restore.
+ANCHORS_ONLY=0
+if [ "${1:-}" = "--anchors" ]; then
+  ANCHORS_ONLY=1
+  shift
+fi
 
 FILTER="${1:-}"
 
@@ -46,6 +62,8 @@ FAILED_NAMES=()
 GUARD_CMD=(zig build test)
 
 WORK=$(mktemp -d)
+ANCHOR_TREE=.
+
 # The working copy goes; the failure logs under it do not, or the evidence for
 # a red case dies with the run that produced it.
 cleanup() {
@@ -61,11 +79,13 @@ trap cleanup EXIT
 
 # A pristine copy, reused by every case: only the mutated file is restored
 # between them, so the build cache survives and a run takes minutes not hours.
+if [ "$ANCHORS_ONLY" -eq 0 ]; then
 printf '%spreparing a working copy%s\n' "$DIM" "$OFF"
 mkdir -p "$WORK/tree"
 tar -cf - --exclude .git --exclude .zig-cache --exclude zig-out \
     --exclude tests/consumer/.zig-cache --exclude tests/consumer/zig-out . |
   tar -xf - -C "$WORK/tree"
+fi
 
 # The verdict matcher, checked before anything is judged by it.
 #
@@ -89,6 +109,7 @@ selftest_matcher() {
     exit 1
   fi
 }
+if [ "$ANCHORS_ONLY" -eq 0 ]; then
 selftest_matcher
 
 # Warm the cache once, and refuse to go on if the unmutated tree is not green:
@@ -99,6 +120,9 @@ if ! (cd "$WORK/tree" && zig build test > "$WORK/baseline.log" 2>&1); then
   printf '%sthe tree fails its own suite before any mutation.%s\n' "$RED" "$OFF" >&2
   sed 's/^/  | /' "$WORK/baseline.log" | head -30 >&2
   exit 1
+fi
+else
+  printf '%schecking every anchor still applies%s\n' "$DIM" "$OFF"
 fi
 
 LOGDIR="$WORK/failures"
@@ -136,6 +160,24 @@ case_() {
 
   printf '  %-58s ' "$name"
 
+  if [ "$ANCHORS_ONLY" -eq 1 ]; then
+    if MUT_FILE="$file" MUT_OLD="$old" python3 - "$ANCHOR_TREE" <<'PY'
+import os, sys
+path = os.path.join(sys.argv[1], os.environ["MUT_FILE"])
+n = open(path).read().count(os.environ["MUT_OLD"])
+sys.exit(0 if n == 1 else 1)
+PY
+    then
+      printf '%sok%s %s(%s)%s\n' "$GREEN" "$OFF" "$DIM" "$file" "$OFF"
+      PASSED=$((PASSED + 1))
+    else
+      printf '%sNO ANCHOR%s  it does not appear exactly once in %s\n' \
+        "$RED" "$OFF" "$file"
+      FAILED=$((FAILED + 1)); FAILED_NAMES+=("$name (anchor)")
+    fi
+    return
+  fi
+
   if ! MUT_FILE="$file" MUT_OLD="$old" MUT_NEW="$new" python3 - "$WORK/tree" <<'PY'
 import os, sys
 tree = sys.argv[1]
@@ -169,6 +211,18 @@ PY
   elif [[ "$output" == *"$expect"* ]]; then
     printf '%scaught%s %s(%s)%s\n' "$GREEN" "$OFF" "$DIM" "$expect" "$OFF"
     PASSED=$((PASSED + 1))
+  # zig cuts its build output short when a test fails with a long trace: the
+  # tail is replaced by "unable to read results of configure phase", and a
+  # second failing test's diagnostics never appear. A case judged on a
+  # truncated log is judged on evidence that is not there, and "the expect
+  # string is absent" then means nothing at all -- which is the same class of
+  # bug as the matcher that silently failed to match. Name the state instead
+  # of calling it a wrong failure. The fix for a case that lands here is to
+  # make the mutation fail ONE test, not two.
+  elif [[ "$output" == *"unable to read results of configure phase"* ]]; then
+    report "$name" 'TRUNCATED' \
+      "the build output was cut short, so \"$expect\" could not be looked for" \
+      "$output"
   else
     report "$name" 'WRONG FAILURE' "expected to see: $expect" "$output"
   fi
@@ -1064,7 +1118,7 @@ case_ "the fixture's cmap records left unsorted" \
   "    std.mem.sort(Record, records.items, {}, Record.before);" \
   "    if (records.items.len == 0) return error.NoCmapTable;"
 
-printf '\n%sVersioning%s %s(ci/measurements.sh, not the suite)%s\n' \
+printf '\n%sVersioning and licences%s %s(ci/measurements.sh, not the suite)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
 # ztext's version is written in three files, and CHANGELOG.md states what a
@@ -1150,13 +1204,21 @@ case_ "a declared entry point with no implementation" \
 GUARD_CMD=(zig build test)
 
 printf '\n'
+if [ "$ANCHORS_ONLY" -eq 1 ]; then
+  what='anchors, every one applying to exactly one place'
+  wrong='anchors no longer apply to exactly one place:'
+else
+  what='mutations, every one caught by a named test'
+  wrong='mutations were not caught as expected:'
+fi
+
 if [ $FAILED -eq 0 ]; then
-  printf '%s%d mutations, every one caught by a named test%s\n' "$GREEN" "$PASSED" "$OFF"
+  printf '%s%d %s%s\n' "$GREEN" "$PASSED" "$what" "$OFF"
   exit 0
 fi
 
-printf '%s%d of %d mutations were not caught as expected:%s\n' \
-  "$RED" "$FAILED" "$((PASSED + FAILED))" "$OFF" >&2
+printf '%s%d of %d %s%s\n' \
+  "$RED" "$FAILED" "$((PASSED + FAILED))" "$wrong" "$OFF" >&2
 for name in "${FAILED_NAMES[@]}"; do printf '  %s\n' "$name" >&2; done
 printf '\nA mutation that is NOT CAUGHT is a hole in the suite, not a bug in\n' >&2
 printf 'this script. A mutation with NO ANCHOR means the code moved and the\n' >&2

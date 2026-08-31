@@ -41,6 +41,10 @@
 #     byte to FreeType rather than to HarfBuzz.
 #   - --check reads README.md with regular expressions. It fails loudly when a
 #     sentence it knows is gone, but it cannot see a number nobody taught it.
+#   - The guard-section check compares two lists of NAMES. It cannot tell
+#     whether the sentence beside a name describes the cases in that section,
+#     and it does not count the cases per section -- only that neither list
+#     holds a name the other does not.
 #   - The ffi/ztext.h banner check proves every pinned upstream is NAMED
 #     there. It cannot prove the sentence around those names is true, and it
 #     says nothing about the counts written in prose elsewhere -- a count with
@@ -139,6 +143,23 @@ hdr_major=$(grep -oE '#define ZTEXT_VERSION_MAJOR [0-9]+' ffi/ztext.h | grep -oE
 hdr_minor=$(grep -oE '#define ZTEXT_VERSION_MINOR [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_patch=$(grep -oE '#define ZTEXT_VERSION_PATCH [0-9]+' ffi/ztext.h | grep -oE '[0-9]+$')
 hdr_version="$hdr_major.$hdr_minor.$hdr_patch"
+# ci/check-guards.sh's sections against the table in README.md that lists
+# them. The table was a hand-kept mirror, which is the defect this file exists
+# to catch everywhere else: four sections were added to the harness and none
+# of them reached the README. The left column is now the section name itself,
+# so the two lists can be compared rather than proof-read.
+guard_sections=$(sed -n "s/^printf '\\\\n%s\([^%]*\)%s.*/\1/p" ci/check-guards.sh |
+                 sort)
+readme_sections=$(awk '/^### Do the guards actually fail/ { f = 1; next }
+                       /^### / { f = 0 }
+                       f && /^\| / { print }' README.md |
+                  sed -n 's/^| \([^|]*\) | .*/\1/p' |
+                  sed 's/ *$//' |
+                  grep -v '^section$' |
+                  sort)
+guard_section_diff=$(diff <(printf '%s\n' "$guard_sections") \
+                          <(printf '%s\n' "$readme_sections") 2>&1 || true)
+
 # The upstreams ffi/ztext.h's banner names, against src/pins.zig. Six places
 # said "three" when the package had vendored four for months, and the one that
 # matters is this one: it is the first line a consumer reads and it is a LIST,
@@ -353,6 +374,16 @@ if [ $CHECK -eq 1 ]; then
     printf '  %-42s %sthe three version homes disagree: build.zig.zon %s, ffi/ztext.h %s, CHANGELOG.md %s%s\n' \
       'version' "$RED" "${zon_version:-<none>}" "${hdr_version:-<none>}" \
       "${changelog_version:-<none>}" "$OFF"
+    MISMATCHES=$((MISMATCHES + 1))
+  fi
+
+  if [ -z "$guard_section_diff" ]; then
+    printf '  %-42s %s%s sections%s\n' 'check-guards.sh = README guard table' \
+      "$GREEN" "$(printf '%s\n' "$guard_sections" | wc -l | tr -d ' ')" "$OFF"
+  else
+    printf '  %-42s %sthe two lists differ%s\n' \
+      'check-guards.sh = README guard table' "$RED" "$OFF"
+    printf '%s\n' "$guard_section_diff" | sed 's/^/    /'
     MISMATCHES=$((MISMATCHES + 1))
   fi
 
