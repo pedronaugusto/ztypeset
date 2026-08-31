@@ -217,6 +217,24 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **A number the documentation states has one home, and a script says so.**
+  `ci/measurements.sh --check` recomputes every number README.md states, and
+  nothing stopped another document from writing one down as well. Two had:
+  SECURITY.md carried the entry-point count, and CONTRIBUTING.md carried an
+  approximate count of the mutation cases -- in the paragraph telling a
+  contributor that a number needs the line that recomputes it. Neither is a
+  number now; both point at what does the counting. The check searches the
+  other prose documents for the values it recomputes and fails on a second
+  copy, and `ci/check-guards.sh` plants one to prove it fails. CHANGELOG.md is
+  deliberately not searched: a released entry states what was true at that
+  release, and editing it later would turn the history into a second, lying
+  copy of the present.
+
+- **The threat model has one home too.** README.md restated SECURITY.md's
+  OSS-Fuzz table -- the two project names, the fuzzer count and the date, in
+  both files. README now states the consequence and points at the document
+  whose subject it is.
+
 - **The package ships the files its own build graph reads.** `build.zig`
   compiles `examples/quickstart.zig` -- twice, once as a program and once as
   the bytes the documentation is diffed against -- and `examples` was not in

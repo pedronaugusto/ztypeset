@@ -20,10 +20,10 @@ Two things worth saying here because they shape a patch before it is written:
 **A claim in this repository is expected to have something that can fail.** A
 comment describing an invariant is a comment; the invariant is whatever a test
 or a script can refuse. `ci/check-guards.sh` exists to prove the tests can
-actually fail — it applies each of ~90 deliberate bugs and requires a *named*
-test to catch it — and `ci/measurements.sh --check` recomputes every number the
-documentation states. If you add a rule, add the thing that enforces it; if you
-add a number, add the line that recomputes it.
+actually fail — it applies deliberate bugs one at a time and requires a
+*named* test to catch each — and `ci/measurements.sh --check` recomputes
+every number the documentation states. If you add a rule, add the thing
+that enforces it; if you add a number, add the line that recomputes it.
 
 **`libs/` is upstream, byte for byte.** Nothing in a patch may touch it, not
 even a warning fix. ztext's own C compiles with `-Wall -Wextra -Werror`;
