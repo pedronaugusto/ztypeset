@@ -839,7 +839,49 @@ pub fn build(b: *std.Build) void {
     const run_null_sweep = b.addRunArtifact(null_sweep);
     run_null_sweep.addFileArg(b.path("tests/fonts/NotoSansHebrew-Regular.ttf"));
 
+    // The implementation-private contracts, exercised directly.
+    //
+    // ffi/ztext_internal.h declares helpers ztext.h never exposes, and until
+    // this existed nothing could reach them: the Zig suite enters through
+    // ztext.h and the other two C tests link the installed library, so an
+    // internal precondition was checkable only by reading every caller --
+    // and "no caller does that today" is not a property a header can promise
+    // about tomorrow.
+    //
+    // The ffi units are compiled INTO it rather than linked from libztext,
+    // because those symbols are deliberately unexported: a shared build hides
+    // them behind -fvisibility=hidden and an MSVC DLL never declares them, so
+    // a test that linked the library would run in the static arm alone --
+    // which is the arm where the ABI matters least.
+    const c_internal = b.addExecutable(.{
+        .name = "ztext-internal",
+        .root_module = b.createModule(.{ .target = target, .optimize = optimize }),
+    });
+    c_internal.root_module.link_libc = true;
+    if (!msvc) c_internal.root_module.link_libcpp = true;
+    c_internal.root_module.sanitize_c = sanitize;
+    c_internal.root_module.addIncludePath(b.path("ffi"));
+    c_internal.root_module.addIncludePath(b.path("libs/freetype/include"));
+    c_internal.root_module.addIncludePath(b.path("libs/harfbuzz/src"));
+    c_internal.root_module.addIncludePath(b.path("libs/sheenbidi/Headers"));
+    c_internal.root_module.addIncludePath(b.path("libs/libunibreak/src"));
+    c_internal.root_module.addCSourceFiles(.{
+        .files = &ztext_sources,
+        .flags = c_flags,
+    });
+    c_internal.root_module.addCSourceFile(.{
+        .file = b.path("tests/c_internal.c"),
+        .flags = c_flags,
+    });
+    c_internal.root_module.linkLibrary(freetype);
+    c_internal.root_module.linkLibrary(harfbuzz);
+    c_internal.root_module.linkLibrary(sheenbidi);
+    c_internal.root_module.linkLibrary(libunibreak);
+
+    const run_c_internal = b.addRunArtifact(c_internal);
+
     const c_test_step = b.step("test-c", "Run the C-level smoke test");
+    c_test_step.dependOn(&run_c_internal.step);
     c_test_step.dependOn(&run_c_smoke.step);
     c_test_step.dependOn(&run_c_smoke_hostile.step);
     c_test_step.dependOn(&run_null_sweep.step);
@@ -859,6 +901,7 @@ pub fn build(b: *std.Build) void {
     );
     install_c_tests.dependOn(&b.addInstallArtifact(c_smoke, .{}).step);
     install_c_tests.dependOn(&b.addInstallArtifact(null_sweep, .{}).step);
+    install_c_tests.dependOn(&b.addInstallArtifact(c_internal, .{}).step);
     install_c_tests.dependOn(&b.addInstallArtifact(bench, .{}).step);
 
     // Registered unconditionally, including when ztext is consumed as a

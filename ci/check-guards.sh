@@ -423,6 +423,32 @@ case_ "three bytes per pixel counted as one" \
     case ZTEXT_BITMAP_FORMAT_LCD_V:
       return 1u;"
 
+printf '\n%sThe internal contracts%s %s(what no public call can reach)%s\n' \
+  "$BOLD" "$OFF" "$DIM" "$OFF"
+
+# The bound covers all three encodings from one place, and no public call can
+# reach it: both of ztextTextDecode's callers are in bounds by construction,
+# which is exactly why the read past the end survived. tests/c_internal.c is
+# the caller that can.
+case_ "the decoder reading the unit at the end" \
+  ffi/ztext_core.c \
+  "decode at index == length returns 1" \
+  "  if (index >= length) {
+    *out = 0xFFFDu;
+    return 1u;
+  }
+
+  switch (encoding) {" \
+  "  switch (encoding) {"
+
+# Written as two negations because a NaN fails every comparison: the range
+# test that reads more naturally lets one through.
+case_ "the 26.6 domain written as a range test" \
+  ffi/ztext_core.c \
+  "a NaN is refused" \
+  "  if (!(pixels > 0.0f) || !(pixels <= 16384.0f)) return 0;" \
+  "  if (pixels <= 0.0f || pixels > 16384.0f) return 0;"
+
 printf '\n%sThe ABI handshake%s %s(what proves the two sides agree)%s\n' \
   "$BOLD" "$OFF" "$DIM" "$OFF"
 
