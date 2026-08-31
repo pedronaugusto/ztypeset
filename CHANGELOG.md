@@ -217,6 +217,17 @@ says.
   x86_64-windows-msvc, where it named a real portability fault in the test
   drivers the same day. See the `fopen` entry below.
 
+- **Nine modules compile C; the sanitizer setting reaches all nine, and now
+  has to.** The three C test executables were built without
+  `sanitize_c` while every library had it, so one link could hold an
+  unsanitized library and a default-sanitized test object -- and a trap raised
+  in the test half reads as a crash in the library half. It was one of four
+  candidate causes on the table while the intermittent segfault was being
+  chased, and eliminating it took a run of its own. `ci/measurements.sh
+  --check` now matches every identifier handed a C source file against every
+  identifier handed the build's sanitizer setting, and names any module in the
+  first set and not the second. A guard case takes the line off one of them.
+
 - **`-Dshared` was a build option nobody could find.** `build.zig` declares
   two options; README documented one of them by name and referred to the other
   only as "a shared build", so a caller wanting a `.dll` or a `.so` had to read

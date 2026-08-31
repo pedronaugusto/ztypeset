@@ -1327,6 +1327,16 @@ case_ "a licence row that no longer matches the build" \
   '| "Old MIT", taken from HarfBuzz | **Yes.**' \
   '| "Old MIT", taken from HarfBuzz | No.'
 
+# One C artifact left out of the sanitizer setting the rest of the build uses.
+# Green everywhere: it builds, it links, and it passes -- and a trap raised in
+# the unsanitized half reads as a fault in the other half, which is the shape
+# that cost the most time in this package's history.
+case_ "a C artifact left out of the sanitizer" \
+  build.zig \
+  "compiles C without sanitize_c" \
+  "    c_smoke.root_module.sanitize_c = sanitize;" \
+  "    c_smoke.root_module.single_threaded = false;"
+
 # A build option renamed on the command line and not in the documentation.
 # The suite cannot see this at all: -Dsanitize_c is passed by ci/run.sh, so a
 # renamed option makes the flag inert rather than an error, and every test
