@@ -3791,25 +3791,35 @@ test "a library keeps its own allocator when the global one is replaced" {
     const first = first_state.allocator();
     const second = second_state.allocator();
 
-    try ztext.setAllocator(first);
-    const library = try ztext.Library.init();
-    const font = try library.createFont(fonts.hebrew, 0);
-    const face = try font.face(0, 24);
+    // The allocator is process-wide and these two are backed by THIS frame, so
+    // every path out of the block below has to take the installed one out
+    // again -- a failed assertion included. Without the defer, a test that
+    // fails here leaves ztext allocating and freeing through a dead frame for
+    // the rest of the process. That is the c_smoke defect this package already
+    // paid for once, and in this form it does not announce itself: the next
+    // allocation is undefined, and what it did here was hang the run.
+    {
+        try ztext.setAllocator(first);
+        defer ztext.resetAllocator();
 
-    // Everything from here is nominally the second allocator's.
-    try ztext.setAllocator(second);
-    const other = try ztext.Library.init();
+        const library = try ztext.Library.init();
+        const font = try library.createFont(fonts.hebrew, 0);
+        const face = try font.face(0, 24);
 
-    // Destroying the first library must return its memory to the allocator it
-    // was born with, not to whichever one happens to be installed. The order
-    // below is the tidy one; the test after this file's last golden is the one
-    // that shows the order does not matter.
-    face.deinit();
-    font.deinit();
-    library.deinit();
-    other.deinit();
+        // Everything from here is nominally the second allocator's.
+        try ztext.setAllocator(second);
+        const other = try ztext.Library.init();
 
-    ztext.resetAllocator();
+        // Destroying the first library must return its memory to the
+        // allocator it was born with, not to whichever one happens to be
+        // installed. The order below is the tidy one; the test after this
+        // file's last golden is the one that shows the order does not matter.
+        face.deinit();
+        font.deinit();
+        library.deinit();
+        other.deinit();
+    }
+
     try std.testing.expectEqual(std.heap.Check.ok, first_state.deinit());
     try std.testing.expectEqual(std.heap.Check.ok, second_state.deinit());
 }
@@ -4434,31 +4444,41 @@ test "a face's glyph buffer belongs to its library, not to whatever is installed
 
     try warmProcessCaches();
 
-    try ztext.setAllocator(first);
-    const library = try ztext.Library.init();
-    const font = try library.createFont(fonts.latin, 0);
-    const face = try font.face(0, 32);
+    // Scoped, and the reset deferred, because the two assertions below are the
+    // ones a mutation is meant to break: an early return past a bare
+    // resetAllocator would leave a process-wide allocator pointing at this
+    // frame after it ends. See the note on the test above.
+    {
+        try ztext.setAllocator(first);
+        defer ztext.resetAllocator();
 
-    // Everything from here is nominally the second allocator's.
-    try ztext.setAllocator(second);
-    const before_first = first_state.total_requested_bytes;
-    const before_second = second_state.total_requested_bytes;
+        const library = try ztext.Library.init();
+        defer library.deinit();
+        const font = try library.createFont(fonts.latin, 0);
+        defer font.deinit();
+        const face = try font.face(0, 32);
+        defer face.deinit();
 
-    const glyph = font.glyphIndex('g');
-    const bitmap = try face.renderGlyph(glyph, .a8, .normal, 0, 0);
-    try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
+        // Everything from here is nominally the second allocator's.
+        try ztext.setAllocator(second);
+        const before_first = first_state.total_requested_bytes;
+        const before_second = second_state.total_requested_bytes;
 
-    // Rendering is FreeType and ztext and nothing else -- no HarfBuzz call is
-    // reachable from here -- so the second allocator must not have been asked
-    // for a single byte, and the first must have been asked for the buffer.
-    try std.testing.expectEqual(before_second, second_state.total_requested_bytes);
-    try std.testing.expect(first_state.total_requested_bytes > before_first);
+        const glyph = font.glyphIndex('g');
+        const bitmap = try face.renderGlyph(glyph, .a8, .normal, 0, 0);
+        try std.testing.expect(bitmap.width > 0 and bitmap.height > 0);
 
-    face.deinit();
-    font.deinit();
-    library.deinit();
+        // Rendering is FreeType and ztext and nothing else -- no HarfBuzz call
+        // is reachable from here -- so the second allocator must not have been
+        // asked for a single byte, and the first must have been asked for the
+        // buffer.
+        try std.testing.expectEqual(
+            before_second,
+            second_state.total_requested_bytes,
+        );
+        try std.testing.expect(first_state.total_requested_bytes > before_first);
+    }
 
-    ztext.resetAllocator();
     try std.testing.expectEqual(std.heap.Check.ok, first_state.deinit());
     try std.testing.expectEqual(std.heap.Check.ok, second_state.deinit());
 }
