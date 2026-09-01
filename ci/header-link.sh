@@ -166,20 +166,65 @@ printf '   %severy installed header compiles%s\n' "$GREEN" "$OFF"
 #-----------------------------------------------------------------------------
 # 2. Reached: the preprocessor names every header it actually opened.
 #-----------------------------------------------------------------------------
-zig cc ${cc_target[@]+"${cc_target[@]}"} -M -I "$inc" "$work/surface.c" \
-  > "$work/deps.raw" 2>/dev/null
+if ! zig cc ${cc_target[@]+"${cc_target[@]}"} -M -I "$inc" "$work/surface.c" \
+     > "$work/deps.raw" 2> "$work/deps.log"; then
+  cat "$work/deps.log" >&2
+  printf '%sthe dependency scan failed, so check 2 measured nothing%s\n' \
+    "$RED" "$OFF" >&2
+  exit 1
+fi
 
 # -M emits one backslash-continued line of paths. Normalise the separators and
 # the case, then split on whitespace.
-#
-# Matching is by path SUFFIX rather than by stripping the prefix, deliberately:
-# on Windows the shell's idea of the temporary directory (/tmp/...) and the
-# compiler's (C:/Users/.../AppData/Local/Temp/...) are the same directory
-# spelled two ways, and a prefix comparison silently matches nothing. Nothing
-# is what the first run of this reported -- every header "unreached", including
-# the ones the compiler had visibly just opened.
 tr 'A-Z' 'a-z' < "$work/deps.raw" | tr -d '\r' | tr -s ' \t\n' '\n' \
   | sed 's|\\|/|g' | grep '[.]h$' | sort -u > "$work/reached.txt"
+
+# Reduce that to the headers under our own prefix, spelled exactly the way
+# `installed` spells them, so that the comparison below is set membership and
+# nothing cleverer.
+#
+# The reduction is anchored on the trailing components of the install prefix --
+# `prefix/include`, which this script chose itself -- rather than on its
+# absolute path, deliberately: on Windows the shell's idea of the temporary
+# directory (/tmp/...) and the compiler's (C:/Users/.../AppData/Local/Temp/...)
+# are the same directory spelled two ways, and a full-prefix comparison
+# silently matches nothing. Nothing is what the first run of this reported --
+# every header "unreached", including the ones the compiler had visibly just
+# opened.
+#
+# What the anchor must NOT be is a bare filename suffix. It was, and the test
+# for it was written as arithmetic over an awk index():
+#
+#     index($0, s) == length($0) - length(s) + 1
+#
+# index() returns 0 when the substring is absent, so for every line that did
+# not contain the header at all the test collapsed to
+# `length($0) == length(s) - 1`, and any path of the right LENGTH read as a
+# match. On a native Linux host zig cc resolves libc through the system's own
+# headers, which is where three short dependency paths come from:
+#
+#     /usr/include/stdio.h        20 == len "sheenbidi/sbconfig.h"
+#     /usr/include/stdint.h       21 == len "freetype/ftchapters.h"
+#     /usr/include/stdc-predef.h  26 == len "freetype/config/ftmodule.h"
+#
+# -- which is exactly the three entries of unreached_by_design, and all three
+# were reported as "declared unreachable and IS reached" on ubuntu-latest and
+# on no other host. Windows and macOS reach their libc headers through long
+# toolchain- and SDK-relative paths, so the same gate returned the opposite
+# verdict on the same tree. A check whose answer depends on how long a path
+# happens to be is not a check, so this one is now whole-line equality against
+# a set: `grep -qxF`, no arithmetic and no pattern metacharacters.
+anchor=${inc#"$work"/}
+sed -n "s|^.*/$anchor/||p" "$work/reached.txt" | sort -u > "$work/ours.reached"
+
+# The failure mode that reduction can have is naming nothing, and a silent
+# nothing would surface as every installed header being unreached at once --
+# a hundred lines that name the wrong cause. Say it once instead.
+[ -s "$work/ours.reached" ] || {
+  printf '%sthe dependency scan named no header under %s%s\n' \
+    "$RED" "$anchor" "$OFF" >&2
+  exit 1
+}
 
 fail2=0
 while IFS= read -r h; do
@@ -189,9 +234,7 @@ while IFS= read -r h; do
   for entry in "${unreached_by_design[@]}"; do
     case "$entry" in "$h|"*) reason=${entry#*|} ;; esac
   done
-  if awk -v s="/$key" \
-       'index($0, s) == length($0) - length(s) + 1 { hit = 1 }
-        END { exit !hit }' "$work/reached.txt"; then
+  if grep -qxF -- "$key" "$work/ours.reached"; then
     if [ -n "$reason" ]; then
       printf '   %s%s is declared unreachable and IS reached%s\n' \
         "$RED" "$h" "$OFF" >&2
@@ -209,9 +252,10 @@ if [ "$fail2" -ne 0 ]; then
   printf '%sthe installed set and the reachable set disagree%s\n' "$RED" "$OFF" >&2
   exit 1
 fi
-printf '%s2. reached%s   %s installed, %s opened, %s deliberately neither\n' \
+printf '%s2. reached%s   %s installed, %s opened, %s of them ours, %s deliberately neither\n' \
   "$DIM" "$OFF" "$(printf '%s\n' "$installed" | wc -l | tr -d ' ')" \
-  "$(wc -l < "$work/reached.txt" | tr -d ' ')" "${#unreached_by_design[@]}"
+  "$(wc -l < "$work/reached.txt" | tr -d ' ')" \
+  "$(wc -l < "$work/ours.reached" | tr -d ' ')" "${#unreached_by_design[@]}"
 
 #-----------------------------------------------------------------------------
 # 3. Links: reference every declared entry point and make the linker resolve it.
