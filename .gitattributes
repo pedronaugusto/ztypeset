@@ -1,0 +1,30 @@
+# ztypeset -- one line-ending truth, and two trees whose bytes are the contract.
+#
+# `core.autocrlf` defaults to true on a Windows GitHub runner. Its checkout
+# therefore rewrote every LF to CRLF, and the first hosted run failed on that
+# alone: `zig fmt --check` listed every Zig source it was given, none of which
+# had been touched. A checkout that does not match the commit is not a
+# formatting problem, and it cannot be fixed in the step that noticed it.
+#
+# So: LF in the repository and LF in the working tree, on every host. This also
+# stops a CRLF file entering in the first place, which is the half a checkout
+# setting alone does not cover.
+* text=auto eol=lf
+
+# The two exceptions, and they are not stylistic -- both are trees whose exact
+# bytes something checks:
+#
+#   - libs/ is four pristine upstream trees. ci/verify-vendor.sh proves it by
+#     diffing them against a fresh clone of the pinned commit, and normalising
+#     line endings on either side would make that diff a function of the host
+#     rather than of the tree. Nothing in libs/ is ours to normalise anyway.
+#   - tests/fonts/ is verified against SHA256SUMS, and the golden shaping
+#     results in the suite are only meaningful against those exact bytes.
+#
+# These lines come after the rule above because a later pattern overrides an
+# earlier one; written the other way round they would do nothing at all.
+libs/**        -text
+tests/fonts/** -text
+
+# Fonts anywhere: never diffed or merged as text.
+*.ttf binary

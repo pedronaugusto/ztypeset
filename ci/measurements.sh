@@ -243,10 +243,11 @@ helper_fopen=$(grep -c 'fopen(' tests/ztypeset_test_io.h || true)
 zon_paths=$(sed -n '/\.paths = \.{/,/}/p' build.zig.zon |
             sed -n 's/.*"\([^"]*\)".*/\1/p' | sort)
 # The exclusions, each for a reason. .git, .zig-cache and zig-out are not
-# source. .gitignore describes a working copy rather than a package, and Zig
-# does not read it.
+# source. .gitignore and .gitattributes describe a working copy rather than a
+# package -- one says what git ignores, the other how git checks a file out --
+# and a fetched package has no git for either to address.
 top_level=$(ls -A . |
-            grep -vxE '\.git|\.gitignore|\.zig-cache|zig-out' | sort)
+            grep -vxE '\.git|\.gitignore|\.gitattributes|\.zig-cache|zig-out' | sort)
 unshipped=$(comm -23 <(printf '%s\n' "$top_level") <(printf '%s\n' "$zon_paths"))
 
 # Every *Destroy in ffi/ztypeset.h must state the exactly-once rule in its own
