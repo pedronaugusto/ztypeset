@@ -937,12 +937,13 @@ both rasters are byte-identical with the option on and off. What the option
 moves is a scattered minority of each font, so only a sweep can see it. Both
 arms were measured; all three digests and all three ink totals differ.
 
-Blind spot, stated: those digests are absolute raster values, measured on
-x86_64 Windows against the pinned FreeType. FreeType's rasteriser and
-autohinter are integer-only, so the same numbers are expected everywhere, but
-that is read from the source rather than measured -- this package has never run
-the suite on a hosted runner. A hosted arm that disagrees is telling you to
-re-measure the golden, not that the option regressed.
+Those digests are absolute raster values, first measured on x86_64 Windows
+against the pinned FreeType. FreeType's rasteriser and autohinter are
+integer-only, so the same numbers are expected everywhere -- and the hosted
+suite has since measured exactly that: Linux, macOS and Windows on both ABIs
+all hold the same digests. The configurations CI only compile-checks remain
+unmeasured. A hosted arm that disagrees is telling you to re-measure the
+golden, not that the option regressed.
 
 It also broke the heap balance, which is the part worth writing down. The
 coverage pass builds a HarfBuzz buffer and lets it guess its segment
@@ -1092,15 +1093,8 @@ cross list repeats three of the configurations the executed jobs already run --
 above -- and every other entry on it is a configuration nothing else reaches.
 
 That table describes the matrix, not a promise: **the badge at the top of this
-file is the authority on whether those runs have actually happened and
-passed.** While the repository is private GitHub Actions does not run at all,
-so the badge does not render -- an absent badge means "not run", not "failed".
-
-Which is the reason the badge and not this paragraph is where the answer
-lives. A list of what had been run by hand, on which machine, stood here
-instead; it was accurate the day it was written and became a claim about the
-present that nothing could refresh. A run either has a badge or it has a log,
-and prose is neither.
+file is the authority on whether those runs pass on the commit you are
+reading.**
 
 ## Scope
 
