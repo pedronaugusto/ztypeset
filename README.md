@@ -6,7 +6,7 @@ Text shaping and glyph rasterisation for Zig: [FreeType](https://freetype.org),
 [HarfBuzz](https://harfbuzz.github.io),
 [SheenBidi](https://github.com/Tehreer/SheenBidi) and
 [libunibreak](https://github.com/adah1972/libunibreak) vendored, pinned and
-wired together, with no renderer, no atlas and no layout engine attached.
+wired together.
 
 - Fonts load **from memory**. There is no path-based API at all — a host
   feeding fonts out of an asset pack has bytes, not paths — and a font parsed
