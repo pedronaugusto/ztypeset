@@ -100,6 +100,10 @@ run 'every committed script is executable' ci/check-executable.sh
 # build directory into a public clone forever with nothing to say so.
 run 'nothing this repository ignores is tracked' ci/check-ignored.sh
 
+# This file's header says it mirrors .github/workflows/ci.yml. Held rather
+# than stated: the two must build the same set of -D option combinations.
+run 'ci/run.sh mirrors the workflow' ci/check-mirror.sh
+
 # The null sweep is only worth having if it still covers everything. This
 # fails when the header grows an entry point the sweep never learned about.
 run 'null sweep covers every entry point' ci/api-surface.sh --sweep

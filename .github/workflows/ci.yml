@@ -54,6 +54,10 @@ jobs:
         shell: bash
         run: ci/check-ignored.sh
 
+      - name: Source — ci/run.sh mirrors this workflow
+        shell: bash
+        run: ci/check-mirror.sh
+
       - name: Source — the null sweep covers every entry point
         shell: bash
         run: ci/api-surface.sh --sweep
