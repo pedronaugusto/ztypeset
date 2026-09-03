@@ -46,6 +46,14 @@ jobs:
         shell: bash
         run: ci/check-columns.sh
 
+      - name: Source — every committed script is executable
+        shell: bash
+        run: ci/check-executable.sh
+
+      - name: Source — nothing this repository ignores is tracked
+        shell: bash
+        run: ci/check-ignored.sh
+
       - name: Source — the null sweep covers every entry point
         shell: bash
         run: ci/api-surface.sh --sweep
