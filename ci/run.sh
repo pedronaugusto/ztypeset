@@ -91,6 +91,15 @@ run 'zig fmt (every .zig in the repo)' \
 # because a rule with two implementations can disagree with itself.
 run "ztypeset's C is ASCII, within 80 columns" ci/check-columns.sh
 
+# CI runs the scripts in ci/ by path. One committed without its executable bit
+# fails there and nowhere else, because every local runner invokes bash first.
+run 'every committed script is executable' ci/check-executable.sh
+
+# .gitignore says what does not belong in the history. Being tracked overrides
+# every rule in it, so a blanket `git add -A` can put a fetched package or a
+# build directory into a public clone forever with nothing to say so.
+run 'nothing this repository ignores is tracked' ci/check-ignored.sh
+
 # The null sweep is only worth having if it still covers everything. This
 # fails when the header grows an entry point the sweep never learned about.
 run 'null sweep covers every entry point' ci/api-surface.sh --sweep
