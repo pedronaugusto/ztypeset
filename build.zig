@@ -950,6 +950,28 @@ pub fn build(b: *std.Build) void {
     // This does not put ztypeset's libraries in a consumer's prefix: a
     // dependency's install step only runs when something the consumer builds
     // actually depends on it.
+    //
+    // What is installed is NOT four self-contained copies of the upstreams.
+    // Two of the four carry an undefined symbol out of the way ztypeset
+    // compiles them, and neither is an oversight:
+    //
+    //   `freetype` has undefined `hb_*` symbols, because
+    //   ffi/ztypeset_ftoption.h defines FT_CONFIG_OPTION_USE_HARFBUZZ and the
+    //   autohinter asks HarfBuzz for coverage and clusters.
+    //
+    //   `harfbuzz` has four undefined `ztypeset_hb_*` symbols, because
+    //   HarfBuzz's allocator seam is compile-time and the flags above point it
+    //   at ztypeset's shims, which are compiled into `lib`.
+    //
+    // Neither can be closed with another build-graph edge: harfbuzz already
+    // links freetype, so `freetype.linkLibrary(harfbuzz)` is a cycle, and the
+    // shims cannot move out of `lib` without being defined twice for anyone
+    // who links both. `lib` closes both instead -- it links all four upstreams
+    // and defines the shims -- so an artifact is linked ALONGSIDE it, never on
+    // its own. Taking `module("ztypeset")` links `lib` already; a consumer
+    // with no Zig takes `artifact("ztypeset")`. The README says the same in
+    // the section that shows the artifact, where a consumer reads it before
+    // the link error rather than after.
     b.installArtifact(lib);
     b.installArtifact(freetype);
     b.installArtifact(harfbuzz);

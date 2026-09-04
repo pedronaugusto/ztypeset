@@ -48,6 +48,33 @@ The vendored upstreams have their own versions, recorded in `UPSTREAM.md` with
 `src/pins.zig` as their one home and `ci/verify-vendor.sh` as their gate. They
 move independently of this number.
 
+## Unreleased
+
+### Fixed
+
+- **The upstream artifacts are documented as pieces of this build, not
+  standalone libraries.** `dep.artifact("freetype")` has always carried
+  undefined `hb_*` symbols — ztypeset builds FreeType with
+  `FT_CONFIG_OPTION_USE_HARFBUZZ`, so the autohinter asks HarfBuzz for coverage
+  and clusters — and `dep.artifact("harfbuzz")` has always carried undefined
+  `ztypeset_hb_*` symbols, because HarfBuzz's allocator seam is compile-time
+  and ztypeset points it at its own. Both are closed by the ztypeset library
+  and by nothing else, and no build-graph edge can say so: HarfBuzz already
+  links FreeType, so the reverse edge is a cycle. Nothing said it where a
+  consumer would read it, so the first news of it was a link error naming
+  HarfBuzz from an artifact the consumer had not asked for. The install site in
+  `build.zig` and the README's artifact section now state the pairing; what is
+  installed and what links are unchanged.
+- **The README says that installing an allocator is start-up, not an
+  operation.** Its thread-safety list mirrored every other clause of
+  `ffi/ztypeset.h`'s block but stopped at "process-wide and must be
+  thread-safe", which reads as sufficient and is not: `setAllocator` mutates a
+  process-wide registry with no synchronisation of its own, and a thread-safe
+  host allocator does not cover the install. A consumer working from the README
+  could install one after its workers were running. The Zig doc comment on
+  `setAllocator` carries the same restriction now; the rationale had been
+  written on a private helper, where no consumer reads it.
+
 ## 0.2.0
 
 ### Renamed
