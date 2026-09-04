@@ -22,6 +22,7 @@
 // -- which is the arm where the ABI matters least.
 //===----------------------------------------------------------------------===//
 
+#include <fenv.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -149,7 +150,33 @@ static void splitsCharacterIsBounded(void) {
 // The face's pixel size and the stroker's radius are the same conversion with
 // the same requirement, and they had two copies of it. Zero is the refusal
 // value, so every rejected input has to produce it.
+//
+// NaN is the ONLY input that separates the guard's two negations from the
+// range test they read like: De Morgan makes the two spellings identical for
+// every ordered value, endpoints included. And the returned value cannot see
+// that boundary. Converting a NaN to an integer is undefined, and on AArch64
+// it yields 0 -- the refusal value itself -- so `== 0` holds either way. What
+// separates them is whether the conversion RAN, and IEEE 754 makes a
+// conversion handed a NaN an invalid operation, which sets a readable flag.
+//
+// Blind spot, stated: that flag is only evidence while the refusal is a
+// branch. Optimised, LLVM makes it branchless -- the multiply and the
+// conversion run unconditionally and a csel picks between the two answers --
+// so a REFUSED NaN is converted too and the flag stops separating them. The
+// probe is therefore taken in an unoptimised build alone, which is the build
+// ci/check-guards.sh runs. The x86 arms need none of it: cvttss2si answers a
+// NaN with INT_MIN, so there the returned value is the whole story.
 //===----------------------------------------------------------------------===//
+
+/// Whether the invalid-operation flag can separate a refused NaN from a
+/// converted one in THIS build; see the note above. Clang defines
+/// __OPTIMIZE__ exactly when it is optimising, which is exactly when the
+/// refusal stops being a branch.
+#ifdef __OPTIMIZE__
+#define ZTYPESET_FLAG_SEPARATES_A_NAN 0
+#else
+#define ZTYPESET_FLAG_SEPARATES_A_NAN 1
+#endif
 
 static void toFixed266Domain(void) {
   check(ztypesetToFixed266(1.0f) == 64, "26.6: one pixel is 64");
@@ -163,12 +190,25 @@ static void toFixed266Domain(void) {
   check(ztypesetToFixed266(16384.5f) == 0,
         "26.6: past the largest size is refused");
 
-  // A NaN fails every comparison, which is why the guard is written as two
-  // negations rather than as a range test: `pixels <= 0 || pixels > 16384`
-  // would let a NaN through.
+  // 0.0f/0.0f raises the same FE_INVALID a float-to-integer conversion of a
+  // NaN does, so the flag is read once before a refusal is judged by it.
   volatile float zero = 0.0f;
+  feclearexcept(FE_ALL_EXCEPT);
   const float nan = zero / zero;
-  check(ztypesetToFixed266(nan) == 0, "26.6: a NaN is refused");
+  const int flag_readable = fetestexcept(FE_INVALID) != 0;
+
+  feclearexcept(FE_ALL_EXCEPT);
+  const int32_t refused = ztypesetToFixed266(nan);
+  const int converted = fetestexcept(FE_INVALID) != 0;
+
+  check(refused == 0, "26.6: a NaN is refused");
+  if (ZTYPESET_FLAG_SEPARATES_A_NAN) {
+    check(flag_readable,
+          "26.6: an invalid operation raises a flag this test can read");
+    // Refused, and refused BEFORE the conversion. The range test satisfies
+    // the first of those here and cannot satisfy the second.
+    check(!converted, "26.6: a NaN is refused before the conversion");
+  }
 }
 
 int main(void) {
