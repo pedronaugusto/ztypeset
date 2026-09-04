@@ -131,7 +131,8 @@ exe.root_module.addImport("ztypeset", ztypeset_dep.module("ztypeset"));
 ```
 
 FreeType, HarfBuzz and SheenBidi are also exposed as artifacts with their own
-headers installed, so a C or C++ part of your program can use them directly:
+headers installed, so a C or C++ part of your program can use them directly —
+linked alongside ztypeset itself, which the two lines above already bring in:
 
 ```zig
 exe.root_module.linkLibrary(ztypeset_dep.artifact("harfbuzz"));
@@ -139,6 +140,17 @@ exe.root_module.linkLibrary(ztypeset_dep.artifact("harfbuzz"));
 
 That is deliberate. For anything past ztypeset's scope, HarfBuzz's own API is
 better documented and more capable than a façade over it could be.
+
+An upstream artifact is a piece of *this* build rather than a self-contained
+copy of the upstream, and two of them do not link on their own: `freetype` has
+undefined `hb_*` symbols, because ztypeset builds FreeType with
+`FT_CONFIG_OPTION_USE_HARFBUZZ` and the autohinter asks HarfBuzz for coverage
+and clusters; `harfbuzz` has undefined `ztypeset_hb_*` symbols, because
+HarfBuzz's allocator seam is compile-time and ztypeset points it at its own.
+The ztypeset library defines the shims and links all four upstreams, so it
+closes both — which is why the line above belongs after the ones before it, and
+why a host that imports no Zig module takes `artifact("ztypeset")` beside
+whichever upstream it reaches for.
 
 What is installed is exactly what was compiled. ztypeset builds a reduced
 configuration of each upstream — FreeType without the modules it does not
@@ -368,6 +380,13 @@ propagates:
   readable from several threads.
 - The installed allocator is process-wide and must be thread-safe if ztypeset is
   used from more than one thread.
+- **Installing one is start-up, not an operation.** `setAllocator` mutates a
+  process-wide registry with no synchronisation of its own, so call it once
+  before any other thread is using ztypeset — the way a host installs its
+  allocator. A thread-safe allocator does not cover the install itself. That
+  restriction is the allocator's alone: everything else ztypeset keeps
+  process-wide and writes after start-up is atomic, so the per-thread rules
+  above are all the drawing path imposes.
 
 ### Font and Face are separate, and why the bitmap is copied
 

@@ -138,6 +138,12 @@ fn slotFor(gpa: std.mem.Allocator) err.Error!*std.mem.Allocator {
 /// `resetAllocator` below has a precondition a host can meet without knowing
 /// to.
 ///
+/// SETUP, not an operation. `slotFor` above and the C side's registry are both
+/// unsynchronised, deliberately, so this has to be called before any other
+/// thread is using ztypeset -- once, at start-up. A thread-safe `gpa` does not
+/// cover the install itself: what races is ztypeset's own bookkeeping, not the
+/// allocator behind it. See "Thread safety" in `ffi/ztypeset.h`.
+///
 /// Which of two installed allocators a given block comes from is stated in
 /// full beside `ztypesetSetAllocator` in `ffi/ztypeset.h`: handle-owned memory
 /// follows the handle, HarfBuzz's follows whatever is installed when it
