@@ -48,7 +48,7 @@ The vendored upstreams have their own versions, recorded in `UPSTREAM.md` with
 `src/pins.zig` as their one home and `ci/verify-vendor.sh` as their gate. They
 move independently of this number.
 
-## Unreleased
+## 0.2.1
 
 ### Fixed
 
@@ -74,6 +74,23 @@ move independently of this number.
   could install one after its workers were running. The Zig doc comment on
   `setAllocator` carries the same restriction now; the rationale had been
   written on a private helper, where no consumer reads it.
+- **A mutation the suite survived: the NaN boundary of the 26.6 domain.**
+  `ztypesetToFixed266` refuses a NaN by writing its domain as two negations,
+  and a NaN is the ONLY input that separates that spelling from the range test
+  it reads like — for every ordered value, endpoints included, the two decide
+  identically. `tests/c_internal.c` pinned the NaN and asserted the value
+  returned, which cannot see the difference: converting a NaN to an integer is
+  undefined, and on AArch64 it yields 0, the refusal value itself. The test
+  now also asserts the invalid-operation flag is clear when the call returns,
+  so a NaN that reached the conversion is caught by what the conversion did
+  rather than by what it happened to return — in an unoptimised build, where
+  the refusal is still a branch, which is the build the mutation harness runs.
+- **The C smoke test's fault reporter could not name a bus error.** It
+  installed handlers for SIGSEGV, SIGILL, SIGFPE and SIGABRT, and a wild
+  pointer is not always SIGSEGV: an address no mapping can hold — `0xCD..CD`
+  from the poisoned injection arm — is SIGBUS on arm64. So the one fault the
+  reporter was written for arrived as a bare "terminated with signal BUS",
+  naming no phase, which is the outcome it exists to prevent.
 
 ## 0.2.0
 

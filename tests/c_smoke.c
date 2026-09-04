@@ -116,6 +116,9 @@ static void reportFault(const char* what) {
 }
 
 static void onSignal(int sig) {
+#ifdef SIGBUS
+  if (sig == SIGBUS) reportFault("SIGBUS");
+#endif
   reportFault(sig == SIGSEGV   ? "SIGSEGV"
               : sig == SIGILL  ? "SIGILL"
               : sig == SIGFPE  ? "SIGFPE"
@@ -139,6 +142,14 @@ static void installFaultReporter(void) {
   signal(SIGILL, onSignal);
   signal(SIGFPE, onSignal);
   signal(SIGABRT, onSignal);
+  // A wild pointer is not always SIGSEGV, and this reporter was blind to the
+  // difference. An address no mapping can hold -- 0xCD..CD, handed over by
+  // the poisoned injector below -- is a bus error on arm64, and an unhandled
+  // one arrives as the bare "terminated with signal BUS" this file exists to
+  // replace. SIGBUS is POSIX, not C, so it is installed where it is defined.
+#ifdef SIGBUS
+  signal(SIGBUS, onSignal);
+#endif
 #ifdef _WIN32
   SetUnhandledExceptionFilter(onWindowsFault);
 #endif

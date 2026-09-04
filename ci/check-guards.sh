@@ -1273,15 +1273,22 @@ printf '\n%sVersioning and licences%s %s(ci/measurements.sh, not the suite)%s\n'
 
 # ztypeset's version is written in three files, and CHANGELOG.md states what a
 # bump of each position promises. The suite cannot see any of that: a build
-# whose manifest says 0.2.0 and whose header says 0.3.0 compiles, links, and
-# passes every test.
+# whose manifest says one version and whose header says another compiles,
+# links, and passes every test.
+#
+# The two anchors below are read from the manifest rather than written here.
+# Spelled literally they went stale at every release, and an anchor that no
+# longer matches is a mutation that stops being applied — a guard silently
+# proving nothing about the release it was meant to gate.
 GUARD_CMD=(ci/measurements.sh --check)
+zon_version=$(sed -n 's/^[[:space:]]*\.version = "\([^"]*\)".*/\1/p' build.zig.zon)
+[ -n "$zon_version" ] || { printf 'cannot read .version from build.zig.zon\n' >&2; exit 1; }
 
 case_ "a version bump that reached three of its four homes" \
   build.zig.zon \
   "version homes disagree" \
-  '.version = "0.2.0",' \
-  '.version = "0.3.0",'
+  ".version = \"$zon_version\"," \
+  '.version = "9.9.9",'
 
 # The other half, and the reason the comparison rejects an empty value rather
 # than comparing two blanks: a heading reworded stops the grep matching, and a
@@ -1289,8 +1296,8 @@ case_ "a version bump that reached three of its four homes" \
 case_ "the changelog heading the gate reads by shape" \
   CHANGELOG.md \
   "version homes disagree" \
-  '## 0.2.0' \
-  '## v0.2.0'
+  "## $zon_version" \
+  "## v$zon_version"
 
 # A number README states and a script recomputes, written a second time in
 # another document. Both copies read as current until one of them is not, and
