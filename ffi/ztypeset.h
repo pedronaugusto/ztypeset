@@ -152,7 +152,7 @@ extern "C" {
 
 #define ZTYPESET_VERSION_MAJOR 0
 #define ZTYPESET_VERSION_MINOR 2
-#define ZTYPESET_VERSION_PATCH 0
+#define ZTYPESET_VERSION_PATCH 1
 
 /// Version of the ztypeset binding, packed as (major<<16)|(minor<<8)|patch.
 /// Compare against the ZTYPESET_VERSION_* macros to detect a header/library
