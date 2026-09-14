@@ -7,6 +7,7 @@
         "build.zig",
         "build.zig.zon",
         "ci",
+        "docs",
         ".github",
         "examples",
         "ffi",
