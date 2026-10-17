@@ -48,6 +48,26 @@ The vendored upstreams have their own versions, recorded in `UPSTREAM.md` with
 `src/pins.zig` as their one home and `ci/verify-vendor.sh` as their gate. They
 move independently of this number.
 
+## 0.3.0
+
+### Changed
+
+- **ztypeset builds with Zig 0.17, and needs it.** `minimum_zig_version` is
+  0.17.0. Nothing in `ffi/ztypeset.h` moved, so a C consumer is unaffected;
+  the minor moves because a Zig consumer on 0.16 cannot build this release, and
+  a patch would be selected for it without being asked.
+  - Zig 0.17 gives type information as parallel lists (`field_names` beside
+    `field_types` or `field_values`, `decl_names`). `src/reflect.zig` joins
+    them back into the one list of fields the ABI checks and the layout guards
+    read, so those checks are unchanged; it is internal, never exported.
+  - The ABI cross-check reads `ffi/ztypeset.h` through a translate-c step in
+    the build (`ztypeset_h`), on the test module only, where it had
+    `@cImport`; 0.17 removed `@cImport`. Function signatures compare
+    `param_types` and `attrs.callconv`.
+  - The tests build their repeated byte strings with a comptime helper; 0.17
+    removed `**`. One test, for `reflect.zig`, is new: 148 tests, 296
+    executions.
+
 ## 0.2.1
 
 ### Fixed

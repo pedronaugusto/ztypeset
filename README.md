@@ -7,7 +7,7 @@ HarfBuzz, SheenBidi and libunibreak. It orders a paragraph, itemises it into
 runs, finds the break and grapheme boundaries, shapes each run and rasterises
 the glyphs; drawing them is the host's.
 
-Status: **v0.2**.
+Status: **v0.3**.
 
 Beside this file: [CHANGELOG.md](CHANGELOG.md) for what changed and what a
 version bump means, [UPSTREAM.md](UPSTREAM.md) for the pinned upstream commits
@@ -156,7 +156,7 @@ paint, colour, maths and OpenType layout queries, FreeType's glyph objects and
 colour layers — is reached through their own headers, installed beside
 ztypeset's. Of the outline formats FreeType can read, this build compiles
 TrueType and CFF/CFF2 only. Nothing in the repository enforces that division:
-it is the state of the surface at 0.2.1, not a checked property.
+it is the state of the surface at 0.3.0, not a checked property.
 
 The handles. None has a destruction order — whichever of a pair is released
 second frees what they share, so `deinit` is safe in any sequence:

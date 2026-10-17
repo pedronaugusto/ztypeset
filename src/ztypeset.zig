@@ -586,7 +586,7 @@ test "every probed field carries the distinct marker the library wrote" {
 test "the linked upstreams are the pinned ones, to the patch" {
     const v = version();
     try std.testing.expectEqual(@as(u8, 0), v.major);
-    try std.testing.expectEqual(@as(u8, 2), v.minor);
+    try std.testing.expectEqual(@as(u8, 3), v.minor);
 
     // src/pins.zig is the one home for what libs/ holds, and this asserts the
     // LINKED libraries agree with it -- not that a document says so.
