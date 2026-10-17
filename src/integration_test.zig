@@ -13,8 +13,19 @@
 //! face and so cannot be reached from inside ztypeset; see UPSTREAM.md.
 
 const std = @import("std");
+const reflect = @import("reflect.zig");
 const ztypeset = @import("ztypeset.zig");
 const fonts = @import("fonts");
+
+/// `s` `n` times over: what `s ** n` spelled before Zig 0.17 removed the operator.
+fn repeat(comptime s: []const u8, comptime n: usize) *const [s.len * n]u8 {
+    const out = comptime blk: {
+        var a: [s.len * n]u8 = undefined;
+        for (0..n) |i| @memcpy(a[i * s.len ..][0..s.len], s);
+        break :blk a;
+    };
+    return &out;
+}
 
 const ppem: u32 = 32;
 
@@ -662,7 +673,7 @@ test "vertical face metrics are synthesised for a font with no vmtx" {
     try std.testing.expect(metrics.line_height > 0);
     try std.testing.expectEqual(
         @as(usize, 14),
-        @typeInfo(ztypeset.FaceMetrics).@"struct".fields.len,
+        @typeInfo(ztypeset.FaceMetrics).@"struct".field_names.len,
     );
 
     try std.testing.expectEqual(@as(u32, 0), metrics.has_vertical_metrics);
@@ -2798,7 +2809,7 @@ test "several threads may each drive their own library at once" {
 
     const thread_count = 4;
     const rounds = 24;
-    var ok = [_]bool{false} ** thread_count;
+    var ok: [thread_count]bool = @splat(false);
     var threads: [thread_count]std.Thread = undefined;
 
     var started: usize = 0;
@@ -3380,7 +3391,7 @@ test "non-font bytes are refused" {
     );
     try std.testing.expectError(
         ztypeset.Error.BadFont,
-        fixture.library.createFont("this is definitely not a font" ** 8, 0),
+        fixture.library.createFont(repeat("this is definitely not a font", 8), 0),
     );
 
     // A format ztypeset recognises but does not compile support for is reported
@@ -3388,11 +3399,11 @@ test "non-font bytes are refused" {
     // re-cook rather than to go looking for corruption.
     try std.testing.expectError(
         ztypeset.Error.Unsupported,
-        fixture.library.createFont("wOFF" ++ "\x00" ** 60, 0),
+        fixture.library.createFont("wOFF" ++ repeat("\x00", 60), 0),
     );
     try std.testing.expectError(
         ztypeset.Error.Unsupported,
-        fixture.library.createFont("wOF2" ++ "\x00" ** 60, 0),
+        fixture.library.createFont("wOF2" ++ repeat("\x00", 60), 0),
     );
     try std.testing.expect(ztypeset.lastErrorDetail().len > 0);
 
@@ -3592,7 +3603,7 @@ test "face counting reports what a font image contains" {
     );
     try std.testing.expectError(
         ztypeset.Error.Unsupported,
-        fixture.library.countFaces("wOFF" ++ "\x00" ** 60),
+        fixture.library.countFaces("wOFF" ++ repeat("\x00", 60)),
     );
 }
 
@@ -4087,8 +4098,8 @@ test "a metric this build does not name is rejected rather than passed through" 
     // the other half of the same guarantee: nothing in the enum is a tag
     // ztypesetFaceMetric refuses.
     var named: usize = 0;
-    inline for (@typeInfo(ztypeset.Metric).@"enum".fields) |field| {
-        const metric: ztypeset.Metric = @enumFromInt(field.value);
+    inline for (reflect.enumFields(ztypeset.Metric)) |field| {
+        const metric: ztypeset.Metric = @fromBackingInt(@intCast(field.value));
         // Never InvalidArgument: that is reserved for a tag this build does
         // not name, and every one of these is named by definition. Unsupported
         // is a real answer and says the font is quiet about this metric.
@@ -4763,7 +4774,7 @@ test "a paragraph runs only the segmentation passes it was asked for" {
     const all = try ztypeset.Paragraph.init(text, .{});
     defer all.deinit();
     try std.testing.expectEqual(
-        @as(u32, @intCast(@intFromEnum(ztypeset.Segmentation.all))),
+        @as(u32, @intCast(@backingInt(ztypeset.Segmentation.all))),
         all.segmentation(),
     );
     try std.testing.expectEqual(text.len, all.lineBreaks().len);

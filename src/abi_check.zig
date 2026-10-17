@@ -6,7 +6,7 @@
 //! drift, and nothing in either compiler notices when this file's twin stops
 //! matching `ffi/ztypeset.h`.
 //!
-//! This closes that by `@cImport`-ing the header — in a test only, so the
+//! This closes that by translating the header (the build's `ztypeset_h`) — in a test only, so the
 //! shipped module stays translate-c-free — and comparing the two namespaces
 //! declaration by declaration. There is **no hand-written list of what to
 //! check**: every public declaration in `c.zig` is discovered by reflection,
@@ -46,11 +46,10 @@
 //! says.
 
 const std = @import("std");
+const reflect = @import("reflect.zig");
 const c = @import("c.zig");
 
-const h = @cImport({
-    @cInclude("ztypeset.h");
-});
+const h = @import("ztypeset_h");
 
 /// Functions the header defines inline, which emit no symbol and so have
 /// nothing for `c.zig` to declare. ztypeset has none; the list exists so that
@@ -143,15 +142,15 @@ fn checkFnType(
     const ours = @typeInfo(Ours).@"fn";
     const theirs = @typeInfo(Theirs).@"fn";
 
-    if (ours.params.len != theirs.params.len) {
-        fail(what ++ " takes " ++ std.fmt.comptimePrint("{d}", .{ours.params.len}) ++
-            " parameters in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{theirs.params.len}) ++
+    if (ours.param_types.len != theirs.param_types.len) {
+        fail(what ++ " takes " ++ std.fmt.comptimePrint("{d}", .{ours.param_types.len}) ++
+            " parameters in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{theirs.param_types.len}) ++
             " in ffi/ztypeset.h");
     }
 
-    inline for (ours.params, theirs.params, 0..) |op, tp, i| {
-        const OP = op.type orelse fail(what ++ " has an untyped parameter in src/c.zig");
-        const TP = tp.type orelse fail(what ++ " has an untyped parameter in ffi/ztypeset.h");
+    inline for (ours.param_types, theirs.param_types, 0..) |op, tp, i| {
+        const OP = op orelse fail(what ++ " has an untyped parameter in src/c.zig");
+        const TP = tp orelse fail(what ++ " has an untyped parameter in ffi/ztypeset.h");
         sameSizeAndAlign(
             what ++ " parameter " ++ std.fmt.comptimePrint("{d}", .{i}),
             OP,
@@ -184,13 +183,13 @@ fn checkStructLayout(
         else => fail(what ++ " is a struct in src/c.zig but not in ffi/ztypeset.h"),
     };
 
-    if (ours.fields.len != theirs.fields.len) {
-        fail(what ++ " has " ++ std.fmt.comptimePrint("{d}", .{ours.fields.len}) ++
-            " fields in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{theirs.fields.len}) ++
+    if (ours.field_names.len != theirs.field_names.len) {
+        fail(what ++ " has " ++ std.fmt.comptimePrint("{d}", .{ours.field_names.len}) ++
+            " fields in src/c.zig but " ++ std.fmt.comptimePrint("{d}", .{theirs.field_names.len}) ++
             " in ffi/ztypeset.h");
     }
 
-    inline for (ours.fields) |f| {
+    inline for (reflect.structFields(Ours)) |f| {
         if (!@hasField(Theirs, f.name)) {
             fail(what ++ " has field `" ++ f.name ++ "` in src/c.zig, which ffi/ztypeset.h does not");
         }
@@ -218,7 +217,7 @@ fn checkEnumValues(
     comptime Ours: type,
     comptime ours_name: []const u8,
 ) void {
-    inline for (@typeInfo(Ours).@"enum".fields) |f| {
+    inline for (reflect.enumFields(Ours)) |f| {
         const cname = fieldCName(ours_name, f.name);
         _ = theirDecl(cname, what ++ "." ++ f.name);
         if (@as(i128, @field(h, cname)) != @as(i128, f.value)) {
@@ -249,7 +248,7 @@ fn sweepOurs() Counts {
     comptime {
         var n = Counts{};
 
-        for (@typeInfo(c).@"struct".decls) |d| {
+        for (reflect.decls(c)) |d| {
             const Decl = @TypeOf(@field(c, d.name));
 
             // ---- types -----------------------------------------------------
@@ -275,7 +274,7 @@ fn sweepOurs() Counts {
                         switch (s.layout) {
                             .@"extern" => {
                                 checkStructLayout(what, Ours, Theirs);
-                                n.fields += s.fields.len;
+                                n.fields += s.field_names.len;
                             },
                             .@"packed" => fail(what ++ " is a packed struct. ztypeset has no " ++
                                 "bit-mask types today, so there is no tested code here to " ++
@@ -288,7 +287,7 @@ fn sweepOurs() Counts {
                         _ = theirDecl(cname, what);
                         sameSizeAndAlign(what, Ours, @field(h, cname));
                         checkEnumValues(what, Ours, d.name);
-                        n.enumerators += e.fields.len;
+                        n.enumerators += e.field_names.len;
                     },
                     .int, .float, .bool => {
                         _ = theirDecl(cname, what);
@@ -321,7 +320,7 @@ fn sweepOurs() Counts {
 
             // ---- functions -------------------------------------------------
             if (@typeInfo(Decl) == .@"fn") {
-                if (@typeInfo(Decl).@"fn".calling_convention == .auto) {
+                if (@typeInfo(Decl).@"fn".attrs.@"callconv" == .auto) {
                     // A Zig helper, not part of the C ABI. c.zig should not
                     // really have these, but one is not drift.
                     continue;
@@ -359,7 +358,7 @@ fn sweepOurs() Counts {
                 const what = "constant " ++ d.name;
                 _ = theirDecl(cname, what);
                 const ours_val: i128 = @intCast(if (@typeInfo(Decl) == .@"enum")
-                    @intFromEnum(@field(c, d.name))
+                    @backingInt(@field(c, d.name))
                 else
                     @field(c, d.name));
                 const theirs_val: i128 = @intCast(@field(h, cname));
@@ -389,7 +388,7 @@ fn sweepTheirs() usize {
         var missing: usize = 0;
         var found: usize = 0;
 
-        for (@typeInfo(h).@"struct".decls) |d| {
+        for (reflect.decls(h)) |d| {
             // Filter by name BEFORE touching the value: translate-c emits
             // `@compileError` declarations for system macros it cannot render,
             // and evaluating one of those would fail the build for a reason
@@ -431,7 +430,7 @@ fn sweepTheirs() usize {
 fn sweepProbeCoverage() usize {
     comptime {
         var covered: usize = 0;
-        for (@typeInfo(c).@"struct".decls) |d| {
+        for (reflect.decls(c)) |d| {
             const Decl = @field(c, d.name);
             if (@TypeOf(Decl) != type) continue;
             const info = @typeInfo(Decl);
@@ -440,7 +439,7 @@ fn sweepProbeCoverage() usize {
             if (Decl == c.AbiLayout or Decl == c.AbiProbe) continue;
 
             var found = false;
-            for (@typeInfo(c.AbiProbe).@"struct".fields) |f| {
+            for (reflect.structFields(c.AbiProbe)) |f| {
                 if (f.type == Decl) found = true;
             }
             if (!found) {

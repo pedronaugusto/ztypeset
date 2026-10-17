@@ -64,7 +64,7 @@ pub const Paragraph = struct {
         /// accessor for a pass not asked for returns an empty slice. The
         /// default runs all three, which is what a caller that has not
         /// thought about it wants.
-        segmentation: u32 = @intFromEnum(types.Segmentation.all),
+        segmentation: u32 = @backingInt(types.Segmentation.all),
     };
 
     /// The segmentation passes this paragraph ran.

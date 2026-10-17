@@ -495,8 +495,9 @@ pub fn build(b: *std.Build) void {
     // Every option that changes what the C compiles to is mirrored into a Zig
     // module, so the wrapper can never disagree with the library it links.
     const options_step = b.addOptions();
-    inline for (std.meta.fields(@TypeOf(options))) |field| {
-        options_step.addOption(field.type, field.name, @field(options, field.name));
+    const option_fields = @typeInfo(@TypeOf(options)).@"struct";
+    inline for (option_fields.field_names, option_fields.field_types) |name, T| {
+        options_step.addOption(T, name, @field(options, name));
     }
     const options_module = options_step.createModule();
 
@@ -739,9 +740,9 @@ pub fn build(b: *std.Build) void {
     });
     tests.root_module.linkLibrary(lib);
 
-    // The ABI cross-check @cImport-s ffi/ztypeset.h. It is wired here, on the test
-    // module, and deliberately NOT on the module above: the shipped module has
-    // no include path and never runs translate-c.
+    // The ABI cross-check translates ffi/ztypeset.h and imports it as
+    // `ztypeset_h`. It is wired here, on the test module, and deliberately NOT
+    // on the module above: the shipped module never runs translate-c.
     //
     // No macro wiring accompanies it, and that is a measured claim rather than
     // an omission. ffi/ztypeset.h includes only <stddef.h> and <stdint.h> and is
@@ -753,6 +754,8 @@ pub fn build(b: *std.Build) void {
     // build options would have to forward those macros here; ztypeset's does not.
     tests.root_module.link_libc = true;
     tests.root_module.addIncludePath(b.path("ffi"));
+    const header = b.addTranslateC(.{ .root_source_file = b.path("ffi/ztypeset.h"), .target = target, .optimize = optimize });
+    tests.root_module.addImport("ztypeset_h", header.createModule());
 
     // The documented examples and the documents that quote them, as bytes the
     // suite can compare. src/example_test.zig is the one home for the rule;

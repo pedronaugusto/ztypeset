@@ -37,14 +37,14 @@ pub const Segmentation = c.Segmentation;
 /// `Segmentation.none` are the two ends and need no call.
 pub fn segmentation(kinds: []const Segmentation) u32 {
     var mask: u32 = 0;
-    for (kinds) |kind| mask |= @as(u32, @intCast(@intFromEnum(kind)));
+    for (kinds) |kind| mask |= @as(u32, @intCast(@backingInt(kind)));
     return mask;
 }
 
 /// Whether a paragraph ran one segmentation pass, against the mask
 /// `Paragraph.segmentation` reports.
 pub fn segmentationHas(mask: u32, kind: Segmentation) bool {
-    const bit: u32 = @intCast(@intFromEnum(kind));
+    const bit: u32 = @intCast(@backingInt(kind));
     return mask & bit == bit;
 }
 
@@ -56,7 +56,7 @@ pub fn bitmapChannels(format: BitmapFormat) u32 {
 }
 
 pub fn glyphHas(glyph: Glyph, flag: GlyphFlag) bool {
-    const bit: u32 = @intCast(@intFromEnum(flag));
+    const bit: u32 = @intCast(@backingInt(flag));
     return glyph.flags & bit != 0;
 }
 

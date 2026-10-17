@@ -393,10 +393,10 @@ ci/verify-vendor.sh         # diff libs/ against pinned upstream (needs network)
 ci/install-hooks.sh         # run ci/run.sh automatically before every push
 ```
 
-**147 tests**, executed twice: the second pass runs the same binary with
+**148 tests**, executed twice: the second pass runs the same binary with
 HarfBuzz's three environment variables set to values that change what it does,
 and every assertion has to hold unchanged.
-`zig build test` therefore reports **294/294 passed**.
+`zig build test` therefore reports **296/296 passed**.
 Tests that touch a face, a shaper or a paragraph install
 `std.testing.allocator`, so any allocation ztypeset or an upstream fails to
 return fails the test.

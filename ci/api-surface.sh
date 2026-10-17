@@ -177,8 +177,9 @@ zig_fns=0
 for file in src/*.zig; do
   case "$file" in
     # c.zig and pins.zig are generated-shaped surfaces the README describes as
-    # a whole; abi_check.zig and the *_test.zig files are not API at all.
-    */c.zig | */pins.zig | *_test.zig | */abi_check.zig) continue ;;
+    # a whole; abi_check.zig, reflect.zig (type information joined for the
+    # checks, never exported) and the *_test.zig files are not API at all.
+    */c.zig | */pins.zig | *_test.zig | */abi_check.zig | */reflect.zig) continue ;;
   esac
   for fn in $(grep -oE '^[[:space:]]*pub fn [a-zA-Z_][A-Za-z0-9_]*' "$file" |
               awk '{ print $NF }' | sort -u); do

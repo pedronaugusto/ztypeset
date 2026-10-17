@@ -50,6 +50,7 @@
 //! ```
 
 const std = @import("std");
+const reflect = @import("reflect.zig");
 
 pub const c = @import("c.zig");
 
@@ -227,6 +228,7 @@ test {
     // the shipped module never analyses it and never runs translate-c.
     _ = @import("abi_check.zig");
     _ = @import("pins.zig");
+    _ = @import("reflect.zig");
     // Reads README.md, this file and examples/quickstart.zig, so it belongs
     // here for the same reason abi_check does: the shipped module must not
     // embed the repository's documentation.
@@ -294,11 +296,11 @@ fn layoutExpectation(comptime name: []const u8) usize {
         return @alignOf(layoutType(name[0 .. name.len - "_align".len]));
     }
     if (comptime std.mem.endsWith(u8, name, "_last")) {
-        const fields = @typeInfo(layoutType(name[0 .. name.len - "_last".len])).@"enum".fields;
+        const fields = reflect.enumFields(layoutType(name[0 .. name.len - "_last".len]));
         return @intCast(fields[fields.len - 1].value);
     }
     if (comptime std.mem.endsWith(u8, name, "_count")) {
-        return @typeInfo(layoutType(name[0 .. name.len - "_count".len])).@"enum".fields.len;
+        return @typeInfo(layoutType(name[0 .. name.len - "_count".len])).@"enum".field_names.len;
     }
     @compileError("ZtypesetAbiLayout." ++ name ++
         " ends in none of _size, _align, _offset_<field>, _last or _count, so " ++
@@ -317,7 +319,7 @@ test "the C library agrees with the extern declarations in c.zig" {
     c.ztypesetAbiLayout(&layout);
 
     comptime var checked: usize = 0;
-    inline for (@typeInfo(c.AbiLayout).@"struct".fields) |field| {
+    inline for (reflect.structFields(c.AbiLayout)) |field| {
         const got: usize = @field(layout, field.name);
         const want = comptime layoutExpectation(field.name);
         if (got != want) {
@@ -332,7 +334,7 @@ test "the C library agrees with the extern declarations in c.zig" {
     // A sweep that silently matched nothing would be indistinguishable from
     // one that matched everything.
     try std.testing.expectEqual(
-        @typeInfo(c.AbiLayout).@"struct".fields.len,
+        @typeInfo(c.AbiLayout).@"struct".field_names.len,
         checked,
     );
 }
@@ -475,8 +477,8 @@ const probe_fields = blk: {
     @setEvalBranchQuota(1_000_000);
     var list: [probe_markers.len]ProbeField = undefined;
     var n = 0;
-    for (@typeInfo(c.AbiProbe).@"struct".fields) |member| {
-        for (@typeInfo(member.type).@"struct".fields) |field| {
+    for (reflect.structFields(c.AbiProbe)) |member| {
+        for (reflect.structFields(member.type)) |field| {
             if (n == list.len) {
                 @compileError("ZtypesetAbiProbe has more fields than src/ztypeset.zig's " ++
                     "probe_markers has entries, so at least one field's marker is " ++
@@ -552,8 +554,8 @@ test "every probed field carries the distinct marker the library wrote" {
     var holes: usize = 0;
     var checked: usize = 0;
 
-    inline for (@typeInfo(c.AbiProbe).@"struct".fields) |member| {
-        inline for (@typeInfo(member.type).@"struct".fields) |field| {
+    inline for (reflect.structFields(c.AbiProbe)) |member| {
+        inline for (reflect.structFields(member.type)) |field| {
             const name = member.name ++ "." ++ field.name;
             const want = comptime probeMarker(name);
             const got = markerOf(@field(@field(probe, member.name), field.name));
@@ -618,8 +620,8 @@ test "the linked upstreams are the pinned ones, to the patch" {
 }
 
 test "result names are never empty" {
-    inline for (@typeInfo(c.Result).@"enum".fields) |field| {
-        const name = resultName(@enumFromInt(field.value));
+    inline for (reflect.enumFields(c.Result)) |field| {
+        const name = resultName(@fromBackingInt(@intCast(field.value)));
         try std.testing.expect(name.len > 0);
     }
 }
