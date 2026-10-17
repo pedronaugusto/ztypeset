@@ -2,7 +2,7 @@
     .name = .ztypeset_consumer,
     .version = "0.0.0",
     .fingerprint = 0x28da22b76b9aad03,
-    .minimum_zig_version = "0.16.0",
+    .minimum_zig_version = "0.17.0",
     .dependencies = .{
         .ztypeset = .{ .path = "../.." },
     },
